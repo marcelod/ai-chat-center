@@ -29,7 +29,8 @@ export async function clearBusyIfOlder(sid: string, before: number): Promise<boo
   } catch {
     return true;
   }
-  if (mtimeMs >= before) return false;
+  // Same millisecond counts as older: file times carry sub-ms digits that Date.now() lacks.
+  if (Math.floor(mtimeMs) > before) return false;
   await removeFile(paths().busyFile(sid));
   return true;
 }

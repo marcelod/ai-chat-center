@@ -7,6 +7,8 @@ vi.mock('./api', () => ({
   getEvents: vi.fn(),
   sendMessage: vi.fn(),
   openStream: vi.fn(),
+  verifyHub: vi.fn(),
+  forgetToken: vi.fn(),
 }));
 
 import * as api from './api';
@@ -25,6 +27,8 @@ let push: (c: ProviderChange) => void;
 let handlers: { onOpen?: () => void; onError?: () => void };
 
 beforeEach(() => {
+  vi.mocked(api.verifyHub).mockResolvedValue('ok');
+  vi.mocked(api.forgetToken).mockReset();
   vi.mocked(api.getSessions).mockResolvedValue(sessions);
   vi.mocked(api.getEvents).mockResolvedValue([a('e1', '2026-01-01T10:00:00Z')]);
   vi.mocked(api.openStream).mockImplementation((cb, h) => {
@@ -346,7 +350,7 @@ describe('page visibility', () => {
     act(() => setHidden(true));
     expect(closes).toEqual([1]);
     act(() => setHidden(false));
-    expect(api.openStream).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(api.openStream).toHaveBeenCalledTimes(2));
     act(() => handlers.onOpen?.());
     await waitFor(() => expect(vi.mocked(api.getSessions).mock.calls.length).toBeGreaterThan(fetches));
   });
@@ -364,5 +368,59 @@ describe('page visibility', () => {
     act(() => setHidden(true));
     expect(closed).toBe(0);
     spy.mockRestore();
+  });
+});
+
+// Audit S4-S3: every (re)connect proves the hub first.
+describe('useLiveSessions: hub verification', () => {
+  it('a server that cannot prove the token gets no stream: the token is dropped', async () => {
+    vi.mocked(api.verifyHub).mockResolvedValue('mismatch');
+    vi.mocked(api.openStream).mockClear();
+    renderHook(() => useLiveSessions());
+    await waitFor(() => expect(api.forgetToken).toHaveBeenCalled());
+    expect(api.openStream).not.toHaveBeenCalled();
+  });
+  it('a reconnect after a stream error verifies again before opening, and stops on a mismatch', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.mocked(api.openStream).mockClear();
+    vi.mocked(api.verifyHub).mockClear();
+    const { result } = renderHook(() => useLiveSessions());
+    await waitFor(() => expect(result.current.data.connected).toHaveLength(2));
+    await waitFor(() => expect(api.openStream).toHaveBeenCalledTimes(1));
+    expect(api.verifyHub).toHaveBeenCalledTimes(1);
+    vi.mocked(api.verifyHub).mockResolvedValue('mismatch');
+    act(() => handlers.onError?.());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1100);
+    });
+    await waitFor(() => expect(api.verifyHub).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.forgetToken).toHaveBeenCalled());
+    expect(api.openStream).toHaveBeenCalledTimes(1);
+  });
+  // Audit R4-L1: the hub's poll can make a sessions refresh adopt the message before the POST answers.
+  it('a sent message shows once even when the hub lists it before the POST response arrives', async () => {
+    const { result } = renderHook(() => useLiveSessions());
+    await waitFor(() => expect(result.current.data.connected).toHaveLength(2));
+    await waitFor(() => expect(api.openStream).toHaveBeenCalled());
+    let resolvePost!: (v: { id: string }) => void;
+    vi.mocked(api.sendMessage).mockReturnValue(new Promise((r) => (resolvePost = r)));
+    let sending!: Promise<void>;
+    act(() => {
+      sending = result.current.send('s1', 'hi');
+    });
+    vi.mocked(api.getSessions).mockResolvedValue({
+      connected: [
+        { ...sessions.connected[0], pendingAppMessageIds: ['m1'], pendingAppMessages: [{ id: 'm1', text: 'hi', createdAt: new Date().toISOString() }] },
+        sessions.connected[1],
+      ],
+      others: [],
+    });
+    act(() => push({ type: 'sessions' }));
+    await waitFor(() => expect(result.current.pending.s1?.length).toBe(1));
+    await act(async () => {
+      resolvePost({ id: 'm1' });
+      await sending;
+    });
+    expect(result.current.pending.s1.map((m) => m.id)).toEqual(['m1']);
   });
 });

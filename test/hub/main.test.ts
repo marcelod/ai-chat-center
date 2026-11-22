@@ -278,6 +278,37 @@ describe('main', () => {
       await h!.close();
     }
   });
+  // Audit R4-Info: a pid never identified plus a hub that cannot run `claude agents` (exits never detected)
+  // used to keep the hub up forever. Such a registration holds it only while active in the last 24 h.
+  it('a registration with an unknown pid and no activity for 24 h does not keep the hub up', async () => {
+    const { register } = await import('../../src/core/registry.js');
+    const tp = path.join(home, 't.jsonl');
+    await fsp.writeFile(tp, '');
+    const old = new Date(Date.now() - 25 * 3600_000);
+    await fsp.utimes(tp, old, old);
+    await register({ sessionId: 'quiet', transcriptPath: tp, cwd: home, pid: null, key: 'k', connectedAt: old.toISOString() });
+    let idle = 0;
+    const h = await startHub({ idleMs: 60, idleCheckMs: 10, listLive: async () => null, onIdle: () => void idle++ });
+    try {
+      await vi.waitFor(() => expect(idle).toBe(1), { timeout: 5000, interval: 20 });
+    } finally {
+      await h!.close();
+    }
+  });
+  it('a registration with an unknown pid and recent activity keeps the hub up', async () => {
+    const { register } = await import('../../src/core/registry.js');
+    const tp = path.join(home, 't.jsonl');
+    await fsp.writeFile(tp, '');
+    await register({ sessionId: 'busy', transcriptPath: tp, cwd: home, pid: null, key: 'k', connectedAt: new Date(Date.now() - 25 * 3600_000).toISOString() });
+    let idle = 0;
+    const h = await startHub({ idleMs: 60, idleCheckMs: 10, listLive: async () => null, onIdle: () => void idle++ });
+    try {
+      await new Promise((r) => setTimeout(r, 300));
+      expect(idle).toBe(0);
+    } finally {
+      await h!.close();
+    }
+  });
   it('the background exit check runs every 5 minutes by default', async () => {
     const { EXIT_CHECK_MS } = await import('../../src/hub/main.js');
     expect(EXIT_CHECK_MS).toBe(5 * 60_000);

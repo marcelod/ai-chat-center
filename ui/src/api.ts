@@ -105,13 +105,65 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** Drops the token (the hub could not prove it knows it): the app shows the "open the /cc link" screen. */
+export function forgetToken(): void {
+  dropToken();
+}
+
+export type HubCheck = 'ok' | 'mismatch' | 'unreachable';
+
+const hex = (b: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, '0')).join('');
+
+/**
+ * Audit S4-S3: after the hub exits (idle, replaced, killed), anything that later listens on its port would
+ * receive what this tab sends. Before (re)connecting and before every message, the tab asks the server to
+ * prove it knows the token: HMAC-SHA256(token, `challenge|port|pid|version`) over a fresh challenge, bound
+ * to the port this page was loaded from (the same proof /cc checks). 'mismatch' for any answer without a
+ * valid proof; 'unreachable' when nothing answered (the hub may be restarting).
+ */
+export async function verifyHub(): Promise<HubCheck> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!token || !subtle) return 'mismatch'; // 127.0.0.1 is a secure context: WebCrypto is always there
+  const challenge = hex(globalThis.crypto.getRandomValues(new Uint8Array(16)));
+  let res: Response;
+  try {
+    res = await fetch(`/api/health?challenge=${challenge}`, { cache: 'no-store' });
+  } catch {
+    return 'unreachable';
+  }
+  let j: { ok?: unknown; pid?: unknown; version?: unknown; proof?: unknown };
+  try {
+    j = (await res.json()) as typeof j;
+  } catch {
+    return 'mismatch';
+  }
+  if (!res.ok || j?.ok !== true || typeof j.pid !== 'number' || typeof j.version !== 'string' || typeof j.proof !== 'string') return 'mismatch';
+  const port = Number(window.location.port || (window.location.protocol === 'https:' ? 443 : 80));
+  const enc = new TextEncoder();
+  try {
+    const key = await subtle.importKey('raw', enc.encode(token), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const want = hex(await subtle.sign('HMAC', key, enc.encode(`${challenge}|${port}|${j.pid}|${j.version}`)));
+    return want === j.proof ? 'ok' : 'mismatch';
+  } catch {
+    return 'mismatch';
+  }
+}
+
 export const getSessions = () => request<SessionsResponse>('/api/sessions');
 export const getEvents = (id: string) => request<ChatEvent[]>(`/api/sessions/${encodeURIComponent(id)}/events`);
-export const sendMessage = (id: string, text: string) =>
-  request<{ id: string }>(`/api/sessions/${encodeURIComponent(id)}/messages`, {
+/** Never POSTs to a server that cannot prove it is the hub (see verifyHub). */
+export async function sendMessage(id: string, text: string): Promise<{ id: string }> {
+  const check = await verifyHub();
+  if (check === 'mismatch') {
+    dropToken();
+    throw new ApiError(401);
+  }
+  if (check === 'unreachable') throw new ApiError(0);
+  return request<{ id: string }>(`/api/sessions/${encodeURIComponent(id)}/messages`, {
     method: 'POST',
     body: JSON.stringify({ text }),
   });
+}
 export const getConfig = () => request<UiConfig>('/api/config');
 export const setConfig = (c: UiConfig) =>
   request<UiConfig>('/api/config', { method: 'PUT', body: JSON.stringify(c) });

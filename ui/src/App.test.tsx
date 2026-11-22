@@ -12,6 +12,8 @@ vi.mock('./api', () => ({
   setConfig: vi.fn(async (c: { language: string }) => c),
   openStream: vi.fn(() => () => {}),
   sendMessage: vi.fn(),
+  verifyHub: vi.fn(async () => 'ok'),
+  forgetToken: vi.fn(),
 }));
 
 import * as api from './api';

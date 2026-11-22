@@ -22,7 +22,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { assertSessionId, paths } from '../core/paths.js';
 import { DIR_MODE, ensureDir } from '../core/fsAtomic.js';
-import { getRegistration, isActive, markDisconnected, register } from '../core/registry.js';
+import { claudeConfigDir, getRegistration, isActive, markDisconnected, register } from '../core/registry.js';
 import { clearWaiting, setWaiting } from '../core/waiting.js';
 import { clearBusy, setBusy } from '../core/busy.js';
 import { ensureHub } from './ensureHub.js';
@@ -90,6 +90,7 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
     transcriptPath: input.transcript_path,
     cwd: input.cwd,
     pid,
+    configDir: claudeConfigDir(),
     // The key stays while the connection is active; a reactivation gets a new one.
     key: keep && prev.key ? prev.key : crypto.randomBytes(16).toString('hex'),
     ...(previousKeys.length ? { previousKeys } : {}),

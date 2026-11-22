@@ -91,6 +91,21 @@ describe('hook', () => {
     expect(out(u).hookSpecificOutput.additionalContext).toBe('AI Chat Center: unknown argument. Use /cc or /cc off.');
   });
 
+  // Audit S4-U3: the registration records the Claude config dir of the session.
+  it('/cc records the Claude config dir (CLAUDE_CONFIG_DIR, else ~/.claude)', async () => {
+    const prev = process.env.CLAUDE_CONFIG_DIR;
+    try {
+      delete process.env.CLAUDE_CONFIG_DIR;
+      await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
+      expect((await getRegistration('s1'))!.configDir).toBe(path.join(os.homedir(), '.claude'));
+      process.env.CLAUDE_CONFIG_DIR = path.join(os.tmpdir(), 'cfg-x');
+      await handleHook('prompt-submit', inp({ session_id: 's2', prompt: '/cc' }), ctx());
+      expect((await getRegistration('s2'))!.configDir).toBe(path.join(os.tmpdir(), 'cfg-x'));
+    } finally {
+      if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = prev;
+    }
+  });
   it('/cc keeps the key while active and makes a new one on reactivation', async () => {
     await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
     const k1 = await keyOf();

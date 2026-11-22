@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { assertSessionId, paths } from '../core/paths.js';
-import { getRegistration, isActive, listRegistrations, markDisconnected, updateRegistration } from '../core/registry.js';
+import { getRegistration, isActive, listRegistrations, markDisconnected, sameConfigDir, updateRegistration } from '../core/registry.js';
 import { clearBusy, clearBusyIfOlder, isBusy } from '../core/busy.js';
 import { lookupClaudePid, type PidLookup } from './claudePid.js';
 import { drain, sweepClaimed } from '../core/inbox.js';
@@ -149,7 +149,9 @@ async function sessionSwitch(
 ): Promise<void> {
   const source = input.source ?? '';
   if (!SWITCH_SOURCES.has(source)) return;
-  const active = (await listRegistrations()).filter(isActive);
+  // Only sessions this process's `claude agents` can see (same Claude config dir): another one is never
+  // judged by a lookup that cannot list it (audit S4-U3).
+  const active = (await listRegistrations()).filter((r) => isActive(r) && (r.sessionId === sid || sameConfigDir(r)));
   const others = active.filter((r) => r.sessionId !== sid && r.pid !== null);
   if (source === 'clear') {
     // A registration whose pid was never resolved could be the conversation this /clear replaced: resolve

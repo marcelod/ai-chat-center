@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { assertSessionId, paths } from './paths.js';
 import { readJson, removeFile, writeJsonAtomic } from './fsAtomic.js';
@@ -23,6 +24,12 @@ export type Registration = {
   /** Keys of earlier connections of this session, so their messages still display as app messages. */
   previousKeys?: string[];
   connectedAt: string;
+  /**
+   * The Claude config dir of the session (CLAUDE_CONFIG_DIR, else ~/.claude). `claude agents` only lists
+   * the sessions of its own config dir, so lookups only judge registrations of the same one. Missing in
+   * registrations written before 0.2.3: treated as the same.
+   */
+  configDir?: string;
   disconnectedAt?: string;
   disconnectReason?: 'off' | 'clear' | 'exited';
 };
@@ -33,6 +40,19 @@ function regFile(sid: string): string {
 }
 
 export const isActive = (r: Registration): boolean => !r.disconnectedAt;
+
+/** The Claude config dir of this process (CLAUDE_CONFIG_DIR, else ~/.claude), resolved. */
+export function claudeConfigDir(): string {
+  const raw = process.env.CLAUDE_CONFIG_DIR;
+  return path.resolve(raw && raw.trim() ? raw : path.join(os.homedir(), '.claude'));
+}
+
+/** True when `claude agents` run by this process can see the session (same config dir, or unknown). */
+export function sameConfigDir(r: Registration, mine = claudeConfigDir()): boolean {
+  if (!r.configDir) return true;
+  const a = path.resolve(r.configDir);
+  return process.platform === 'win32' ? a.toLowerCase() === mine.toLowerCase() : a === mine;
+}
 
 /** Every key whose blocks belong to this session (current last). */
 export const trustedKeys = (r: Registration): string[] => [...(r.previousKeys ?? []), ...(r.key ? [r.key] : [])];

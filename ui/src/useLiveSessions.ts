@@ -276,7 +276,28 @@ export function useLiveSessions() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let close: (() => void) | undefined;
 
+    /** After a stream failure: resync once over HTTP (only with a hub that proved itself), then reconnect. */
+    const retryLater = () => {
+      timer = setTimeout(() => {
+        timer = undefined;
+        if (!closed && !paused) connect();
+      }, nextDelay(failures++));
+    };
+    // Audit S4-S3: every (re)connect first asks the server on this port to prove it knows the token. A
+    // server that cannot (the hub is gone and something else listens there) gets neither the token in the
+    // stream URL nor anything else: the token is dropped and the app shows the "open the /cc link" screen.
     const connect = () => {
+      void api.verifyHub().then((check) => {
+        if (closed || paused || close !== undefined) return;
+        if (check === 'mismatch') return api.forgetToken();
+        if (check === 'unreachable') {
+          failed = true;
+          return retryLater();
+        }
+        open();
+      });
+    };
+    const open = () => {
       close = api.openStream(onChange, {
         onOpen: () => {
           failures = 0;
@@ -293,13 +314,11 @@ export function useLiveSessions() {
           if (closed || paused || timer !== undefined) return;
           failed = true;
           close?.();
-          // EventSource hides the status: ask once over plain HTTP. A 401 (the hub restarted with a new
-          // token) drops the token and shows the "open the /cc link" screen instead of retrying forever.
-          void refresh();
-          timer = setTimeout(() => {
-            timer = undefined;
-            if (!closed && !paused) connect();
-          }, nextDelay(failures++));
+          close = undefined;
+          // EventSource hides the status: the reconnect proves the hub first (a hub restarted with a new
+          // token fails the proof: the token is dropped and the "open the /cc link" screen shows instead
+          // of retrying forever), then resyncs on open.
+          retryLater();
         },
       });
     };
@@ -356,10 +375,12 @@ export function useLiveSessions() {
       const { id } = await api.sendMessage(sid, text);
       if (appIds(eventsRef.current[sid] ?? []).has(id)) return;
       const failed = dataRef.current.connected.find((s) => s.sessionId === sid)?.state === 'disconnected';
-      updatePending((p) => ({
-        ...p,
-        [sid]: [...(p[sid] ?? []), { id, text, ts: new Date().toISOString(), ...(failed ? { failed: true } : {}) }],
-      }));
+      // Audit R4-L1: a sessions refresh may have adopted this id (queued at the hub) before the POST answered.
+      updatePending((p) =>
+        p[sid]?.some((m) => m.id === id)
+          ? p
+          : { ...p, [sid]: [...(p[sid] ?? []), { id, text, ts: new Date().toISOString(), ...(failed ? { failed: true } : {}) }] },
+      );
     },
     [updatePending],
   );

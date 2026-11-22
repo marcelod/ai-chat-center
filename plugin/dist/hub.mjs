@@ -98,6 +98,7 @@ import path6 from "node:path";
 
 // src/core/registry.ts
 import fs6 from "node:fs/promises";
+import os2 from "node:os";
 import path5 from "node:path";
 
 // src/core/inbox.ts
@@ -399,6 +400,15 @@ function regFile(sid) {
   return path5.join(paths().sessionsDir, `${sid}.json`);
 }
 var isActive = (r) => !r.disconnectedAt;
+function claudeConfigDir() {
+  const raw = process.env.CLAUDE_CONFIG_DIR;
+  return path5.resolve(raw && raw.trim() ? raw : path5.join(os2.homedir(), ".claude"));
+}
+function sameConfigDir(r, mine = claudeConfigDir()) {
+  if (!r.configDir) return true;
+  const a = path5.resolve(r.configDir);
+  return process.platform === "win32" ? a.toLowerCase() === mine.toLowerCase() : a === mine;
+}
 var trustedKeys = (r) => [...r.previousKeys ?? [], ...r.key ? [r.key] : []];
 async function getRegistration(sid) {
   return readJson(regFile(sid));
@@ -783,14 +793,14 @@ var TranscriptReader = class {
 
 // src/core/claudeAgents.ts
 import { execFile } from "node:child_process";
-import os2 from "node:os";
+import os3 from "node:os";
 function runClaudeAgentsJson(platform = process.platform) {
   const win = platform === "win32";
   return new Promise((resolve, reject) => {
     execFile(
       win ? "claude agents --json" : "claude",
       win ? [] : ["agents", "--json"],
-      { cwd: os2.homedir(), shell: win, windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
+      { cwd: os3.homedir(), shell: win, windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => err ? reject(err) : resolve(String(stdout))
     );
   });
@@ -902,7 +912,9 @@ var ClaudeCodeProvider = class {
     this.lastEvents.set(sid, last);
     return last;
   }
-  shouldMarkExited(sid, connectedAt, live) {
+  shouldMarkExited(reg, live) {
+    const { sessionId: sid, connectedAt } = reg;
+    if (!sameConfigDir(reg)) return false;
     let m = this.misses.get(sid);
     if (!m || m.connectedAt !== connectedAt) {
       m = { connectedAt, count: 0 };
@@ -947,7 +959,7 @@ var ClaudeCodeProvider = class {
       if (!isActive(reg)) continue;
       if (listed.has(sid)) {
         this.misses.delete(sid);
-      } else if (this.shouldMarkExited(sid, reg.connectedAt, live)) {
+      } else if (this.shouldMarkExited(reg, live)) {
         await markDisconnected(sid, "exited");
         this.misses.delete(sid);
         gone.push(sid);
@@ -967,7 +979,7 @@ var ClaudeCodeProvider = class {
       let disconnected = !isActive(reg);
       if (!disconnected) {
         if (l) this.misses.delete(sid);
-        else if (this.shouldMarkExited(sid, reg.connectedAt, live)) {
+        else if (this.shouldMarkExited(reg, live)) {
           await markDisconnected(sid, "exited");
           this.misses.delete(sid);
           disconnected = true;
@@ -1434,7 +1446,17 @@ var PRUNE_AGE_MS = 30 * 864e5;
 var PRUNE_EVERY_MS = 10 * 6e4;
 var IDLE_EXIT_MS = 2 * 36e5;
 var EXIT_CHECK_MS = 5 * 6e4;
-var holdsHub = (r) => isActive(r) && (r.pid === null || isAlive(r.pid));
+var UNKNOWN_PID_HOLD_MS = 24 * 36e5;
+async function holdsHub(r, now = Date.now()) {
+  if (!isActive(r)) return false;
+  if (r.pid !== null) return isAlive(r.pid);
+  let last = Date.parse(r.connectedAt) || 0;
+  try {
+    last = Math.max(last, (await fs9.stat(r.transcriptPath)).mtimeMs);
+  } catch {
+  }
+  return now - last < UNKNOWN_PID_HOLD_MS;
+}
 async function prune(log) {
   try {
     const gone = await pruneRegistrations(PRUNE_AGE_MS);
@@ -1565,7 +1587,9 @@ async function startHub(opts = {}) {
     let idleFired = false;
     const idleTimer = setInterval(async () => {
       try {
-        if (started.clients() > 0 || (await listRegistrations()).some(holdsHub)) {
+        let held = started.clients() > 0;
+        for (const r of held ? [] : await listRegistrations()) if (held = await holdsHub(r)) break;
+        if (held) {
           lastUsed = Date.now();
           return;
         }

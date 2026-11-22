@@ -2,7 +2,7 @@
 
 > **Nota (pt-BR):** Este roteiro é para rodar à mão numa máquina Windows. Ele repete os cenários (a)–(j) do teste ponta a ponta e acrescenta as verificações específicas do Windows. Marque cada item com PASS, FAIL ou SKIPPED e anote o que viu. Se algo falhar, copie a mensagem de erro e o conteúdo de `%USERPROFILE%\.ai-chat-center\logs`, sem o token.
 
-Use Windows 10 or 11, with Node.js 20+ and Claude Code on the `PATH`. Run all commands in **PowerShell**. Linux results for comparison are in [e2e-results.md](e2e-results.md).
+Use Windows 10 or 11, with Node.js 18+ and Claude Code on the `PATH`. Run all commands in **PowerShell**. Linux results for comparison are in [e2e-results.md](e2e-results.md).
 
 ## 0. Preparation
 
@@ -72,6 +72,8 @@ Invoke-RestMethod "http://127.0.0.1:$port/api/sessions" -Headers $hdr | ConvertT
   ```
 - [ ] **W8. No console flash from `claude agents`.** With the app open on a connected session, watch the desktop for a minute: the hub runs `claude agents --json` every few seconds, and no console window may flash (it runs with `windowsHide`). Also run `/cc` in a session that was never connected and check that no window flashes during the pid lookup.
 - [ ] **W9. The project folder is not locked by the hub.** Start the hub from a fresh test folder (close any running hub first, see W6, then `/cc` in a session opened in `C:\Temp\cc lock`). Exit that session, then delete the folder (`Remove-Item -Recurse "C:\Temp\cc lock"`) while the hub keeps running. The delete succeeds (the hub's working directory is your user folder), and the app keeps working for other sessions.
+- [ ] **W10. A hub killed without its cleanup.** With a hub running, kill it the way Windows does (`Stop-Process -Id <hub pid>`, Task Manager, or a reboot): `hub.json` stays behind. Run `/cc` again: it answers within a second or two with a working link, and `hub.json` names the new hub's pid.
+- [ ] **W11. A planted `node` in the project folder is never run.** Every hook runs `node` with the project as its working directory. In an empty folder `C:\Temp\cc node`, create `node.cmd` with `@echo planted > "%TEMP%\acc-planted-node.txt"` (and, separately, copy any harmless `.exe` there as `node.exe`). Open `claude` in that folder, type a prompt and `/cc`. `%TEMP%\acc-planted-node.txt` must not exist, and the hooks must work (they ran the real Node from the `PATH`). If the marker file appears, stop and report it: Claude Code resolved `node` from the project folder.
 - [ ] **W7. Line endings.** In a clone made with default Git for Windows settings (`core.autocrlf=true`), `git status` is clean after `npm ci` and `npm run build`, with no CRLF changes in `plugin/dist`.
 
 ## Results
@@ -97,3 +99,5 @@ Invoke-RestMethod "http://127.0.0.1:$port/api/sessions" -Headers $hdr | ConvertT
 | W7 | | |
 | W8 | | |
 | W9 | | |
+| W10 | | |
+| W11 | | |

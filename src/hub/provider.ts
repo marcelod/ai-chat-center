@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ChatEvent, LiveSession, ProviderChange, SessionView } from '../shared/types.js';
-import { getRegistration, isActive, listRegistrations, markDisconnected, trustedKeys, type Registration } from '../core/registry.js';
+import { getRegistration, isActive, listRegistrations, markDisconnected, sameConfigDir, trustedKeys, type Registration } from '../core/registry.js';
 import { busyAge, clearBusy } from '../core/busy.js';
 import { countUnsigned, enqueue, peek } from '../core/inbox.js';
 import { getWaiting } from '../core/waiting.js';
@@ -108,7 +108,10 @@ export class ClaudeCodeProvider implements Provider {
     return last;
   }
 
-  private shouldMarkExited(sid: string, connectedAt: string, live: Live): boolean {
+  private shouldMarkExited(reg: Registration, live: Live): boolean {
+    const { sessionId: sid, connectedAt } = reg;
+    // `claude agents` only lists sessions of the hub's own Claude config dir (audit S4-U3).
+    if (!sameConfigDir(reg)) return false;
     let m = this.misses.get(sid);
     if (!m || m.connectedAt !== connectedAt) {
       m = { connectedAt, count: 0 };
@@ -156,7 +159,7 @@ export class ClaudeCodeProvider implements Provider {
       if (!isActive(reg)) continue;
       if (listed.has(sid)) {
         this.misses.delete(sid);
-      } else if (this.shouldMarkExited(sid, reg.connectedAt, live)) {
+      } else if (this.shouldMarkExited(reg, live)) {
         await markDisconnected(sid, 'exited');
         this.misses.delete(sid);
         gone.push(sid);
@@ -178,7 +181,7 @@ export class ClaudeCodeProvider implements Provider {
       let disconnected = !isActive(reg);
       if (!disconnected) {
         if (l) this.misses.delete(sid);
-        else if (this.shouldMarkExited(sid, reg.connectedAt, live)) {
+        else if (this.shouldMarkExited(reg, live)) {
           await markDisconnected(sid, 'exited');
           this.misses.delete(sid);
           disconnected = true;

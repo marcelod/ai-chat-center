@@ -52,6 +52,18 @@ describe('provider', () => {
     expect(v.state).toBe('disconnected');
     expect((await getRegistration('s1'))!.disconnectReason).toBe('exited');
   });
+  // Audit S4-U3: the hub only sees sessions of its own Claude config dir: it never marks another one exited.
+  it('a session of another Claude config dir is never marked exited', async () => {
+    await register({ sessionId: 'far', transcriptPath: '/none.jsonl', cwd: '/x', pid: null, configDir: '/other/claude-config' });
+    let t = Date.now() + 3600_000;
+    const p = new ClaudeCodeProvider(async () => [], { now: () => t });
+    for (let i = 0; i < 5; i++) {
+      t += 6000;
+      expect(await p.detectExits()).toEqual([]);
+      await p.listSessions();
+    }
+    expect((await getRegistration('far'))!.disconnectedAt).toBeUndefined();
+  });
   // Audit S2-N3 / R2-N1: exit detection that runs without any browser (the hub's background check).
   it('detectExits marks exits with the same rules: grace, 3 fresh misses, never on a failed lookup', async () => {
     await reg();

@@ -402,6 +402,14 @@ describe('waiter start: same-process session switches', () => {
       expect(a?.disconnectedAt).toBeUndefined();
       expect(a?.pid).toBe(55);
     });
+    // Audit S4-U3: `claude agents` only sees sessions of its own CLAUDE_CONFIG_DIR.
+    it('a registration from another Claude config dir is never touched by a /clear here', async () => {
+      await register({ sessionId: 'A', transcriptPath: '/a', cwd: '/x', pid: null, configDir: '/other/claude-config' });
+      let asked = 0;
+      await wait('start', { session_id: 'B', source: 'clear', cwd: '/x' }, { lookup: async (id) => (id === 'A' && asked++, { ok: true, pid: id === 'B' ? 42 : null }) });
+      expect((await getRegistration('A'))?.disconnectedAt).toBeUndefined();
+      expect(asked).toBe(0);
+    });
     it('lookup failing: disconnected when in the same folder, kept otherwise', async () => {
       await register({ sessionId: 'A', transcriptPath: '/a', cwd: '/x', pid: null });
       await register({ sessionId: 'C', transcriptPath: '/c', cwd: '/elsewhere', pid: null });

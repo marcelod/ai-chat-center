@@ -21,8 +21,25 @@ export const IDLE_EXIT_MS = 2 * 3600_000;
 /** Background exit detection (one `claude agents` lookup), with or without a browser connected. */
 export const EXIT_CHECK_MS = 5 * 60_000;
 
-/** Counts toward keeping the hub up: active, and its claude process is not known to be dead. */
-const holdsHub = (r: Registration): boolean => isActive(r) && (r.pid === null || isAlive(r.pid));
+/** A registration whose claude pid was never identified holds the hub only while active this recently. */
+export const UNKNOWN_PID_HOLD_MS = 24 * 3600_000;
+
+/**
+ * Counts toward keeping the hub up: active, and its claude process is not known to be dead. With an
+ * unknown pid (and a hub that cannot run `claude agents`, the exit may never be detected), only while its
+ * transcript (or, unreadable, its connection) changed in the last 24 h (audit R4-Info).
+ */
+async function holdsHub(r: Registration, now = Date.now()): Promise<boolean> {
+  if (!isActive(r)) return false;
+  if (r.pid !== null) return isAlive(r.pid);
+  let last = Date.parse(r.connectedAt) || 0;
+  try {
+    last = Math.max(last, (await fs.stat(r.transcriptPath)).mtimeMs);
+  } catch {
+    /* no transcript yet: the connection time */
+  }
+  return now - last < UNKNOWN_PID_HOLD_MS;
+}
 
 export interface StartHubOptions {
   idleMs?: number;
@@ -197,7 +214,9 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
     let idleFired = false;
     const idleTimer = setInterval(async () => {
       try {
-        if (started.clients() > 0 || (await listRegistrations()).some(holdsHub)) {
+        let held = started.clients() > 0;
+        for (const r of held ? [] : await listRegistrations()) if ((held = await holdsHub(r))) break;
+        if (held) {
           lastUsed = Date.now();
           return;
         }

@@ -35,6 +35,7 @@ function paths() {
 
 // src/core/registry.ts
 import fs6 from "node:fs/promises";
+import os2 from "node:os";
 import path5 from "node:path";
 
 // src/core/fsAtomic.ts
@@ -428,7 +429,7 @@ async function clearBusyIfOlder(sid, before) {
   } catch {
     return true;
   }
-  if (mtimeMs >= before) return false;
+  if (Math.floor(mtimeMs) > before) return false;
   await removeFile(paths().busyFile(sid));
   return true;
 }
@@ -473,6 +474,15 @@ function regFile(sid) {
   return path5.join(paths().sessionsDir, `${sid}.json`);
 }
 var isActive = (r) => !r.disconnectedAt;
+function claudeConfigDir() {
+  const raw = process.env.CLAUDE_CONFIG_DIR;
+  return path5.resolve(raw && raw.trim() ? raw : path5.join(os2.homedir(), ".claude"));
+}
+function sameConfigDir(r, mine = claudeConfigDir()) {
+  if (!r.configDir) return true;
+  const a = path5.resolve(r.configDir);
+  return process.platform === "win32" ? a.toLowerCase() === mine.toLowerCase() : a === mine;
+}
 async function updateRegistration(sid, patch, opts = {}) {
   if (!await getRegistration(sid)) return null;
   return locked(sid, async () => {
@@ -517,14 +527,14 @@ async function markDisconnected(sid, reason) {
 
 // src/core/claudeAgents.ts
 import { execFile } from "node:child_process";
-import os2 from "node:os";
+import os3 from "node:os";
 function runClaudeAgentsJson(platform = process.platform) {
   const win = platform === "win32";
   return new Promise((resolve, reject) => {
     execFile(
       win ? "claude agents --json" : "claude",
       win ? [] : ["agents", "--json"],
-      { cwd: os2.homedir(), shell: win, windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
+      { cwd: os3.homedir(), shell: win, windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => err ? reject(err) : resolve(String(stdout))
     );
   });
@@ -633,7 +643,7 @@ async function inboxHasMessages(sid) {
 async function sessionSwitch(sid, input, lookup, lookupOther) {
   const source = input.source ?? "";
   if (!SWITCH_SOURCES.has(source)) return;
-  const active = (await listRegistrations()).filter(isActive);
+  const active = (await listRegistrations()).filter((r2) => isActive(r2) && (r2.sessionId === sid || sameConfigDir(r2)));
   const others = active.filter((r2) => r2.sessionId !== sid && r2.pid !== null);
   if (source === "clear") {
     for (const u of active.filter((r2) => r2.sessionId !== sid && r2.pid === null)) {

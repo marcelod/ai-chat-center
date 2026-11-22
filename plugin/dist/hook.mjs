@@ -78,6 +78,7 @@ async function readJson(file) {
 }
 
 // src/core/registry.ts
+import os2 from "node:os";
 import path5 from "node:path";
 
 // src/core/inbox.ts
@@ -259,6 +260,10 @@ function regFile(sid) {
   return path5.join(paths().sessionsDir, `${sid}.json`);
 }
 var isActive = (r) => !r.disconnectedAt;
+function claudeConfigDir() {
+  const raw = process.env.CLAUDE_CONFIG_DIR;
+  return path5.resolve(raw && raw.trim() ? raw : path5.join(os2.homedir(), ".claude"));
+}
 async function register(r) {
   return locked(r.sessionId, async () => {
     const prev = await getRegistration(r.sessionId);
@@ -286,7 +291,7 @@ async function markDisconnected(sid, reason) {
 // src/hooks/ensureHub.ts
 import fs4 from "node:fs";
 import http from "node:http";
-import os2 from "node:os";
+import os3 from "node:os";
 import path6 from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -351,7 +356,7 @@ async function hubAcceptsToken(port, token) {
   return r !== "refused" && r !== null && r.status === 200;
 }
 function hubSpawnOptions() {
-  return { detached: true, stdio: "ignore", windowsHide: true, cwd: os2.homedir() };
+  return { detached: true, stdio: "ignore", windowsHide: true, cwd: os3.homedir() };
 }
 function defaultSpawnHub() {
   const hubPath = path6.join(path6.dirname(fileURLToPath(import.meta.url)), "hub.mjs");
@@ -673,14 +678,14 @@ function isCcCommand(prompt) {
 
 // src/core/claudeAgents.ts
 import { execFile } from "node:child_process";
-import os3 from "node:os";
+import os4 from "node:os";
 function runClaudeAgentsJson(platform = process.platform) {
   const win = platform === "win32";
   return new Promise((resolve, reject) => {
     execFile(
       win ? "claude agents --json" : "claude",
       win ? [] : ["agents", "--json"],
-      { cwd: os3.homedir(), shell: win, windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
+      { cwd: os4.homedir(), shell: win, windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => err ? reject(err) : resolve(String(stdout))
     );
   });
@@ -735,6 +740,7 @@ async function connect(input, resolve, ctx) {
     transcriptPath: input.transcript_path,
     cwd: input.cwd,
     pid,
+    configDir: claudeConfigDir(),
     // The key stays while the connection is active; a reactivation gets a new one.
     key: keep && prev.key ? prev.key : crypto4.randomBytes(16).toString("hex"),
     ...previousKeys.length ? { previousKeys } : {},

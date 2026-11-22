@@ -5,8 +5,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
-  # Dev dependencies only (the plugin ships bundled, with no runtime dependencies): one grouped PR a
-  # week instead of one per package. Major versions stay separate, since they may need code changes.
+  # Dev dependencies only (the plugin ships bundled, with no runtime dependencies): at most two grouped
+  # PRs a week instead of one per package: one for every minor and patch update, and one for every major
+  # update (kept apart from the first, since majors may need code changes).
   - package-ecosystem: npm
     directory: /
     schedule:
