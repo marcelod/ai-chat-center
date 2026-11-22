@@ -240,3 +240,38 @@ In manual mode the app asked `Run this shell command: echo hi > <scratch>/e2e-r1
 ### Cleanup
 
 The driver was stopped (which closes the terminal); the waiter exited and released its lock. The hub was stopped with the pid from `hub.json` (`hub stopped` in `hub.log`). Afterwards `ps` showed no `hub.mjs`, `waiter.mjs`, `drive-session` or `claude --plugin-dir` process, and port 7790 was free.
+
+## Audit round 2 (branch `fix/audit-round-1`, version 0.2.1, exec-form hooks)
+
+Run date: 2026-11-22. Claude Code 2.1.330, Node 22, Linux, `claude --plugin-dir <repo>/plugin --model haiku`, isolated `AI_CHAT_CENTER_HOME=<scratch>/e2e-r2/home`, `AI_CHAT_CENTER_PORT=7790`, `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1`, two fresh empty project directories (session A with `/cc`, session B without). Both sessions started in auto mode. Tokens are shown as `<token>`, paths as `<scratch>` / `<repo>`.
+
+| Scenario | Result |
+|----------|--------|
+| Exec-form hooks fire: `node <repo>/plugin/dist/waiter.mjs stop` is a direct child of `claude` (no shell) | PASS |
+| `/cc` connects; the link comes only from the hook; Claude prints no URL, token or key | PASS |
+| An app message is delivered and answered | PASS |
+| Stop re-arms a new waiter after each delivery; a second and third message are delivered once each | PASS |
+| A session without `/cc` shows no hook output and writes no state | PASS |
+| The 0.2.1 hub's health proof verifies only against the port that was dialed | PASS |
+
+### `/cc` and exec form
+
+Before `/cc`, session A showed no hook output, the startup waiter had already exited, and the state folder was empty. Then:
+```
+❯ /ai-chat-center:cc
+  ⎿  UserPromptSubmit says: AI Chat Center is ready: http://127.0.0.1:7790/?token=<token>
+● Sessão conectada ao AI Chat Center. O link de acesso já foi exibido acima.
+```
+`ps` showed the waiter as `node <repo>/plugin/dist/waiter.mjs stop` with the `claude` pid as its parent: Claude Code spawned node directly, with no shell in between. The hub ran as `node <repo>/plugin/dist/hub.mjs`, and `hub.json` named port 7790. The state folder was `700` and `token` was `600`. A challenge to `/api/health` returned version `0.2.1` and a proof that matched `HMAC(token, challenge|7790|pid|version)` and did not match the same proof computed for port 7791.
+
+### App messages and Stop re-arm
+
+The app (hub API, Bearer token) posted `Reply with exactly: APP-R2`. The screen showed `● Stop hook feedback` followed by `● APP-R2`. After the turn a new `waiter.mjs stop` was running (new pid, again a direct child of `claude`), and the inbox was empty. `Reply with exactly: APP-R2B` was then delivered and answered the same way, and another fresh waiter was armed. Events for the session: `notice, assistant, user(app), assistant, user(app), assistant`. After session B had started, `Reply with exactly: APP-R2C` was still delivered to A (three `Stop hook feedback` entries in total, one per message).
+
+### Session without `/cc`
+
+Session B, in its own fresh folder, answered `Reply with exactly: HELLO-B` with `HELLO-B`. Its screen had no hook output (no `AI Chat Center` line, no hook feedback, no hook error); the only mention of a hook in its terminal output was Claude Code's own transient spinner text "running Stop hook". It left no registration, no waiter of B was running afterwards, and session A stayed connected.
+
+### Cleanup
+
+Both drivers were stopped (which closes the terminals; both exited with code 129). The hub was stopped with the pid from `hub.json` (`hub stopped` in `hub.log`; `hub.json` removed). Afterwards `ps` showed no `hub.mjs`, `waiter.mjs`, `hook.mjs`, `drive-session` or `claude --plugin-dir` process, and port 7790 was free.
