@@ -93,7 +93,7 @@ try {
   }
   const ctx = out.hookSpecificOutput?.additionalContext ?? '';
   check(cc.status === 0 && cc.stderr === '' && ctx.startsWith('AI Chat Center: connected'), `/cc: exit ${cc.status} ${cc.error?.code ?? ''} in ${Date.now() - t0} ms, context ${JSON.stringify(ctx.split('\n')[0])} ${JSON.stringify((cc.stderr ?? '').slice(0, 300))}`);
-  check(/http:\/\/127\.0\.0\.1:\d+\/[?#]token=[0-9a-f]{64}/.test(out.systemMessage ?? ''), 'the link is shown to the user');
+  check(/http:\/\/127\.0\.0\.1:\d+\/#token=[0-9a-f]{64}/.test(out.systemMessage ?? ''), 'the link, token in the fragment, is shown to the user');
   check(!/token=/.test(ctx), 'the model context has no token');
   const key = /AI Chat Center key: ([0-9a-f]{32})/.exec(ctx)?.[1];
   check(Boolean(key), 'the model context has the key');

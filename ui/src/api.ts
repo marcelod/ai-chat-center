@@ -23,7 +23,11 @@ function readStored(): string | null {
   }
 }
 
-/** Reads ?token= on first load, keeps it for this tab and strips it from the URL. */
+/**
+ * Reads the token on first load from the fragment (`#token=`, printed by /cc since 0.2.2: never sent to
+ * the server, less likely to persist) or, for links printed by 0.2.1 and earlier, from `?token=`. Keeps
+ * it for this tab and clears it from the URL either way. (`?token=` is accepted during 0.2.x only.)
+ */
 function initToken(): string | null {
   try {
     localStorage.removeItem(TOKEN_KEY); // left by 0.1.x
@@ -33,10 +37,15 @@ function initToken(): string | null {
   let token: string | null = null;
   try {
     const url = new URL(window.location.href);
-    token = url.searchParams.get('token');
-    if (token) {
+    const frag = new URLSearchParams(url.hash.replace(/^#/, ''));
+    const fromHash = frag.get('token');
+    const fromQuery = url.searchParams.get('token');
+    token = fromHash || fromQuery;
+    if (fromHash !== null || fromQuery !== null) {
+      frag.delete('token');
       url.searchParams.delete('token');
-      window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+      const hash = frag.toString();
+      window.history.replaceState(null, '', url.pathname + url.search + (hash ? `#${hash}` : ''));
     }
   } catch {
     /* ignore */

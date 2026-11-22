@@ -343,7 +343,7 @@ function readHub() {
     return null;
   }
 }
-var urlOf = (h) => `http://127.0.0.1:${h.port}/?token=${h.token}`;
+var urlOf = (h) => `http://127.0.0.1:${h.port}/#token=${h.token}`;
 function compareVersions(a, b) {
   const parse = (v) => /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(v.trim());
   const x = parse(a);

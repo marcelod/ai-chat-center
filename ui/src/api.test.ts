@@ -23,6 +23,23 @@ describe('token', () => {
     expect(localStorage.getItem('acc.token')).toBeNull();
   });
 
+  // Audit S3-L4: a query string is sent to the server and kept in browser history (which may sync); a
+  // fragment is never sent. /cc prints #token=; the UI reads it, keeps it for the tab and clears it.
+  it('is read from the fragment, kept in sessionStorage and cleared from the URL', async () => {
+    window.history.replaceState(null, '', '/#token=frag');
+    const api = await load();
+    expect(api.hasToken()).toBe(true);
+    expect(window.location.hash).toBe('');
+    expect(window.location.href.includes('frag')).toBe(false);
+    expect(sessionStorage.getItem('acc.token')).toBe('frag');
+  });
+  it('keeps other fragment parameters', async () => {
+    window.history.replaceState(null, '', '/#token=frag&view=s1');
+    const api = await load();
+    expect(api.hasToken()).toBe(true);
+    expect(window.location.hash).toBe('#view=s1');
+  });
+
   it('a token left in localStorage by an older version is removed and not used', async () => {
     localStorage.setItem('acc.token', 'old');
     const api = await load();

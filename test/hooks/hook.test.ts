@@ -13,7 +13,7 @@ import { getWaiting } from '../../src/core/waiting.js';
 import { paths } from '../../src/core/paths.js';
 import { saveConfig } from '../../src/core/config.js';
 
-const URL_ = 'http://127.0.0.1:7777/?token=t';
+const URL_ = 'http://127.0.0.1:7777/#token=t';
 const ctx = (parentPid = 42) => ({
   ensureHub: async () => URL_,
   resolvePid: async (): Promise<number | null> => parentPid,
@@ -287,7 +287,7 @@ describe('ensureHub', () => {
     let spawned = 0;
     const url = await ensureHub({ spawnHub: () => void spawned++ });
     srv.close();
-    expect(url).toBe(`http://127.0.0.1:${port}/?token=tok`);
+    expect(url).toBe(`http://127.0.0.1:${port}/#token=tok`);
     expect(spawned).toBe(0);
   });
 
@@ -335,7 +335,7 @@ describe('ensureHub', () => {
       pollMs: 5,
     });
     expect(killed).toEqual([1234]);
-    expect(url).toBe('http://127.0.0.1:7778/?token=tok2');
+    expect(url).toBe('http://127.0.0.1:7778/#token=tok2');
   });
 
   // Audit S2-N4: two installed plugin versions must not keep replacing each other's hub.
@@ -349,7 +349,7 @@ describe('ensureHub', () => {
       spawnHub: () => void spawned++,
       pollMs: 5,
     });
-    expect(url).toBe('http://127.0.0.1:7777/?token=tok');
+    expect(url).toBe('http://127.0.0.1:7777/#token=tok');
     expect(killed).toEqual([]);
     expect(spawned).toBe(0);
   });
@@ -374,7 +374,7 @@ describe('ensureHub', () => {
       pollMs: 5,
     });
     expect(spawned).toBe(1);
-    expect(url).toBe('http://127.0.0.1:7777/?token=tok');
+    expect(url).toBe('http://127.0.0.1:7777/#token=tok');
   });
 
   // Audit R3-F4: a hub stalled for a moment (load, antivirus, resume from sleep) got a twin that rotated

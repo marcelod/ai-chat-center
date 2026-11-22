@@ -79,7 +79,8 @@ function readHub(): { port: number; token: string; pid: number | null } | null {
   }
 }
 
-const urlOf = (h: { port: number; token: string }) => `http://127.0.0.1:${h.port}/?token=${h.token}`;
+/** The token goes in the fragment: never sent in a request, and the UI clears it from the address bar. */
+const urlOf = (h: { port: number; token: string }) => `http://127.0.0.1:${h.port}/#token=${h.token}`;
 
 /** Semver order of `a` vs `b` (major.minor.patch; a pre-release sorts before its release). NaN if either is unparsable. */
 export function compareVersions(a: string, b: string): number {

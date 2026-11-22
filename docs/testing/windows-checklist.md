@@ -42,7 +42,7 @@ Invoke-RestMethod "http://127.0.0.1:$port/api/sessions" -Headers $hdr | ConvertT
 
 ## Scenarios
 
-- [ ] **(a) `/cc` shows the URL and the session is connected.** Type `/cc`. The reply shows a link like `http://127.0.0.1:7777/?token=…`. Open it in the browser. The session appears in the list as connected. `sessions\<id>.json` exists, and after the reply a file appears in `waiters\`.
+- [ ] **(a) `/cc` shows the URL and the session is connected.** Type `/cc`. The reply shows a link like `http://127.0.0.1:7777/#token=…`. Open it in the browser. The session appears in the list as connected. `sessions\<id>.json` exists, and after the reply a file appears in `waiters\`.
 - [ ] **(b) Question from the app.** In the app, ask `What is 2+3? Answer with just the number.` The answer appears in the app and in the terminal, where it shows as "Stop hook feedback".
 - [ ] **(c) Action from the app.** In the app, ask `Create a file ola.txt containing: ola`. `ola.txt` is created in the test folder (`Test-Path .\ola.txt`).
 - [ ] **(d) Two quick messages, in order.** Send `Reply ALPHA` and then `Reply BETA` from the app right away. Both arrive in the right order, and the answer covers both.

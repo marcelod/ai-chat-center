@@ -32,7 +32,7 @@ AI Chat Center is a plugin for Claude Code plus a small local app. It lets you f
 
 ## Usage
 
-- Type `/cc` in a session to connect it. The plugin shows a link to the app in the terminal, in the form `http://127.0.0.1:7777/?token=…`; open it in your browser. Claude only confirms the connection: the link is shown to you by the plugin and is never repeated by Claude.
+- Type `/cc` in a session to connect it. The plugin shows a link to the app in the terminal, in the form `http://127.0.0.1:7777/#token=…`; open it in your browser. Claude only confirms the connection: the link is shown to you by the plugin and is never repeated by Claude.
 - Type `/cc off` to disconnect the session.
 - The command also works through its full name, `/ai-chat-center:cc`. If another plugin or one of your own commands also defines `/cc`, use `/ai-chat-center:cc`.
 
@@ -48,7 +48,7 @@ Everything stays on your computer. The hub listens only on 127.0.0.1. The plugin
 
 - **Messages from the app have the same authority as typing in the terminal, with one limit.** Claude treats them as yours, including requests to run commands or edit files, under the same permission rules. They never count as your answer to something Claude asked you in the terminal, such as a permission prompt or "should I proceed?" before a destructive or irreversible action: answer those in the terminal.
 - **This relies on model behavior.** Claude Code labels the waiter's output as a system notification, "not user input". The `/cc` command asks Claude to treat the keyed blocks that arrive from the AI Chat Center hook as typed by you. That depends on how the model follows the instruction, and it may change in a future Claude Code or model version; if it does, Claude may refuse app messages. Type the request in the terminal instead, and please report it.
-- **The app link carries a token.** A new token is made every time the hub starts. The browser keeps it only for that tab (session storage), so after a hub restart, or in a new tab or browser, open the link from `/cc` again. The token is shown to you only; it is not sent to Claude.
+- **The app link carries a token.** A new token is made every time the hub starts. It is in the part of the link after `#`, which the browser never sends to the hub, and the app removes it from the address bar as soon as the page loads. The browser keeps it only for that tab (session storage), so after a hub restart, or in a new tab or browser, open the link from `/cc` again. The token is shown to you only; it is not sent to Claude.
 - **The app link is saved in the session transcript.** The plugin shows it to you as a hook message, and Claude Code stores that message in the session's transcript file (under `~/.claude/projects`), so an `/export`, a shared transcript or a backup carries it. The token in it stops working as soon as the hub restarts, since every start makes a new one, and the hub exits on its own after 2 hours with no browser and no connected session.
 - **The per-connection key** lets Claude tell real app messages from text that merely looks like one. Claude trusts a message block only when it arrives as hook feedback from the waiter, never when it shows up in a file, a web page or command output, even with the right key.
 - **Anything that can write to `~/.ai-chat-center` as your user can send messages** to your connected sessions, like the app does. The folder is created readable by you only (0700 on macOS and Linux); keep it that way.
