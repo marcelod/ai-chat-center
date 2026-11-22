@@ -24,6 +24,8 @@ import { getRegistration, isActive, markDisconnected, register } from '../core/r
 import { clearWaiting, setWaiting } from '../core/waiting.js';
 import { clearBusy, setBusy } from '../core/busy.js';
 import { ensureHub } from './ensureHub.js';
+import { loadConfig } from '../core/config.js';
+import { t } from '../core/i18n.js';
 import { resolveClaudePid } from './claudePid.js';
 
 export type HookEvent = 'prompt-submit' | 'notification';
@@ -50,6 +52,7 @@ const CC_RE = /^\s*\/(?:ai-chat-center:)?cc(?:\s+(\S[\s\S]*?))?\s*$/i;
 const MAX_PREVIOUS_KEYS = 20;
 
 export const UNKNOWN_ARG = 'AI Chat Center: unknown argument. Use /cc or /cc off.';
+export const CONNECTED = 'AI Chat Center: connected';
 export const PID_UNKNOWN =
   'AI Chat Center: could not identify the Claude process; closing the terminal will be detected by the hub.';
 
@@ -98,17 +101,24 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
   });
   await clearBusy(sid);
   await clearWaiting(sid);
-  let first: string;
+  const { language } = await loadConfig();
+  // The token URL is shown to the user only (systemMessage). The model gets the key and a status
+  // line: the token must not end up in the model context or be repeated in its reply.
+  let status: string;
+  let shown: string;
   try {
-    first = `AI Chat Center URL: ${await ctx.ensureHub()}`;
+    shown = t(language, 'hook.ready', { url: await ctx.ensureHub() });
+    status = CONNECTED;
   } catch (e) {
     // Keep the registration: the hub will show the session once it is up.
     logError(e);
-    first = `AI Chat Center: the hub failed to start. See ${path.join(paths().logDir, 'hook.log')}`;
+    const log = path.join(paths().logDir, 'hook.log');
+    status = `AI Chat Center: the hub failed to start. See ${log}`;
+    shown = t(language, 'hook.hubFailed', { log });
   }
-  const lines = [first, `AI Chat Center key: ${reg.key}`];
+  const lines = [status, `AI Chat Center key: ${reg.key}`];
   if (pid === null) lines.push(PID_UNKNOWN);
-  return output(lines.join('\n'), first);
+  return output(lines.join('\n'), shown);
 }
 
 export async function handleHook(event: HookEvent, input: HookInput, ctx: HookContext): Promise<HookResult> {
@@ -123,7 +133,7 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
 
   if (event === 'prompt-submit') {
     const cmd = isCcCommand(input.prompt);
-    if (cmd === 'unknown') return output(UNKNOWN_ARG);
+    if (cmd === 'unknown') return output(UNKNOWN_ARG, t((await loadConfig()).language, 'hook.unknownArg'));
     if (cmd === 'on') return connect(input, resolve, ctx);
     const reg = await getRegistration(sid);
     if (!reg) return nothing;

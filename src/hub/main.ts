@@ -4,7 +4,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { paths } from '../core/paths.js';
-import { ensureDir, readJson, writeJsonAtomic } from '../core/fsAtomic.js';
+import { ensureDir, readJson, withFsRetry, writeJsonAtomic } from '../core/fsAtomic.js';
+import { newChallenge, proofMatches } from '../core/healthProof.js';
 import { ClaudeCodeProvider } from './provider.js';
 import { acquireLock, releaseLock } from '../core/lock.js';
 import { pruneRegistrations } from '../core/registry.js';
@@ -24,51 +25,50 @@ async function prune(log: (m: string) => void): Promise<void> {
   }
 }
 
-async function ensureToken(log: (m: string) => void = () => {}): Promise<string> {
+/** A new random token on every hub start (0600, written atomically): a copy kept anywhere goes stale. */
+async function rotateToken(): Promise<string> {
   const file = paths().token;
   await ensureDir(path.dirname(file));
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const t = crypto.randomBytes(32).toString('hex');
-    try {
-      await fs.writeFile(file, t, { flag: 'wx', mode: 0o600 });
-      return t;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-    }
-    let existing = '';
-    try {
-      existing = (await fs.readFile(file, 'utf8')).trim();
-    } catch {
-      continue; // vanished; retry creation
-    }
-    if (TOKEN_RE.test(existing)) {
-      await fs.chmod(file, 0o600).catch(() => {});
-      return existing;
-    }
-    await writeFileAtomic600(file, t);
-    log('token file was invalid; regenerated');
-    return t;
-  }
-  throw new Error('could not create token file');
+  const t = crypto.randomBytes(32).toString('hex');
+  await writeFileAtomic600(file, t);
+  await fs.chmod(file, 0o600).catch(() => {});
+  return t;
 }
 
 async function writeFileAtomic600(file: string, data: string): Promise<void> {
   const tmp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
     await fs.writeFile(tmp, data, { mode: 0o600 });
-    await fs.rename(tmp, file);
+    await withFsRetry(() => fs.rename(tmp, file));
   } catch (e) {
     await fs.rm(tmp, { force: true });
     throw e;
   }
 }
 
+/** True only when the hub recorded in hub.json proves it knows the token on disk (see ensureHub). */
 async function liveHubExists(): Promise<boolean> {
   const info = await readJson<{ pid?: number; port?: number }>(paths().hubJson);
   if (!info || typeof info.port !== 'number') return false;
+  let token: string;
   try {
-    const r = await fetch(`http://127.0.0.1:${info.port}/api/health`, { signal: AbortSignal.timeout(1000) });
-    return r.ok && ((await r.json()) as { ok?: boolean }).ok === true;
+    token = (await fs.readFile(paths().token, 'utf8')).trim();
+  } catch {
+    return false;
+  }
+  if (!TOKEN_RE.test(token)) return false;
+  const challenge = newChallenge();
+  try {
+    const r = await fetch(`http://127.0.0.1:${info.port}/api/health?challenge=${challenge}`, { signal: AbortSignal.timeout(1000) });
+    if (!r.ok) return false;
+    const j = (await r.json()) as { ok?: unknown; pid?: unknown; version?: unknown; proof?: unknown };
+    return (
+      j.ok === true &&
+      typeof j.pid === 'number' &&
+      typeof j.version === 'string' &&
+      typeof j.proof === 'string' &&
+      proofMatches(token, challenge, { pid: j.pid, version: j.version, proof: j.proof })
+    );
   } catch {
     return false;
   }
@@ -112,7 +112,7 @@ export async function startHub(): Promise<{ port: number; close(): Promise<void>
   let hub: Awaited<ReturnType<typeof createHub>> | undefined;
   try {
     if (await liveHubExists()) return null;
-    const token = await ensureToken(log);
+    const token = await rotateToken();
     secret = token;
 
     const base = pickPort();

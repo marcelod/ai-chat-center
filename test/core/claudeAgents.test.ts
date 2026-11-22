@@ -4,7 +4,8 @@ const execFile = vi.fn();
 vi.mock('node:child_process', () => ({ execFile: (...a: unknown[]) => execFile(...a) }));
 
 describe('runClaudeAgentsJson', () => {
-  it('runs `claude agents --json` hidden, with timeout and buffer limits', async () => {
+  // Audit SEC-F4: hooks run with the project folder as cwd; on Windows a repo's claude.cmd would win.
+  it('runs `claude agents --json` hidden, from the home folder, with timeout and buffer limits', async () => {
     execFile.mockImplementation((_c: string, _a: string[], _o: object, cb: (e: null, out: string) => void) => cb(null, '[]'));
     const { runClaudeAgentsJson } = await import('../../src/core/claudeAgents.js');
     expect(await runClaudeAgentsJson()).toBe('[]');
@@ -12,6 +13,7 @@ describe('runClaudeAgentsJson', () => {
     expect(cmd).toBe('claude');
     expect(args).toEqual(['agents', '--json']);
     expect(opts).toEqual({
+      cwd: (await import('node:os')).default.homedir(),
       shell: process.platform === 'win32',
       windowsHide: true,
       timeout: 5000,

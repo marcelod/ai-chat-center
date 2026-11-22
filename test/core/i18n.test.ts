@@ -5,8 +5,8 @@ import { t, flatten } from '../../src/core/i18n.js';
 
 describe('i18n', () => {
   it('interpolates and falls back', () => {
-    expect(t('pt-BR', 'hub.started', { url: 'x' })).toContain('x');
-    expect(t('en', 'hub.started', { url: 'http://h' })).toBe('AI Chat Center is running at http://h');
+    expect(t('pt-BR', 'hook.ready', { url: 'x' })).toBe('AI Chat Center pronto: x');
+    expect(t('en', 'hook.ready', { url: 'http://h' })).toBe('AI Chat Center is ready: http://h');
     expect(t('pt-BR', 'no.such.key')).toBe('no.such.key');
   });
   it('falls back to en when key is only in en', () => {

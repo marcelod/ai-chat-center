@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { startHub } from '../../src/hub/main.js';
@@ -21,12 +23,16 @@ afterEach(async () => {
 });
 
 describe('main', () => {
-  it('main reuses existing token and writes hub.json', async () => {
+  // Audit SEC-F2: the token rotates on every hub start (a copy kept anywhere goes stale).
+  it('rotates the token on start (0600) and writes hub.json', async () => {
     await fsp.writeFile(path.join(home, 'token'), 'f'.repeat(64));
     const h = await startHub();
     try {
       expect(h).not.toBeNull();
-      expect(await fsp.readFile(path.join(home, 'token'), 'utf8')).toBe('f'.repeat(64));
+      const t = await fsp.readFile(path.join(home, 'token'), 'utf8');
+      expect(t).toMatch(/^[0-9a-f]{64}$/);
+      expect(t).not.toBe('f'.repeat(64));
+      if (process.platform !== 'win32') expect((fs.statSync(path.join(home, 'token')).mode & 0o777).toString(8)).toBe('600');
       const info = JSON.parse(await fsp.readFile(path.join(home, 'hub.json'), 'utf8'));
       expect(info.pid).toBe(process.pid);
       expect(info.port).toBeGreaterThan(0);
@@ -36,6 +42,24 @@ describe('main', () => {
       await h!.close();
     }
     await expect(fsp.stat(path.join(home, 'hub.json'))).rejects.toThrow();
+  });
+  // Audit SEC-F1: an impostor answering {ok:true} on the recorded port must not stop the real hub.
+  it('a server on the recorded port that cannot prove the token is not a live hub: start on the next port', async () => {
+    const fake = http.createServer((q, s) => s.end(JSON.stringify({ ok: true, pid: 1, version: '0.2.0' })));
+    await new Promise<void>((r) => fake.listen(0, '127.0.0.1', r));
+    const port = (fake.address() as { port: number }).port;
+    await fsp.writeFile(path.join(home, 'hub.json'), JSON.stringify({ pid: 1, port }));
+    await fsp.writeFile(path.join(home, 'token'), 'f'.repeat(64));
+    process.env.AI_CHAT_CENTER_PORT = String(port);
+    const h = await startHub();
+    try {
+      expect(h).not.toBeNull();
+      expect(h!.port).not.toBe(port);
+      expect(JSON.parse(await fsp.readFile(path.join(home, 'hub.json'), 'utf8')).port).toBe(h!.port);
+    } finally {
+      await h?.close();
+      fake.close();
+    }
   });
   it('creates a token when missing, and a second start defers to the live hub', async () => {
     const h = await startHub();
@@ -58,13 +82,11 @@ describe('main', () => {
       for (const h of hubs) await h!.close();
     }
   });
-  it('invalid token file is regenerated', async () => {
+  it('an invalid token file is replaced by a valid one', async () => {
     await fsp.writeFile(path.join(home, 'token'), 'garbage');
     const h = await startHub();
     try {
       expect(await fsp.readFile(path.join(home, 'token'), 'utf8')).toMatch(/^[0-9a-f]{64}$/);
-      const log = await fsp.readFile(path.join(home, 'logs', 'hub.log'), 'utf8');
-      expect(log).toContain('regenerated');
     } finally {
       await h!.close();
     }

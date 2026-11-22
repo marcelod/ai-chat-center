@@ -9,6 +9,7 @@ import type { ProviderChange } from '../shared/types.js';
 import { assertSessionId } from '../core/paths.js';
 import { loadConfig, saveConfig, type Lang } from '../core/config.js';
 import { VERSION } from '../core/version.js';
+import { CHALLENGE_RE, healthProof } from '../core/healthProof.js';
 
 export interface HubOptions {
   provider: Provider;
@@ -231,7 +232,15 @@ export async function createHub(opts: HubOptions): Promise<{ url: string; close(
   const handleApi = async (req: http.IncomingMessage, res: http.ServerResponse, url: URL) => {
     const p = url.pathname;
     const method = req.method ?? 'GET';
-    if (p === '/api/health' && method === 'GET') return sendJson(res, 200, { ok: true, pid: process.pid, version: VERSION });
+    if (p === '/api/health' && method === 'GET') {
+      // Unauthenticated: reveals nothing but the version. With a challenge it proves knowledge of the
+      // token, so ensureHub never hands the token URL to an impostor on this port.
+      const challenge = url.searchParams.get('challenge');
+      if (challenge === null) return sendJson(res, 200, { ok: true, version: VERSION });
+      if (!CHALLENGE_RE.test(challenge)) throw new HttpError(400, 'invalid challenge');
+      const proof = healthProof(token, challenge, process.pid, VERSION);
+      return sendJson(res, 200, { ok: true, version: VERSION, pid: process.pid, proof });
+    }
 
     const bearer = /^Bearer (.+)$/.exec(String(req.headers.authorization ?? ''))?.[1];
     const given = p === '/api/stream' ? (bearer ?? url.searchParams.get('token')) : bearer;

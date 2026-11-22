@@ -1,11 +1,9 @@
 {
-  "hub": { "started": "AI Chat Center is running at {url}" },
-  "cc": {
-    "connected": "Connected to the terminal session",
-    "disconnected": "Disconnected from the terminal session",
-    "notRegistered": "This session is not registered with AI Chat Center"
+  "hook": {
+    "ready": "AI Chat Center is ready: {url}",
+    "hubFailed": "AI Chat Center: the hub failed to start. See {log}",
+    "unknownArg": "AI Chat Center: unknown argument. Use /cc or /cc off."
   },
-  "node": { "missing": "Node.js 20 or newer is required" },
   "ui": {
     "title": "AI Chat Center",
     "search": "Search by name or folder",

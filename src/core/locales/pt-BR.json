@@ -1,11 +1,9 @@
 {
-  "hub": { "started": "O AI Chat Center está rodando em {url}" },
-  "cc": {
-    "connected": "Conectado à sessão do terminal",
-    "disconnected": "Desconectado da sessão do terminal",
-    "notRegistered": "Esta sessão não está registrada no AI Chat Center"
+  "hook": {
+    "ready": "AI Chat Center pronto: {url}",
+    "hubFailed": "AI Chat Center: o hub não iniciou. Veja {log}",
+    "unknownArg": "AI Chat Center: argumento desconhecido. Use /cc ou /cc off."
   },
-  "node": { "missing": "É necessário o Node.js 20 ou mais recente" },
   "ui": {
     "title": "AI Chat Center",
     "search": "Buscar por nome ou pasta",

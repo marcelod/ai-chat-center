@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { handleHook, isCcCommand, type HookInput } from '../../src/hooks/hook.js';
 import { ensureHub, checkHealth, hubSpawnOptions } from '../../src/hooks/ensureHub.js';
 import { VERSION } from '../../src/core/version.js';
@@ -10,6 +11,7 @@ import { register, getRegistration, markDisconnected } from '../../src/core/regi
 import { isBusy, setBusy } from '../../src/core/busy.js';
 import { getWaiting } from '../../src/core/waiting.js';
 import { paths } from '../../src/core/paths.js';
+import { saveConfig } from '../../src/core/config.js';
 
 const URL_ = 'http://127.0.0.1:7777/?token=t';
 const ctx = (parentPid = 42) => ({
@@ -59,18 +61,34 @@ describe('hook', () => {
     expect(lookups).toBe(0);
   });
 
-  it('/cc registers with a fresh key and returns url, key and a user-visible systemMessage', async () => {
+  // Audit SEC-F3 / AI-F6: the token URL goes only to the user (systemMessage), never to the model.
+  it('/cc registers with a fresh key; the url is only in the user-visible systemMessage', async () => {
     const r = await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
     const reg = await getRegistration('s1');
     expect(reg).toMatchObject({ sessionId: 's1', pid: 42, cwd: '/x', transcriptPath: '/t.jsonl' });
     expect(reg!.key).toMatch(/^[0-9a-f]{32}$/);
     expect(out(r)).toEqual({
-      systemMessage: `AI Chat Center URL: ${URL_}`,
+      systemMessage: `AI Chat Center is ready: ${URL_}`,
       hookSpecificOutput: {
         hookEventName: 'UserPromptSubmit',
-        additionalContext: `AI Chat Center URL: ${URL_}\nAI Chat Center key: ${reg!.key}`,
+        additionalContext: `AI Chat Center: connected\nAI Chat Center key: ${reg!.key}`,
       },
     });
+    expect(out(r).hookSpecificOutput.additionalContext).not.toContain('token');
+    expect(out(r).hookSpecificOutput.additionalContext).not.toContain('http');
+  });
+
+  // D7: user-visible lines follow the configured language; protocol lines stay English.
+  it('systemMessage lines are localized with the configured language', async () => {
+    await saveConfig({ language: 'pt-BR' });
+    const r = await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
+    expect(out(r).systemMessage).toBe(`AI Chat Center pronto: ${URL_}`);
+    expect(out(r).hookSpecificOutput.additionalContext).toMatch(/^AI Chat Center: connected\n/);
+    const f = await handleHook('prompt-submit', inp({ prompt: '/cc' }), { ...ctx(), ensureHub: async () => { throw new Error('x'); } });
+    expect(out(f).systemMessage).toBe(`AI Chat Center: o hub não iniciou. Veja ${path.join(paths().logDir, 'hook.log')}`);
+    const u = await handleHook('prompt-submit', inp({ prompt: '/cc foo' }), ctx());
+    expect(out(u).systemMessage).toBe('AI Chat Center: argumento desconhecido. Use /cc ou /cc off.');
+    expect(out(u).hookSpecificOutput.additionalContext).toBe('AI Chat Center: unknown argument. Use /cc or /cc off.');
   });
 
   it('/cc keeps the key while active and makes a new one on reactivation', async () => {
@@ -91,7 +109,7 @@ describe('hook', () => {
     expect(reg.pid).toBeNull();
     expect(reg.disconnectedAt).toBeUndefined();
     expect(out(r).hookSpecificOutput.additionalContext).toBe(
-      `AI Chat Center URL: ${URL_}\nAI Chat Center key: ${reg.key}\n` +
+      `AI Chat Center: connected\nAI Chat Center key: ${reg.key}\n` +
         'AI Chat Center: could not identify the Claude process; closing the terminal will be detected by the hub.',
     );
   });
@@ -200,6 +218,7 @@ describe('hook', () => {
     const fail = `AI Chat Center: the hub failed to start. See ${path.join(paths().logDir, 'hook.log')}`;
     expect(out(r).hookSpecificOutput.additionalContext).toBe(`${fail}\nAI Chat Center key: ${await keyOf()}`);
     expect(out(r).systemMessage).toBe(fail);
+    expect(r.stdout).not.toContain('token');
     expect(fs.readFileSync(path.join(paths().logDir, 'hook.log'), 'utf8')).toContain('hub did not start');
   });
 
@@ -229,26 +248,41 @@ describe('ensureHub', () => {
     fs.writeFileSync(paths().hubJson, JSON.stringify({ pid, port }));
     fs.writeFileSync(paths().token, token);
   };
-  const serve = async (body: string) => {
-    const srv = http.createServer((q, s) => s.end(body));
+  const serve = async (handler: (url: URL) => string) => {
+    const srv = http.createServer((q, s) => s.end(handler(new URL(q.url!, 'http://x'))));
     await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
     return { srv, port: (srv.address() as { port: number }).port };
   };
+  const proofOf = (token: string, challenge: string, pid: number, version: string) =>
+    crypto.createHmac('sha256', token).update(`${challenge}.${pid}.${version}`).digest('hex');
+  /** A health() that answers like a real hub holding `token`. */
+  const realHub = (token: string, pid: number, version = VERSION) => async (_port: number, challenge: string) => ({
+    ok: true as const, version, pid, proof: proofOf(token, challenge, pid, version),
+  });
 
-  it('checkHealth requires a JSON body with ok === true', async () => {
-    const bad = await serve('{}');
-    const good = await serve(JSON.stringify({ ok: true, pid: 5, version: 'v' }));
+  it('checkHealth sends a challenge and returns the proven answer, or null', async () => {
+    let seen = '';
+    const good = await serve((u) => {
+      seen = u.searchParams.get('challenge') ?? '';
+      return JSON.stringify({ ok: true, version: 'v', pid: 5, proof: 'p' });
+    });
+    const legacy = await serve(() => JSON.stringify({ ok: true, pid: 5, version: 'v' }));
     try {
-      expect(await checkHealth(bad.port)).toBeNull();
-      expect(await checkHealth(good.port)).toEqual({ ok: true, pid: 5, version: 'v' });
+      const c = 'c'.repeat(32);
+      expect(await checkHealth(good.port, c)).toEqual({ ok: true, version: 'v', pid: 5, proof: 'p' });
+      expect(seen).toBe(c);
+      expect(await checkHealth(legacy.port, c)).toBeNull();
     } finally {
-      bad.srv.close();
       good.srv.close();
+      legacy.srv.close();
     }
   });
 
-  it('returns url without spawning when health matches pid and version', async () => {
-    const { srv, port } = await serve(JSON.stringify({ ok: true, pid: 1, version: VERSION }));
+  it('returns the url without spawning when the hub proves the token on disk and has this version', async () => {
+    const { srv, port } = await serve((u) => {
+      const c = u.searchParams.get('challenge')!;
+      return JSON.stringify({ ok: true, version: VERSION, pid: 1, proof: proofOf('tok', c, 1, VERSION) });
+    });
     writeHub(port);
     let spawned = 0;
     const url = await ensureHub({ spawnHub: () => void spawned++ });
@@ -257,31 +291,39 @@ describe('ensureHub', () => {
     expect(spawned).toBe(0);
   });
 
-  it('spawns when the answering pid is not the one in hub.json', async () => {
+  // Audit SEC-F1: an impostor on the recorded port (even one echoing the right pid) gets nothing.
+  it('a hub that cannot prove the token is foreign: never trusted, its url never returned, a hub is spawned', async () => {
     writeHub(7777, 'tok', 1);
-    let spawned = 0;
-    await expect(
-      ensureHub({ spawnHub: () => void spawned++, health: async () => ({ ok: true, pid: 999, version: VERSION }), pollMs: 5, timeoutMs: 30 }),
-    ).rejects.toThrow();
-    expect(spawned).toBe(1);
+    for (const impostor of [
+      async () => ({ ok: true as const, version: VERSION, pid: 1, proof: 'f'.repeat(64) }),
+      realHub('other-token', 1),
+    ]) {
+      let spawned = 0;
+      const killed: number[] = [];
+      await expect(
+        ensureHub({ spawnHub: () => void spawned++, health: impostor, kill: (p) => void killed.push(p), pollMs: 5, timeoutMs: 30 }),
+      ).rejects.toThrow();
+      expect(spawned).toBe(1);
+      expect(killed).toEqual([]);
+    }
   });
 
-  it('a hub of another version is killed and replaced', async () => {
+  it('a proven hub of another version is killed and replaced', async () => {
     writeHub(7777, 'tok', 1234);
     const killed: number[] = [];
-    let current = { ok: true as const, pid: 1234, version: '0.0.1' };
+    let current = realHub('tok', 1234, '0.0.1');
     const url = await ensureHub({
-      health: async () => current,
+      health: (p, c) => current(p, c),
       kill: (pid) => void killed.push(pid),
       isAlive: () => false,
       spawnHub: () => {
-        writeHub(7777, 'tok', 4321);
-        current = { ok: true, pid: 4321, version: VERSION };
+        writeHub(7778, 'tok2', 4321);
+        current = realHub('tok2', 4321);
       },
       pollMs: 5,
     });
     expect(killed).toEqual([1234]);
-    expect(url).toBe('http://127.0.0.1:7777/?token=tok');
+    expect(url).toBe('http://127.0.0.1:7778/?token=tok2');
   });
 
   it('spawns when hub is down and polls until healthy', async () => {
@@ -293,7 +335,7 @@ describe('ensureHub', () => {
         writeHub(7777);
         setTimeout(() => (up = true), 30);
       },
-      health: async () => (up ? { ok: true, pid: 1, version: VERSION } : null),
+      health: async (p, c) => (up ? realHub('tok', 1)(p, c) : null),
       pollMs: 5,
     });
     expect(spawned).toBe(1);

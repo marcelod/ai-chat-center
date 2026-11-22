@@ -4,6 +4,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { createHub } from '../../src/hub/server.js';
 import { SessionDisconnectedError, type Provider } from '../../src/hub/provider.js';
 import type { ProviderChange } from '../../src/shared/types.js';
@@ -91,11 +92,25 @@ describe('auth and host checks', () => {
     expect((await req(u, '/api/sessions', { headers: { authorization: 'Bearer wrong' } })).status).toBe(401);
     expect((await req(u, '/api/sessions', { headers: { authorization: `Bearer ${'b'.repeat(64)}` } })).status).toBe(401);
   });
-  it('health needs no token', async () => {
+  it('health needs no token and reveals no pid', async () => {
     const u = await start(fakeProvider());
     const r = await req(u, '/api/health');
     expect(r.status).toBe(200);
-    expect(JSON.parse(r.body)).toEqual({ ok: true, pid: process.pid, version: VERSION });
+    expect(JSON.parse(r.body)).toEqual({ ok: true, version: VERSION });
+  });
+  // Audit SEC-F1: a squatter on the port could pass the old pid check and receive the token URL.
+  // The challenge form proves knowledge of the token: HMAC-SHA256(token, challenge.pid.version).
+  it('health with a challenge returns pid and an HMAC proof over challenge, pid and version', async () => {
+    const u = await start(fakeProvider());
+    const challenge = crypto.randomBytes(16).toString('hex');
+    const r = await req(u, `/api/health?challenge=${challenge}`);
+    expect(r.status).toBe(200);
+    const body = JSON.parse(r.body);
+    const proof = crypto.createHmac('sha256', TOKEN).update(`${challenge}.${process.pid}.${VERSION}`).digest('hex');
+    expect(body).toEqual({ ok: true, version: VERSION, pid: process.pid, proof });
+    for (const bad of ['xyz', 'a'.repeat(31), 'A'.repeat(32), 'a'.repeat(33)]) {
+      expect((await req(u, `/api/health?challenge=${bad}`)).status).toBe(400);
+    }
   });
   it('rejects foreign Origin', async () => {
     const u = await start(fakeProvider());

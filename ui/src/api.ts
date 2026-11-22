@@ -5,16 +5,31 @@ export type UiConfig = { language: Language };
 
 const TOKEN_KEY = 'acc.token';
 
-function readStored(): string | null {
+// The token is kept per browser tab (sessionStorage): it dies with the tab, and it rotates on every
+// hub start anyway. Never localStorage, which any page later served on this origin could read.
+function storage(): Storage | null {
   try {
-    return localStorage.getItem(TOKEN_KEY);
+    return window.sessionStorage;
   } catch {
     return null;
   }
 }
 
-/** Reads ?token= on first load, persists it and strips it from the URL. */
+function readStored(): string | null {
+  try {
+    return storage()?.getItem(TOKEN_KEY) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Reads ?token= on first load, keeps it for this tab and strips it from the URL. */
 function initToken(): string | null {
+  try {
+    localStorage.removeItem(TOKEN_KEY); // left by 0.1.x
+  } catch {
+    /* storage unavailable */
+  }
   let token: string | null = null;
   try {
     const url = new URL(window.location.href);
@@ -28,9 +43,9 @@ function initToken(): string | null {
   }
   if (token) {
     try {
-      localStorage.setItem(TOKEN_KEY, token);
+      storage()?.setItem(TOKEN_KEY, token);
     } catch {
-      /* storage unavailable */
+      /* storage unavailable: the token lives in memory only */
     }
     return token;
   }
@@ -55,7 +70,7 @@ export function onAuthLost(cb: () => void): () => void {
 function dropToken(): void {
   token = null;
   try {
-    localStorage.removeItem(TOKEN_KEY);
+    storage()?.removeItem(TOKEN_KEY);
   } catch {
     /* storage unavailable */
   }
