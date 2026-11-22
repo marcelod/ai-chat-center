@@ -204,9 +204,17 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
     // A hub that hub.json no longer names (another hub replaced it, or the state folder was deleted)
     // exits: it would otherwise keep running unseen, still accepting its old token.
     let replacedFired = false;
+    let ownChecking = false; // checks never overlap (a slow read under load), so onReplaced fires once
     const ownTimer = setInterval(async () => {
+      if (replacedFired || ownChecking) return;
+      ownChecking = true;
+      let cur: { pid?: number; port?: number } | null;
+      try {
+        cur = await readJson<{ pid?: number; port?: number }>(paths().hubJson);
+      } finally {
+        ownChecking = false;
+      }
       if (replacedFired) return;
-      const cur = await readJson<{ pid?: number; port?: number }>(paths().hubJson);
       if (cur?.pid === process.pid && cur?.port === port) return;
       if (!cur && fsSync.existsSync(paths().hubJson)) return; // unreadable for a moment (Windows): next time
       replacedFired = true;

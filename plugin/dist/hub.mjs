@@ -1539,9 +1539,17 @@ async function startHub(opts = {}) {
       }
     }, opts.idleCheckMs ?? 6e4);
     let replacedFired = false;
+    let ownChecking = false;
     const ownTimer = setInterval(async () => {
+      if (replacedFired || ownChecking) return;
+      ownChecking = true;
+      let cur;
+      try {
+        cur = await readJson(paths().hubJson);
+      } finally {
+        ownChecking = false;
+      }
       if (replacedFired) return;
-      const cur = await readJson(paths().hubJson);
       if (cur?.pid === process.pid && cur?.port === port) return;
       if (!cur && fsSync.existsSync(paths().hubJson)) return;
       replacedFired = true;
