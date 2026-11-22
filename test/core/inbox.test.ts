@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { enqueue, drain, peek, clearInbox, sweepClaimed } from '../../src/core/inbox.js';
+import { enqueue, drain, peek, clearInbox, sweepClaimed, countUnsigned } from '../../src/core/inbox.js';
 import { paths } from '../../src/core/paths.js';
 
 beforeEach(() => {
@@ -195,3 +195,40 @@ describe('inbox', () => {
   });
 });
 
+
+// Audit R4-M2 / S4-S2: a message is judged BEFORE its claimed file is deleted. One that fails the check
+// is never delivered and never silently lost: it is kept as <name>.msg.unsigned.
+describe('drain with a judge', () => {
+  it('delivers, keeps aside as .unsigned, or drops, as the judge says', async () => {
+    for (const t of ['ok', 'old', 'replayed']) await enqueue('s1', t);
+    const got = await drain('s1', (m) => (m.text === 'ok' ? 'deliver' : m.text === 'old' ? 'unsigned' : 'drop'));
+    expect(got.map((m) => m.text)).toEqual(['ok']);
+    const left = names();
+    expect(left).toHaveLength(1);
+    expect(left[0]).toMatch(/^\d{15}-\d{6}-.+\.msg\.unsigned$/);
+    expect(JSON.parse(fs.readFileSync(path.join(paths().inboxDir('s1'), left[0]), 'utf8')).text).toBe('old');
+    expect(await countUnsigned('s1')).toBe(1);
+    expect(await drain('s1', () => 'deliver')).toEqual([]); // never listed again
+    await clearInbox('s1');
+    expect(names()).toEqual([]);
+    expect(await countUnsigned('nobody')).toBe(0);
+  });
+  it('the delivered messages are recorded before their claimed files are deleted', async () => {
+    await enqueue('s1', 'a');
+    let seenFiles: string[] = [];
+    const got = await drain('s1', () => 'deliver', async (ms) => {
+      expect(ms.map((m) => m.text)).toEqual(['a']);
+      seenFiles = names();
+    });
+    expect(got.map((m) => m.text)).toEqual(['a']);
+    expect(seenFiles.some((n) => n.includes('.msg.claimed-'))).toBe(true);
+    expect(names()).toEqual([]);
+  });
+  it('a failing record still delivers (the messages are claimed)', async () => {
+    await enqueue('s1', 'a');
+    const got = await drain('s1', () => 'deliver', async () => {
+      throw new Error('disk full');
+    });
+    expect(got.map((m) => m.text)).toEqual(['a']);
+  });
+});

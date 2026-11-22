@@ -84,6 +84,7 @@ import fs2 from "node:fs/promises";
 import path3 from "node:path";
 var isRace = (e) => ["ENOENT", "EPERM", "EBUSY"].includes(e.code ?? "");
 var CLAIM_MARK = ".claim";
+var UNSIGNED = ".unsigned";
 async function clearInbox(sid) {
   const dir = paths().inboxDir(sid);
   let names;
@@ -94,7 +95,7 @@ async function clearInbox(sid) {
     throw e;
   }
   for (const n of names) {
-    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`)) continue;
+    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`) && !n.endsWith(`.msg${UNSIGNED}`)) continue;
     try {
       await withFsRetry(() => fs2.rm(path3.join(dir, n), { force: true }));
     } catch (e) {
@@ -304,28 +305,47 @@ function proofMatches(token, challenge, port, answer) {
 
 // src/hooks/ensureHub.ts
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-function checkHealth(port, challenge) {
+function get(port, p, headers = {}) {
   return new Promise((resolve) => {
-    const req = http.get({ host: "127.0.0.1", port, path: `/api/health?challenge=${challenge}`, timeout: 500 }, (res) => {
+    const req = http.get({ host: "127.0.0.1", port, path: p, headers, timeout: 500 }, (res) => {
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (c) => {
         if (body.length < 4096) body += c;
       });
-      res.on("end", () => {
-        try {
-          const j = JSON.parse(body);
-          const ok = res.statusCode === 200 && j.ok === true && typeof j.pid === "number" && typeof j.version === "string" && typeof j.proof === "string";
-          resolve(ok ? { ok: true, version: j.version, pid: j.pid, proof: j.proof } : null);
-        } catch {
-          resolve(null);
-        }
-      });
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
       res.on("error", () => resolve(null));
     });
     req.on("timeout", () => req.destroy());
-    req.on("error", () => resolve(null));
+    req.on("error", (e) => resolve(e.code === "ECONNREFUSED" ? "refused" : null));
   });
+}
+var parse = (body) => {
+  try {
+    const j = JSON.parse(body);
+    return j && typeof j === "object" ? j : null;
+  } catch {
+    return null;
+  }
+};
+async function checkHealth(port, challenge) {
+  const r = await get(port, `/api/health?challenge=${challenge}`);
+  if (r === "refused" || r === null) return r;
+  const j = parse(r.body);
+  if (r.status !== 200 || !j || j.ok !== true || typeof j.version !== "string") return null;
+  if (typeof j.pid === "number" && typeof j.proof === "string") return { ok: true, version: j.version, pid: j.pid, proof: j.proof };
+  return "unproven";
+}
+async function identifyHub(port) {
+  const r = await get(port, "/api/health");
+  if (r === "refused" || r === null || r.status !== 200) return null;
+  const j = parse(r.body);
+  if (!j || j.ok !== true || typeof j.version !== "string") return null;
+  return typeof j.pid === "number" ? { ok: true, version: j.version, pid: j.pid } : { ok: true, version: j.version };
+}
+async function hubAcceptsToken(port, token) {
+  const r = await get(port, "/api/config", { authorization: `Bearer ${token}` });
+  return r !== "refused" && r !== null && r.status === 200;
 }
 function hubSpawnOptions() {
   return { detached: true, stdio: "ignore", windowsHide: true, cwd: os2.homedir() };
@@ -346,9 +366,9 @@ function readHub() {
 }
 var urlOf = (h) => `http://127.0.0.1:${h.port}/#token=${h.token}`;
 function compareVersions(a, b) {
-  const parse = (v) => /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(v.trim());
-  const x = parse(a);
-  const y = parse(b);
+  const parse2 = (v) => /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(v.trim());
+  const x = parse2(a);
+  const y = parse2(b);
   if (!x || !y) return NaN;
   for (let i = 1; i <= 3; i++) {
     const d = Number(x[i]) - Number(y[i]);
@@ -361,6 +381,8 @@ function compareVersions(a, b) {
 }
 async function ensureHub(opts = {}) {
   const health = opts.health ?? checkHealth;
+  const identify = opts.identify ?? identifyHub;
+  const tokenAccepted = opts.tokenAccepted ?? hubAcceptsToken;
   const isAlive2 = opts.isAlive ?? isAlive;
   const kill = opts.kill ?? ((pid) => {
     try {
@@ -374,12 +396,18 @@ async function ensureHub(opts = {}) {
   const check = async (h) => {
     const challenge = newChallenge();
     const r = await health(h.port, challenge);
-    if (!r) return "silent";
-    return proofMatches(h.token, challenge, h.port, r) ? r : null;
+    if (r === null) return "silent";
+    if (r === "refused" || r === "unproven") return r;
+    return proofMatches(h.token, challenge, h.port, r) ? r : "foreign";
   };
   const proven = async (h) => {
     const r = await check(h);
-    return r === "silent" ? null : r;
+    return typeof r === "string" ? null : r;
+  };
+  const stop = async (pid) => {
+    kill(pid);
+    const until = Date.now() + 3e3;
+    while (isAlive2(pid) && Date.now() < until) await sleep(50);
   };
   const hub = readHub();
   if (hub) {
@@ -389,12 +417,20 @@ async function ensureHub(opts = {}) {
       await sleep(Math.max(pollMs, 50));
       r = await check(hub);
     }
-    const h = r === "silent" ? null : r;
-    if (h) {
-      if (!(compareVersions(h.version, VERSION) < 0)) return urlOf(hub);
-      kill(h.pid);
-      const until2 = Date.now() + 3e3;
-      while (isAlive2(h.pid) && Date.now() < until2) await sleep(50);
+    if (typeof r !== "string") {
+      if (!(compareVersions(r.version, VERSION) < 0)) return urlOf(hub);
+      await stop(r.pid);
+    } else if ((r === "unproven" || r === "foreign") && hub.pid !== null && isAlive2(hub.pid)) {
+      const id = await identify(hub.port);
+      if (id && compareVersions(id.version, VERSION) < 0) {
+        const pidMatches = id.pid === void 0 || id.pid === hub.pid;
+        if (pidMatches && await tokenAccepted(hub.port, hub.token)) await stop(hub.pid);
+        else {
+          opts.notice?.(
+            `AI Chat Center: an older AI Chat Center hub (version ${id.version.slice(0, 32)}) seems to still run on port ${hub.port}, but it could not be verified, so it was not stopped. Restart the computer (or stop that process) so that app messages are not sent through it: they would not be delivered.`
+          );
+        }
+      }
     }
   }
   (opts.spawnHub ?? defaultSpawnHub)();
@@ -482,6 +518,7 @@ var en_default = {
       waitingInputBanner: "Claude is waiting for your answer in the terminal",
       waitingBannerHint: "Approving from the app comes in a later version.",
       deliveryStalled: "Messages are waiting, but delivery to this session is paused: send any prompt in the terminal to resume delivery.",
+      undeliveredUnsigned: "A message from an older version of AI Chat Center was not delivered. Send it again from here.",
       messages: "Messages",
       image: "[image]",
       images: "[{n} images]",
@@ -576,6 +613,7 @@ var pt_BR_default = {
       waitingInputBanner: "O Claude est\xE1 esperando sua resposta no terminal",
       waitingBannerHint: "Aprovar pelo app chega em uma vers\xE3o futura.",
       deliveryStalled: "H\xE1 mensagens esperando, mas a entrega para esta sess\xE3o est\xE1 pausada: envie qualquer mensagem no terminal para retomar a entrega.",
+      undeliveredUnsigned: "Uma mensagem de uma vers\xE3o anterior do AI Chat Center n\xE3o foi entregue. Envie-a de novo por aqui.",
       messages: "Mensagens",
       image: "[imagem]",
       images: "[{n} imagens]",
@@ -705,8 +743,13 @@ async function connect(input, resolve, ctx) {
   const { language } = await loadConfig();
   let status;
   let shown;
+  const notices = [];
+  const notice = (m) => {
+    notices.push(m);
+    logError(m);
+  };
   try {
-    shown = t(language, "hook.ready", { url: await ctx.ensureHub() });
+    shown = t(language, "hook.ready", { url: await ctx.ensureHub(notice) });
     status = CONNECTED;
   } catch (e) {
     logError(e);
@@ -714,9 +757,9 @@ async function connect(input, resolve, ctx) {
     status = `AI Chat Center: the hub failed to start. See ${log}`;
     shown = t(language, "hook.hubFailed", { log });
   }
-  const lines = [status, `AI Chat Center key: ${reg.key}`];
+  const lines = [status, `AI Chat Center key: ${reg.key}`, ...notices];
   if (pid === null) lines.push(PID_UNKNOWN);
-  return output(lines.join("\n"), shown);
+  return output(lines.join("\n"), [shown, ...notices].join("\n"));
 }
 async function handleHook(event, input, ctx) {
   const nothing = { exitCode: 0 };
@@ -773,7 +816,7 @@ async function main() {
     const event = process.argv[2];
     if (event !== "prompt-submit" && event !== "notification") return;
     const input = JSON.parse(await readStdin());
-    result = await handleHook(event, input, { ensureHub: () => ensureHub() });
+    result = await handleHook(event, input, { ensureHub: (notice) => ensureHub({ notice }) });
   } catch (e) {
     logError(e);
   }

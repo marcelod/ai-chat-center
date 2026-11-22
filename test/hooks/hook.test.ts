@@ -234,6 +234,17 @@ describe('hook', () => {
     expect(r?.disconnectReason).toBeUndefined();
   });
 
+  // Audit R4-M2: an older hub that could not be verified is not stopped; /cc says so to the user.
+  it('a notice from ensureHub is shown to the user and added to the status lines', async () => {
+    const r = await handleHook('prompt-submit', inp({ prompt: '/cc' }), {
+      ensureHub: async (notice?: (m: string) => void) => (notice?.('AI Chat Center: an older AI Chat Center hub could not be verified'), URL_),
+      resolvePid: async () => 42,
+    });
+    const o = out(r);
+    expect(o.hookSpecificOutput.additionalContext.split('\n')).toContain('AI Chat Center: an older AI Chat Center hub could not be verified');
+    expect(o.systemMessage).toContain('could not be verified');
+    expect(fs.readFileSync(path.join(paths().logDir, 'hook.log'), 'utf8')).toContain('could not be verified');
+  });
   it('notification ignored for disconnected session', async () => {
     await register({ sessionId: 's1', transcriptPath: '/t', cwd: '/x', pid: 42 });
     await handleHook('prompt-submit', inp({ prompt: '/cc off' }), ctx());
@@ -271,7 +282,7 @@ describe('ensureHub', () => {
       const c = 'c'.repeat(32);
       expect(await checkHealth(good.port, c)).toEqual({ ok: true, version: 'v', pid: 5, proof: 'p' });
       expect(seen).toBe(c);
-      expect(await checkHealth(legacy.port, c)).toBeNull();
+      expect(await checkHealth(legacy.port, c)).toBe('unproven');
     } finally {
       good.srv.close();
       legacy.srv.close();
@@ -301,7 +312,7 @@ describe('ensureHub', () => {
       let spawned = 0;
       const killed: number[] = [];
       await expect(
-        ensureHub({ spawnHub: () => void spawned++, health: impostor, kill: (p) => void killed.push(p), pollMs: 5, timeoutMs: 30 }),
+        ensureHub({ spawnHub: () => void spawned++, health: impostor, identify: async () => null, kill: (p) => void killed.push(p), pollMs: 5, timeoutMs: 30 }),
       ).rejects.toThrow();
       expect(spawned).toBe(1);
       expect(killed).toEqual([]);
@@ -415,6 +426,7 @@ describe('ensureHub', () => {
     await expect(
       ensureHub({
         health: async () => (calls++, { ok: true as const, version: VERSION, pid: 777, proof: 'f'.repeat(64) }),
+        identify: async () => null,
         isAlive: () => true,
         spawnHub: () => void spawned++,
         pollMs: 5,
@@ -430,6 +442,126 @@ describe('ensureHub', () => {
     await expect(
       ensureHub({ spawnHub: () => {}, health: async () => null, pollMs: 5, timeoutMs: 50 }),
     ).rejects.toThrow();
+  });
+
+  // Audit R4-M2 / R4-L2: older hubs of our own that cannot prove the token (0.1.0 answers a version-only
+  // health), a proven 0.2.1 hub, and the refused case. Real HTTP servers, the default checkHealth.
+  describe('older hubs and the upgrade path', () => {
+    const TOK = 'a'.repeat(64);
+    /** A fake hub: `/api/health` as `version` answers it, and `/api/config` behind the bearer `token`. */
+    const fakeHub = async (version: string, pid: number, token: string, proofs: boolean) => {
+      const srv = http.createServer((q, s) => {
+        const u = new URL(q.url!, 'http://x');
+        if (u.pathname === '/api/health') {
+          const c = u.searchParams.get('challenge');
+          const port = (srv.address() as { port: number }).port;
+          return void s.end(JSON.stringify(proofs && c ? { ok: true, version, pid, proof: proofOf(token, c, port, pid, version) } : proofs ? { ok: true, version } : { ok: true, pid, version }));
+        }
+        if (q.headers.authorization !== `Bearer ${token}`) {
+          s.writeHead(401);
+          return void s.end('{"error":"unauthorized"}');
+        }
+        s.end('{"language":"en"}');
+      });
+      await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+      return { srv, port: (srv.address() as { port: number }).port };
+    };
+    /** spawnHub: starts a current hub (tok2, pid 9999) and records it in hub.json. */
+    const spawnCurrent = (servers: http.Server[]) => async () => {
+      const h = await fakeHub(VERSION, 9999, 'b'.repeat(64), true);
+      servers.push(h.srv);
+      writeHub(h.port, 'b'.repeat(64), 9999);
+    };
+    const run = async (o: { version: string; pid: number; token?: string; proofs: boolean; alive?: (pid: number) => boolean }) => {
+      const old = await fakeHub(o.version, o.pid, o.token ?? TOK, o.proofs);
+      const servers = [old.srv];
+      writeHub(old.port, TOK, 4242);
+      const killed: number[] = [];
+      const notices: string[] = [];
+      let spawned = 0;
+      const spawn = spawnCurrent(servers);
+      const t = Date.now();
+      try {
+        const url = await ensureHub({
+          kill: (pid) => void killed.push(pid),
+          isAlive: o.alive ?? ((pid) => pid === 4242 && killed.length === 0),
+          spawnHub: () => void (spawned++, spawn()),
+          notice: (m) => void notices.push(m),
+          pollMs: 10,
+          timeoutMs: 3000,
+          stalledWaitMs: 5000,
+        });
+        return { url, killed, notices, spawned, ms: Date.now() - t, oldPort: old.port };
+      } finally {
+        for (const s of servers) s.close();
+      }
+    };
+
+    it('checkHealth tells a refused connection and a version-only answer apart from a timeout', async () => {
+      const legacy = await serve(() => JSON.stringify({ ok: true, pid: 5, version: '0.1.0' }));
+      const free = await serve(() => '');
+      const freePort = free.port;
+      free.srv.close();
+      try {
+        const c = 'c'.repeat(32);
+        expect(await checkHealth(legacy.port, c)).toBe('unproven');
+        expect(await checkHealth(freePort, c)).toBe('refused');
+      } finally {
+        legacy.srv.close();
+      }
+    });
+    it('0.1.0 (version-only health, pid and token match): killed, then replaced at once', async () => {
+      const r = await run({ version: '0.1.0', pid: 4242, proofs: false });
+      expect(r.killed).toEqual([4242]);
+      expect(r.spawned).toBe(1);
+      expect(r.notices).toEqual([]);
+      expect(r.url).toMatch(/#token=b{64}$/);
+      expect(r.ms).toBeLessThan(2500); // no 5 s "stalled hub" wait for an answer that has no proof
+    });
+    it('0.2.1 (the same proof format, older version): killed and replaced', async () => {
+      const r = await run({ version: '0.2.1', pid: 4242, proofs: true });
+      expect(r.killed).toEqual([4242]);
+      expect(r.url).toMatch(/#token=b{64}$/);
+    });
+    it('an older-looking hub that does not accept the token on disk is never killed: the user is told', async () => {
+      const r = await run({ version: '0.1.0', pid: 4242, token: 'c'.repeat(64), proofs: false });
+      expect(r.killed).toEqual([]);
+      expect(r.spawned).toBe(1);
+      expect(r.notices).toHaveLength(1);
+      expect(r.notices[0]).toMatch(/older AI Chat Center hub/);
+      expect(r.notices[0]).toMatch(/restart/i);
+    });
+    it('an older-looking hub whose pid is not the one in hub.json is never killed: the user is told', async () => {
+      const r = await run({ version: '0.1.0', pid: 5555, proofs: false });
+      expect(r.killed).toEqual([]);
+      expect(r.notices).toHaveLength(1);
+    });
+    it('a recorded pid that is dead: nothing is killed, no notice', async () => {
+      const r = await run({ version: '0.1.0', pid: 4242, proofs: false, alive: () => false });
+      expect(r.killed).toEqual([]);
+      expect(r.notices).toEqual([]);
+      expect(r.spawned).toBe(1);
+    });
+    it('a foreign answer (not an AI Chat Center version): nothing is killed, no notice', async () => {
+      const r = await run({ version: 'nginx', pid: 4242, proofs: false });
+      expect(r.killed).toEqual([]);
+      expect(r.notices).toEqual([]);
+    });
+    it('a refused connection is not waited for, even when the recorded pid is alive (pid reuse)', async () => {
+      const free = await serve(() => '');
+      const port = free.port;
+      free.srv.close();
+      writeHub(port, TOK, 4242);
+      const servers: http.Server[] = [];
+      const spawn = spawnCurrent(servers);
+      const t = Date.now();
+      try {
+        await ensureHub({ isAlive: () => true, kill: () => {}, spawnHub: () => void spawn(), pollMs: 10, timeoutMs: 3000, stalledWaitMs: 5000 });
+        expect(Date.now() - t).toBeLessThan(2500);
+      } finally {
+        for (const s of servers) s.close();
+      }
+    });
   });
 
   it('starts the hub detached, hidden, from the home directory (not the session folder)', () => {

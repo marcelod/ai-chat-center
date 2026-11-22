@@ -8,6 +8,7 @@ import type { LiveSession } from '../../src/shared/types.js';
 import { register, getRegistration } from '../../src/core/registry.js';
 import { setWaiting } from '../../src/core/waiting.js';
 import { peek } from '../../src/core/inbox.js';
+import { paths } from '../../src/core/paths.js';
 
 let dir: string;
 let transcript: string;
@@ -396,6 +397,20 @@ describe('provider: delivery stalled', () => {
     const { enqueue } = await import('../../src/core/inbox.js');
     await enqueue('s1', 'fresh');
     expect((await p.listSessions()).connected[0].deliveryStalled).toBeUndefined();
+  });
+});
+
+describe('provider: messages kept aside as unsigned (audit R4-M2)', () => {
+  it('counts them for an active session, and a change shows up as a sessions change', async () => {
+    await reg();
+    const p = new ClaudeCodeProvider(async () => [live()]);
+    expect((await p.listSessions()).connected[0].undeliveredUnsigned).toBeUndefined();
+    await p.poll();
+    const dir = paths().inboxDir('s1');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, '000000000000001-000001-x.msg.unsigned'), '{}');
+    expect((await p.listSessions()).connected[0].undeliveredUnsigned).toBe(1);
+    expect((await p.poll()).some((c) => c.type === 'sessions')).toBe(true);
   });
 });
 

@@ -44,7 +44,8 @@ export type HookInput = {
   message?: string;
 };
 export interface HookContext {
-  ensureHub: () => Promise<string>;
+  /** Returns the hub URL; `notice` receives lines for the user (an older hub that could not be stopped). */
+  ensureHub: (notice?: (msg: string) => void) => Promise<string>;
   /** Resolves the claude process pid of a session, or null. Default: resolveClaudePid. */
   resolvePid?: (sessionId: string) => Promise<number | null>;
 }
@@ -102,8 +103,13 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
   // line: the token must not end up in the model context or be repeated in its reply.
   let status: string;
   let shown: string;
+  const notices: string[] = [];
+  const notice = (m: string) => {
+    notices.push(m);
+    logError(m);
+  };
   try {
-    shown = t(language, 'hook.ready', { url: await ctx.ensureHub() });
+    shown = t(language, 'hook.ready', { url: await ctx.ensureHub(notice) });
     status = CONNECTED;
   } catch (e) {
     // Keep the registration: the hub will show the session once it is up.
@@ -112,9 +118,9 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
     status = `AI Chat Center: the hub failed to start. See ${log}`;
     shown = t(language, 'hook.hubFailed', { log });
   }
-  const lines = [status, `AI Chat Center key: ${reg.key}`];
+  const lines = [status, `AI Chat Center key: ${reg.key}`, ...notices];
   if (pid === null) lines.push(PID_UNKNOWN);
-  return output(lines.join('\n'), shown);
+  return output(lines.join('\n'), [shown, ...notices].join('\n'));
 }
 
 export async function handleHook(event: HookEvent, input: HookInput, ctx: HookContext): Promise<HookResult> {
@@ -179,7 +185,7 @@ export async function main(): Promise<void> {
     const event = process.argv[2] as HookEvent;
     if (event !== 'prompt-submit' && event !== 'notification') return;
     const input = JSON.parse(await readStdin()) as HookInput;
-    result = await handleHook(event, input, { ensureHub: () => ensureHub() });
+    result = await handleHook(event, input, { ensureHub: (notice) => ensureHub({ notice }) });
   } catch (e) {
     logError(e);
   }

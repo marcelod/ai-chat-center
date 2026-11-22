@@ -319,12 +319,17 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
           // a turn is running
         } else {
           if (await lockLost()) return NOTHING; // again, right before draining
-          const claimed = await drain(sid);
-          // Only what the hub signed: anything else was written into the inbox by something else.
-          const drained = [];
-          for (const m of claimed) if (await verifyMessage(m)) drained.push(m);
-          if (drained.length < claimed.length) {
-            logError(`dropped ${claimed.length - drained.length} unsigned or invalid message(s) in the inbox of session ${sid}`);
+          // Only what the hub signed is delivered. Anything else (written by an older hub that did not sign,
+          // or by something else) is kept aside as .unsigned, judged before anything is deleted; the app
+          // tells the user it was not delivered.
+          let unsigned = 0;
+          const drained = await drain(sid, async (m) => {
+            if (await verifyMessage(m)) return 'deliver';
+            unsigned++;
+            return 'unsigned';
+          });
+          if (unsigned > 0) {
+            logError(`kept ${unsigned} unsigned or invalid message(s) aside (not delivered) in the inbox of session ${sid}`);
           }
           let msgs = drained;
           if (discardOld) {

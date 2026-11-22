@@ -139,16 +139,18 @@ async function removeMarker(marker) {
   } catch {
   }
 }
-async function drain(sid) {
+var UNSIGNED = ".unsigned";
+async function drain(sid, judge = () => "deliver", record) {
   const out = [];
+  const toDelete = [];
   for (const f of await list(sid)) {
     const claimed = `${f}.claimed-${Date.now()}-${crypto3.randomUUID()}`;
     const marker = `${f}${CLAIM_MARK}`;
     try {
-      await fs3.writeFile(marker, "", { flag: "wx", mode: FILE_MODE });
+      await fs3.writeFile(marker, String(process.pid), { flag: "wx", mode: FILE_MODE });
     } catch (e) {
       if (isRace(e) || ["EEXIST", "EACCES"].includes(e.code ?? "")) continue;
-      if (out.length > 0) break;
+      if (out.length > 0 || toDelete.length > 0) break;
       throw e;
     }
     try {
@@ -156,7 +158,7 @@ async function drain(sid) {
     } catch (e) {
       await removeMarker(marker);
       if (isRace(e)) continue;
-      if (out.length > 0) break;
+      if (out.length > 0 || toDelete.length > 0) break;
       throw e;
     }
     await removeMarker(marker);
@@ -168,7 +170,20 @@ async function drain(sid) {
       }
       continue;
     }
-    if (m !== "malformed") out.push(m);
+    const verdict = m === "malformed" ? "drop" : await judge(m);
+    if (verdict === "unsigned") {
+      try {
+        await withFsRetry(() => fs3.rename(claimed, `${f}${UNSIGNED}`));
+      } catch {
+      }
+      continue;
+    }
+    if (verdict === "deliver") out.push(m);
+    toDelete.push(claimed);
+  }
+  if (record && out.length > 0) await record(out).catch(() => {
+  });
+  for (const claimed of toDelete) {
     try {
       await withFsRetry(() => fs3.rm(claimed, { force: true }));
     } catch {
@@ -219,7 +234,7 @@ async function clearInbox(sid) {
     throw e;
   }
   for (const n of names) {
-    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`)) continue;
+    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`) && !n.endsWith(`.msg${UNSIGNED}`)) continue;
     try {
       await withFsRetry(() => fs3.rm(path3.join(dir, n), { force: true }));
     } catch (e) {
@@ -716,11 +731,14 @@ async function runWaiter(event, input, opts = {}) {
         } else if (await isBusy(sid) && !await dropStaleBusy()) {
         } else {
           if (await lockLost()) return NOTHING;
-          const claimed = await drain(sid);
-          const drained = [];
-          for (const m of claimed) if (await verifyMessage(m)) drained.push(m);
-          if (drained.length < claimed.length) {
-            logError(`dropped ${claimed.length - drained.length} unsigned or invalid message(s) in the inbox of session ${sid}`);
+          let unsigned = 0;
+          const drained = await drain(sid, async (m) => {
+            if (await verifyMessage(m)) return "deliver";
+            unsigned++;
+            return "unsigned";
+          });
+          if (unsigned > 0) {
+            logError(`kept ${unsigned} unsigned or invalid message(s) aside (not delivered) in the inbox of session ${sid}`);
           }
           let msgs = drained;
           if (discardOld) {

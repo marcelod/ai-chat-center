@@ -95,30 +95,44 @@ async function removeMarker(marker: string): Promise<void> {
   }
 }
 
+/** What a drain does with a claimed message (see drain). */
+export type Verdict = 'deliver' | 'unsigned' | 'drop';
+/** Suffix of a message that failed its check: kept aside, never delivered (audit R4-M2). */
+export const UNSIGNED = '.unsigned';
+
 /**
  * Takes every queued message, in name order. Each file is first CLAIMED with an atomic rename to a
- * unique name; only the drain whose rename succeeds reads, deletes and returns it. A failed rename
- * (ENOENT, or EPERM/EBUSY on Windows) means another drain claimed it. Plain read-then-unlink let two
- * drains both read a file before either deleted it (double delivery on macOS and Windows).
+ * unique name; only the drain whose rename succeeds reads and judges it. A failed rename (ENOENT, or
+ * EPERM/EBUSY on Windows) means another drain claimed it. Plain read-then-unlink let two drains both
+ * read a file before either deleted it (double delivery on macOS and Windows).
  *
- * Once claimed and read, a message IS returned: deleting the claimed file is best effort (a leftover is
- * never listed again, and sweepClaimed removes it later). A claimed file that cannot be read after 3
- * retries is renamed back to its .msg name for the next pass; it is never dropped silently. A malformed
- * message is dropped (it would fail forever).
+ * `judge` decides, BEFORE anything is deleted: 'deliver' returns it; 'unsigned' keeps it aside as
+ * `<name>.msg.unsigned` (never delivered, never silently lost: the app says so); 'drop' deletes it (a
+ * replay, say). `record` sees the delivered messages before their claimed files are deleted (an error
+ * there is the caller's to log: the messages are still returned).
+ *
+ * Deleting a claimed file is best effort (a leftover is never listed again; sweepClaimed handles it). A
+ * claimed file that cannot be read after 3 retries is renamed back to its .msg name for the next pass; it
+ * is never dropped silently. A malformed message is dropped (it would fail forever).
  */
-export async function drain(sid: string): Promise<InboxMessage[]> {
+export async function drain(
+  sid: string,
+  judge: (m: InboxMessage) => Verdict | Promise<Verdict> = () => 'deliver',
+  record?: (delivered: InboxMessage[]) => Promise<void>,
+): Promise<InboxMessage[]> {
   const out: InboxMessage[] = [];
+  const toDelete: string[] = [];
   for (const f of await list(sid)) {
     const claimed = `${f}.claimed-${Date.now()}-${crypto.randomUUID()}`;
     // Exclusive marker first (O_EXCL is atomic everywhere): Windows renames through an open handle, so two
     // drains renaming the same file could both succeed (the second moving the first one's claimed file)
-    // and both read it. Only the marker's holder renames.
+    // and both read it. Only the marker's holder renames. It holds this process's pid (see sweepClaimed).
     const marker = `${f}${CLAIM_MARK}`;
     try {
-      await fs.writeFile(marker, '', { flag: 'wx', mode: FILE_MODE });
+      await fs.writeFile(marker, String(process.pid), { flag: 'wx', mode: FILE_MODE });
     } catch (e) {
       if (isRace(e) || ['EEXIST', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '')) continue; // held
-      if (out.length > 0) break;
+      if (out.length > 0 || toDelete.length > 0) break;
       throw e;
     }
     try {
@@ -127,7 +141,7 @@ export async function drain(sid: string): Promise<InboxMessage[]> {
     } catch (e) {
       await removeMarker(marker);
       if (isRace(e)) continue; // someone else took it
-      if (out.length > 0) break; // deliver what is already claimed; the rest waits for the next pass
+      if (out.length > 0 || toDelete.length > 0) break; // deliver what is already claimed; the rest waits
       throw e;
     }
     await removeMarker(marker);
@@ -140,7 +154,20 @@ export async function drain(sid: string): Promise<InboxMessage[]> {
       }
       continue;
     }
-    if (m !== 'malformed') out.push(m);
+    const verdict: Verdict = m === 'malformed' ? 'drop' : await judge(m);
+    if (verdict === 'unsigned') {
+      try {
+        await withFsRetry(() => fs.rename(claimed, `${f}${UNSIGNED}`));
+      } catch {
+        /* left claimed: sweepClaimed puts it back for another judgment */
+      }
+      continue;
+    }
+    if (verdict === 'deliver') out.push(m as InboxMessage);
+    toDelete.push(claimed);
+  }
+  if (record && out.length > 0) await record(out).catch(() => {});
+  for (const claimed of toDelete) {
     try {
       await withFsRetry(() => fs.rm(claimed, { force: true }));
     } catch {
@@ -148,6 +175,15 @@ export async function drain(sid: string): Promise<InboxMessage[]> {
     }
   }
   return out;
+}
+
+/** How many messages of this session were kept aside as unsigned (see drain). */
+export async function countUnsigned(sid: string): Promise<number> {
+  try {
+    return (await fs.readdir(paths().inboxDir(sid))).filter((n) => n.endsWith(`.msg${UNSIGNED}`)).length;
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -205,7 +241,7 @@ export async function clearInbox(sid: string): Promise<void> {
     throw e;
   }
   for (const n of names) {
-    if (!n.endsWith('.msg') && !n.endsWith('.tmp') && !n.includes('.msg.claimed-') && !n.endsWith(`.msg${CLAIM_MARK}`)) continue;
+    if (!n.endsWith('.msg') && !n.endsWith('.tmp') && !n.includes('.msg.claimed-') && !n.endsWith(`.msg${CLAIM_MARK}`) && !n.endsWith(`.msg${UNSIGNED}`)) continue;
     try {
       await withFsRetry(() => fs.rm(path.join(dir, n), { force: true }));
     } catch (e) {

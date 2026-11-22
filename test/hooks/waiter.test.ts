@@ -560,7 +560,10 @@ describe('waiter: only messages signed by the hub', () => {
     const r = await wait('stop');
     expect(unwrapMessages(r.stderr).map((x) => x.text)).toEqual(['real']);
     expect(r.stderr).not.toContain('rm -rf');
-    expect(log()).toMatch(/dropped 2 unsigned or invalid message/);
+    expect(log()).toMatch(/kept 2 unsigned or invalid message\(s\) aside/);
+    // Audit R4-M2: never silently lost: kept aside, and never delivered by a later waiter either.
+    expect(fs.readdirSync(dir).filter((n) => n.endsWith('.msg.unsigned'))).toHaveLength(2);
+    expect(await wait('stop', {}, { deadlineMs: 100 })).toEqual({ exitCode: 0, stderr: '' });
   });
   it('only invalid messages: nothing is delivered and the waiter keeps waiting', async () => {
     await reg('s1');

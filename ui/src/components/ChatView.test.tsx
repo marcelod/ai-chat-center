@@ -172,6 +172,16 @@ describe('ChatView', () => {
     setup({ session: session({ state: 'idle', deliveryStalled: true, pendingAppMessageIds: ['p1'] }) });
     expect(screen.getByTestId('delivery-stalled').textContent).toContain('send any prompt in the terminal to resume delivery');
   });
+  // Audit R4-M2: a message sent through an older version's hub fails the signature check: kept aside, and
+  // the app says it was not delivered.
+  it('a message kept aside as unsigned is reported as not delivered', () => {
+    setup({ session: session({ state: 'idle', undeliveredUnsigned: 1 }) });
+    expect(screen.getByTestId('undelivered-unsigned').textContent).toContain('older version of AI Chat Center was not delivered');
+  });
+  it('no unsigned notice by default', () => {
+    setup({ session: session({ state: 'idle' }) });
+    expect(screen.queryByTestId('undelivered-unsigned')).not.toBeInTheDocument();
+  });
   it('no stall hint by default', () => {
     setup({ session: session({ state: 'idle' }) });
     expect(screen.queryByText(/resume delivery/)).not.toBeInTheDocument();

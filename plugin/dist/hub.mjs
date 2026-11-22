@@ -191,6 +191,14 @@ async function peek(sid) {
   return out;
 }
 var CLAIM_MARK = ".claim";
+var UNSIGNED = ".unsigned";
+async function countUnsigned(sid) {
+  try {
+    return (await fs3.readdir(paths().inboxDir(sid))).filter((n) => n.endsWith(`.msg${UNSIGNED}`)).length;
+  } catch {
+    return 0;
+  }
+}
 async function clearInbox(sid) {
   const dir = paths().inboxDir(sid);
   let names;
@@ -201,7 +209,7 @@ async function clearInbox(sid) {
     throw e;
   }
   for (const n of names) {
-    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`)) continue;
+    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`) && !n.endsWith(`.msg${UNSIGNED}`)) continue;
     try {
       await withFsRetry(() => fs3.rm(path3.join(dir, n), { force: true }));
     } catch (e) {
@@ -974,6 +982,8 @@ var ClaudeCodeProvider = class {
       };
       if (waitingKind) view.waitingKind = waitingKind;
       if (state === "idle" && await this.deliveryStalled(sid, queued)) view.deliveryStalled = true;
+      const unsigned = disconnected ? 0 : await countUnsigned(sid);
+      if (unsigned > 0) view.undeliveredUnsigned = unsigned;
       if (lastEvent) view.lastEvent = lastEvent;
       connected.push(view);
     }
@@ -1036,7 +1046,8 @@ var ClaudeCodeProvider = class {
         s.name,
         s.lastEvent?.id ?? null,
         s.pendingAppMessageIds,
-        s.deliveryStalled ?? false
+        s.deliveryStalled ?? false,
+        s.undeliveredUnsigned ?? 0
       ])
     });
     if (signature !== this.lastSignature) {

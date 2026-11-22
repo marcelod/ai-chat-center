@@ -62,6 +62,7 @@
       "waitingInputBanner": "O Claude está esperando sua resposta no terminal",
       "waitingBannerHint": "Aprovar pelo app chega em uma versão futura.",
       "deliveryStalled": "Há mensagens esperando, mas a entrega para esta sessão está pausada: envie qualquer mensagem no terminal para retomar a entrega.",
+      "undeliveredUnsigned": "Uma mensagem de uma versão anterior do AI Chat Center não foi entregue. Envie-a de novo por aqui.",
       "messages": "Mensagens",
       "image": "[imagem]",
       "images": "[{n} imagens]",

@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { ChatEvent, LiveSession, ProviderChange, SessionView } from '../shared/types.js';
 import { getRegistration, isActive, listRegistrations, markDisconnected, trustedKeys, type Registration } from '../core/registry.js';
 import { busyAge, clearBusy } from '../core/busy.js';
-import { enqueue, peek } from '../core/inbox.js';
+import { countUnsigned, enqueue, peek } from '../core/inbox.js';
 import { getWaiting } from '../core/waiting.js';
 import { paths } from '../core/paths.js';
 import { TranscriptReader } from './transcript/reader.js';
@@ -222,6 +222,8 @@ export class ClaudeCodeProvider implements Provider {
       };
       if (waitingKind) view.waitingKind = waitingKind;
       if (state === 'idle' && (await this.deliveryStalled(sid, queued))) view.deliveryStalled = true;
+      const unsigned = disconnected ? 0 : await countUnsigned(sid);
+      if (unsigned > 0) view.undeliveredUnsigned = unsigned;
       if (lastEvent) view.lastEvent = lastEvent;
       connected.push(view);
     }
@@ -291,6 +293,7 @@ export class ClaudeCodeProvider implements Provider {
         s.lastEvent?.id ?? null,
         s.pendingAppMessageIds,
         s.deliveryStalled ?? false,
+        s.undeliveredUnsigned ?? 0,
       ]),
     });
     if (signature !== this.lastSignature) {
