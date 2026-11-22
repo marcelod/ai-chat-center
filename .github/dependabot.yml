@@ -5,7 +5,16 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # Dev dependencies only (the plugin ships bundled, with no runtime dependencies): one grouped PR a
+  # week instead of one per package. Major versions stay separate, since they may need code changes.
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    groups:
+      npm-minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
+      npm-major:
+        patterns: ['*']
+        update-types: [major]

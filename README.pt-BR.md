@@ -80,10 +80,11 @@ Tudo fica no seu computador. O hub escuta apenas em 127.0.0.1. O plugin não lê
 ## Desinstalação
 
 1. Desinstale o plugin: `/plugin uninstall ai-chat-center@ai-chat-center`.
-2. Pare o hub (pid em `~/.ai-chat-center/hub.json`):
-   - macOS e Linux: `kill "$(node -p "require(process.env.HOME + '/.ai-chat-center/hub.json').pid")"`
-   - Windows PowerShell: `Stop-Process -Id (Get-Content "$HOME\.ai-chat-center\hub.json" | ConvertFrom-Json).pid`
-3. Apague o estado (token, registros, logs):
+2. Remova o marketplace: `/plugin marketplace remove ai-chat-center`.
+3. Pare o hub, se estiver rodando (pid em `~/.ai-chat-center/hub.json`; nada acontece se o arquivo não existir):
+   - macOS e Linux: `f=~/.ai-chat-center/hub.json; [ -f "$f" ] && kill "$(node -p "require('$f').pid")" 2>/dev/null; true`
+   - Windows PowerShell: `$f = "$HOME\.ai-chat-center\hub.json"; if (Test-Path $f) { Stop-Process -Id (Get-Content $f | ConvertFrom-Json).pid -ErrorAction SilentlyContinue }`
+4. Apague o estado (token, segredo da instalação, registros, logs). Um hub que ainda esteja rodando se encerra sozinho em até um minuto:
    - macOS e Linux: `rm -rf ~/.ai-chat-center`
    - Windows PowerShell: `Remove-Item -Recurse -Force "$HOME\.ai-chat-center"`
 
