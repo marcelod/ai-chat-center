@@ -8,17 +8,30 @@ describe('runClaudeAgentsJson', () => {
   it('runs `claude agents --json` hidden, from the home folder, with timeout and buffer limits', async () => {
     execFile.mockImplementation((_c: string, _a: string[], _o: object, cb: (e: null, out: string) => void) => cb(null, '[]'));
     const { runClaudeAgentsJson } = await import('../../src/core/claudeAgents.js');
-    expect(await runClaudeAgentsJson()).toBe('[]');
+    expect(await runClaudeAgentsJson('linux')).toBe('[]');
     const [cmd, args, opts] = execFile.mock.calls[0]!;
     expect(cmd).toBe('claude');
     expect(args).toEqual(['agents', '--json']);
     expect(opts).toEqual({
       cwd: (await import('node:os')).default.homedir(),
-      shell: process.platform === 'win32',
+      shell: false,
       windowsHide: true,
       timeout: 5000,
       maxBuffer: 10 * 1024 * 1024,
     });
+  });
+  // CI, Windows + Node 24: execFile with args AND shell: true prints DEP0190 on stderr. A waiter's stderr
+  // is the message Claude receives, so the warning was prepended to every delivery. On Windows the
+  // whole command line goes in as one string (claude is a .cmd shim, so a shell is still needed).
+  it('on Windows runs the .cmd shim through the shell as one command line, with no args array', async () => {
+    execFile.mockReset();
+    execFile.mockImplementation((_c: string, _a: string[], _o: object, cb: (e: null, out: string) => void) => cb(null, '[]'));
+    const { runClaudeAgentsJson } = await import('../../src/core/claudeAgents.js');
+    expect(await runClaudeAgentsJson('win32')).toBe('[]');
+    const [cmd, args, opts] = execFile.mock.calls[0]!;
+    expect(cmd).toBe('claude agents --json');
+    expect(args).toEqual([]);
+    expect(opts).toMatchObject({ shell: true, windowsHide: true, cwd: (await import('node:os')).default.homedir() });
   });
   it('rejects on error', async () => {
     execFile.mockImplementation((_c: string, _a: string[], _o: object, cb: (e: Error) => void) => cb(new Error('nope')));
