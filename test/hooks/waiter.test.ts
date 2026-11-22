@@ -297,7 +297,15 @@ describe('waiter', () => {
   it('pid unknown and every lookup fails: exits after the failure limit (30 min by default)', async () => {
     await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: null });
     let lookups = 0;
-    const r = await wait('stop', {}, { reresolveMs: 5, lookupFailMs: 60, lookup: async () => (lookups++, { ok: false }) });
+    // A fake clock that advances 25 ms per lookup: the limit is reached after a known number of lookups,
+    // whatever the machine load (stress: real time let it pass after a single lookup).
+    let t = 0;
+    const r = await wait('stop', {}, {
+      reresolveMs: 5,
+      lookupFailMs: 60,
+      now: () => t,
+      lookup: async () => ((t += 25), lookups++, { ok: false }),
+    });
     expect(r).toEqual({ exitCode: 0, stderr: '' });
     expect(lookups).toBeGreaterThan(1);
     const { LOOKUP_FAIL_EXIT_MS } = await import('../../src/hooks/waiter.js');
@@ -461,7 +469,7 @@ describe('waiter prompt: a waiter during every turn', () => {
     await reg('s1');
     await enqueue('s1', 'x');
     let done = false;
-    const p = wait('prompt', { prompt: 'hi' }, promptOpts({ promptSettleMs: 300 })).then((r) => ((done = true), r));
+    const p = wait('prompt', { prompt: 'hi' }, promptOpts({ promptSettleMs: 2000 })).then((r) => ((done = true), r));
     await sleep(100);
     expect(done).toBe(false);
     expect(await peek('s1')).toHaveLength(1);
@@ -514,6 +522,7 @@ describe('waiter prompt: a waiter during every turn', () => {
     await enqueue('s1', 'x');
     let calls = 0;
     const p = wait('prompt', { prompt: 'hi' }, promptOpts({ staleBusyMs: 1000, busyCheckMs: 10_000, status: async () => (calls++, 'busy') }));
+    await vi.waitFor(() => expect(calls).toBe(1), { timeout: 5000, interval: 10 });
     await sleep(200);
     expect(calls).toBe(1);
     await markDisconnected('s1', 'off');
