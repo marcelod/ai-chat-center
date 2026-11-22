@@ -106,17 +106,35 @@ async function readClaimed(file) {
     }
   }
 }
+var CLAIM_MARK = ".claim";
+var MARKER_STALE_MS = 6e4;
+async function removeMarker(marker) {
+  try {
+    await withFsRetry(() => fs2.rm(marker, { force: true }));
+  } catch {
+  }
+}
 async function drain(sid) {
   const out = [];
   for (const f of await list(sid)) {
     const claimed = `${f}.claimed-${Date.now()}-${crypto2.randomUUID()}`;
+    const marker = `${f}${CLAIM_MARK}`;
+    try {
+      await fs2.writeFile(marker, "", { flag: "wx", mode: FILE_MODE });
+    } catch (e) {
+      if (isRace(e) || ["EEXIST", "EACCES"].includes(e.code ?? "")) continue;
+      if (out.length > 0) break;
+      throw e;
+    }
     try {
       await fs2.rename(f, claimed);
     } catch (e) {
+      await removeMarker(marker);
       if (isRace(e)) continue;
       if (out.length > 0) break;
       throw e;
     }
+    await removeMarker(marker);
     const m = await readClaimed(claimed);
     if (m === "unreadable") {
       try {
@@ -144,6 +162,15 @@ async function sweepClaimed(sid, maxAgeMs) {
   let removed = 0;
   const now = Date.now();
   for (const n of names) {
+    if (n.endsWith(`.msg${CLAIM_MARK}`)) {
+      try {
+        if (now - (await fs2.stat(path3.join(dir, n))).mtimeMs <= Math.min(maxAgeMs, MARKER_STALE_MS)) continue;
+        await withFsRetry(() => fs2.rm(path3.join(dir, n), { force: true }));
+        removed++;
+      } catch {
+      }
+      continue;
+    }
     const m = CLAIMED_RE.exec(n);
     if (!m) continue;
     const file = path3.join(dir, n);
@@ -167,7 +194,7 @@ async function clearInbox(sid) {
     throw e;
   }
   for (const n of names) {
-    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-")) continue;
+    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`)) continue;
     try {
       await withFsRetry(() => fs2.rm(path3.join(dir, n), { force: true }));
     } catch (e) {

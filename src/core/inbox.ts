@@ -79,6 +79,20 @@ async function readClaimed(file: string): Promise<InboxMessage | 'malformed' | '
   }
 }
 
+/** Suffix of the exclusive claim marker of a queued `<name>.msg`. */
+const CLAIM_MARK = '.claim';
+/** A drain holds a claim marker for one rename (milliseconds): one older than this was left behind. */
+const MARKER_STALE_MS = 60_000;
+
+/** A marker that cannot be removed is swept later (sweepClaimed); until then it only delays that message. */
+async function removeMarker(marker: string): Promise<void> {
+  try {
+    await withFsRetry(() => fs.rm(marker, { force: true }));
+  } catch {
+    /* swept later */
+  }
+}
+
 /**
  * Takes every queued message, in name order. Each file is first CLAIMED with an atomic rename to a
  * unique name; only the drain whose rename succeeds reads, deletes and returns it. A failed rename
@@ -94,13 +108,26 @@ export async function drain(sid: string): Promise<InboxMessage[]> {
   const out: InboxMessage[] = [];
   for (const f of await list(sid)) {
     const claimed = `${f}.claimed-${Date.now()}-${crypto.randomUUID()}`;
+    // Exclusive marker first (O_EXCL is atomic everywhere): Windows renames through an open handle, so two
+    // drains renaming the same file could both succeed (the second moving the first one's claimed file)
+    // and both read it. Only the marker's holder renames.
+    const marker = `${f}${CLAIM_MARK}`;
+    try {
+      await fs.writeFile(marker, '', { flag: 'wx', mode: FILE_MODE });
+    } catch (e) {
+      if (isRace(e) || ['EEXIST', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '')) continue; // held
+      if (out.length > 0) break;
+      throw e;
+    }
     try {
       await fs.rename(f, claimed);
     } catch (e) {
+      await removeMarker(marker);
       if (isRace(e)) continue; // someone else took it
       if (out.length > 0) break; // deliver what is already claimed; the rest waits for the next pass
       throw e;
     }
+    await removeMarker(marker);
     const m = await readClaimed(claimed);
     if (m === 'unreadable') {
       try {
@@ -121,6 +148,7 @@ export async function drain(sid: string): Promise<InboxMessage[]> {
 }
 
 /**
+ * Removes claim markers older than a minute (or maxAgeMs if shorter), never the message they guarded.
  * Deletes claimed files older than `maxAgeMs` (by the claim time in their name, else their mtime): left
  * behind by a drain that delivered them but could not delete them. Call it only while holding the
  * session's waiter lock. Returns how many were removed.
@@ -136,6 +164,18 @@ export async function sweepClaimed(sid: string, maxAgeMs: number): Promise<numbe
   let removed = 0;
   const now = Date.now();
   for (const n of names) {
+    if (n.endsWith(`.msg${CLAIM_MARK}`)) {
+      // A claim marker left behind (its holder died, or could not delete it): remove the marker only.
+      // The message, if still queued, becomes claimable again.
+      try {
+        if (now - (await fs.stat(path.join(dir, n))).mtimeMs <= Math.min(maxAgeMs, MARKER_STALE_MS)) continue;
+        await withFsRetry(() => fs.rm(path.join(dir, n), { force: true }));
+        removed++;
+      } catch {
+        /* next time */
+      }
+      continue;
+    }
     const m = CLAIMED_RE.exec(n);
     if (!m) continue;
     const file = path.join(dir, n);
@@ -162,7 +202,7 @@ export async function clearInbox(sid: string): Promise<void> {
     throw e;
   }
   for (const n of names) {
-    if (!n.endsWith('.msg') && !n.endsWith('.tmp') && !n.includes('.msg.claimed-')) continue;
+    if (!n.endsWith('.msg') && !n.endsWith('.tmp') && !n.includes('.msg.claimed-') && !n.endsWith(`.msg${CLAIM_MARK}`)) continue;
     try {
       await withFsRetry(() => fs.rm(path.join(dir, n), { force: true }));
     } catch (e) {

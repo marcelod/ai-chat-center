@@ -82,6 +82,7 @@ import path5 from "node:path";
 import fs2 from "node:fs/promises";
 import path3 from "node:path";
 var isRace = (e) => ["ENOENT", "EPERM", "EBUSY"].includes(e.code ?? "");
+var CLAIM_MARK = ".claim";
 async function clearInbox(sid) {
   const dir = paths().inboxDir(sid);
   let names;
@@ -92,7 +93,7 @@ async function clearInbox(sid) {
     throw e;
   }
   for (const n of names) {
-    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-")) continue;
+    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`)) continue;
     try {
       await withFsRetry(() => fs2.rm(path3.join(dir, n), { force: true }));
     } catch (e) {

@@ -125,4 +125,50 @@ describe('inbox', () => {
     expect(left).toHaveLength(2);
     expect(await sweepClaimed('nobody', 3600_000)).toBe(0);
   });
+
+  // CI, windows-latest: 4 concurrent drains of 50 messages delivered 51. Windows renames through an open
+  // handle: two drains that both opened the same .msg could both rename it (A to its claimed name, then
+  // B moves that same file on to its own), and both read it. A claim now first takes an exclusive
+  // marker (<name>.msg.claim, created with O_EXCL); only its holder renames the message.
+  it('a message whose claim marker another drain holds is skipped, and claimed once the marker is gone', async () => {
+    await enqueue('s1', 'a');
+    const [f] = names();
+    fs.writeFileSync(path.join(paths().inboxDir('s1'), `${f}.claim`), '');
+    expect(await drain('s1')).toEqual([]);
+    expect((await peek('s1')).map((m) => m.text)).toEqual(['a']);
+    fs.rmSync(path.join(paths().inboxDir('s1'), `${f}.claim`));
+    expect((await drain('s1')).map((m) => m.text)).toEqual(['a']);
+    expect(names()).toEqual([]);
+  });
+  it('the claim marker is removed after the claim, also when the message was already taken', async () => {
+    await enqueue('s1', 'a');
+    vi.spyOn(fsp, 'rename').mockImplementationOnce(async () => {
+      throw errno('ENOENT');
+    });
+    expect(await drain('s1')).toEqual([]);
+    vi.restoreAllMocks();
+    expect(names().some((n) => n.endsWith('.claim'))).toBe(false);
+  });
+  it('sweepClaimed removes stale claim markers (never the message), so a put-back message is claimable again', async () => {
+    await enqueue('s1', 'kept');
+    const [f] = names();
+    const marker = path.join(paths().inboxDir('s1'), `${f}.claim`);
+    fs.writeFileSync(marker, '');
+    const old = new Date(Date.now() - 2 * 3600_000);
+    fs.utimesSync(marker, old, old);
+    expect(await sweepClaimed('s1', 3600_000)).toBe(1);
+    expect(names()).toEqual([f]);
+    expect((await drain('s1')).map((m) => m.text)).toEqual(['kept']);
+  });
+  it('many concurrent drains, repeated, deliver every message exactly once', async () => {
+    for (let round = 0; round < 5; round++) {
+      for (let i = 0; i < 40; i++) await enqueue('s1', `${round}-${i}`);
+      const got = await Promise.all(Array.from({ length: 8 }, () => drain('s1')));
+      const all = got.flat().map((m) => m.text);
+      expect(all).toHaveLength(40);
+      expect(new Set(all).size).toBe(40);
+      expect(names()).toEqual([]);
+    }
+  });
 });
+

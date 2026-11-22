@@ -147,6 +147,7 @@ async function peek(sid) {
   }
   return out;
 }
+var CLAIM_MARK = ".claim";
 async function clearInbox(sid) {
   const dir = paths().inboxDir(sid);
   let names;
@@ -157,7 +158,7 @@ async function clearInbox(sid) {
     throw e;
   }
   for (const n of names) {
-    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-")) continue;
+    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`)) continue;
     try {
       await withFsRetry(() => fs2.rm(path3.join(dir, n), { force: true }));
     } catch (e) {
