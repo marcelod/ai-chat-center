@@ -274,6 +274,9 @@ export function useLiveSessions() {
           if (closed || timer !== undefined) return;
           failed = true;
           close?.();
+          // EventSource hides the status: ask once over plain HTTP. A 401 (the hub restarted with a new
+          // token) drops the token and shows the "open the /cc link" screen instead of retrying forever.
+          void refresh();
           timer = setTimeout(() => {
             timer = undefined;
             if (!closed) connect();
