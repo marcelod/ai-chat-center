@@ -190,3 +190,53 @@ A terminal turn was interrupted with Esc at its permission prompt. No `Stop` fir
 ### Cleanup
 
 The driver (which closes the terminal), then the hub, were stopped. The waiter exited by itself when the claude process died. Afterwards `ps` showed no `hub.js`, `waiter.js`, `drive-session` or `claude --plugin-dir` process.
+
+## Audit round 1 re-run (branch `fix/audit-round-1`, version 0.2.0)
+
+Run date: 2026-11-22. Claude Code 2.1.330, Node 22, Linux, `claude --plugin-dir <repo>/plugin --model haiku`, isolated `AI_CHAT_CENTER_HOME=<scratch>/e2e-r1/home`, `AI_CHAT_CENTER_PORT=7790`, `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1`, one fresh empty project directory. The session started in auto mode. Tokens are shown as `<token>`, keys as `<key>`, paths as `<scratch>` / `<repo>`.
+
+| Scenario | Result |
+|----------|--------|
+| `/cc` shows the link to the user; Claude does not print the token | PASS |
+| App question, then app action | PASS |
+| App message during a terminal turn waits for the turn, delivered once | PASS |
+| Permission waiting shows `waiting permission` | PASS |
+| `/compact` on an idle connected session, then an app message is delivered once | PASS (delivery); the model then needed `/cc` again (documented limitation) |
+| A message typed in the terminal while Claude is busy appears in the app | PASS |
+
+### `/cc`
+
+```
+❯ /ai-chat-center:cc
+  ⎿  UserPromptSubmit says: AI Chat Center is ready: http://127.0.0.1:7790/?token=<token>
+● Sessão conectada ao AI Chat Center. O link do app já foi exibido acima.
+```
+The link came only from the hook's `systemMessage`; Claude's reply had no URL, token or key. The registration had the claude pid and a key; the state dir was `700` and `token` `600`. The transcript holds the token once, inside a `hook_system_message` attachment (the persisted `systemMessage`), and nowhere in the model context or in assistant text. Processes: `hub.mjs` and one `waiter.mjs stop`.
+
+### App question, then action
+
+`What is 2+3? Answer with just the number.` was answered `5` (events: notice, assistant, `user(app)`, assistant). The action request was executed (Write action, then the reply). Haiku first chose a different folder for a relative path, so the final check used an absolute path: `<scratch>/e2e-r1/p1/ola.txt` was created with `ola`.
+
+### App message during a terminal turn, and a terminal message typed while busy
+
+The terminal ran a 20 s shell loop. While it ran, `busy/<sid>` existed, the app posted `Reply with exactly: APP-K`, and `Reply with exactly: TERM-Q` was typed in the terminal. 3 s and 8 s later the message was still in `inbox/<sid>/` and `GET /api/sessions` returned `busy` with 1 pending id. The screen at the end:
+```
+❯ Reply with exactly: TERM-Q
+● TERM-Q
+✻ Crunched for 22s · done
+● Stop hook feedback
+● APP-K
+```
+Events: `user(terminal)` loop prompt, `actions` (Bash), `user(terminal) Reply with exactly: TERM-Q`, assistant `TERM-Q`, `user(app) Reply with exactly: APP-K`, assistant `APP-K`. The terminal message reached the app through the transcript's `queued_command` attachment (it has no `user` entry). Afterwards the inbox and `busy/` were empty.
+
+### Permission waiting
+
+In manual mode the app asked `Run this shell command: echo hi > <scratch>/e2e-r1/p1/perm.txt`. Sampled 8, 16 and 24 s later, `GET /api/sessions` reported `waiting permission` and `waiting/<sid>.json` existed. After approving in the terminal, `perm.txt` contained `hi`, the state went back to `idle` and `waiting/` was empty.
+
+### `/compact`, then an app message
+
+`/compact` showed `Compacted … Skills restored (ai-chat-center:cc)`. Before and after it exactly one waiter ran (`waiter.mjs stop`, with its lock); compaction started no new waiter. The app then posted `Reply with exactly: APP-C`. It was delivered once (one `Stop hook feedback` entry, one `user(app)` bubble), and the app showed a `compacted` notice before it. Haiku declined to act on it because the key from `/cc` was no longer in its context after compaction, as the README says. Its reply quoted the first 8 hex characters of the key. After `/ai-chat-center:cc` again, `Reply with exactly: APP-C2` was answered `APP-C2`.
+
+### Cleanup
+
+The driver was stopped (which closes the terminal); the waiter exited and released its lock. The hub was stopped with the pid from `hub.json` (`hub stopped` in `hub.log`). Afterwards `ps` showed no `hub.mjs`, `waiter.mjs`, `drive-session` or `claude --plugin-dir` process, and port 7790 was free.
