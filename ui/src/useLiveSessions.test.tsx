@@ -280,3 +280,43 @@ describe('notifications', () => {
     expect(shown).toEqual(['new']);
   });
 });
+
+// Audit R3-F5: queued bubbles lived only in React state: a reload, or a second tab, did not show a
+// message that was still queued. The hub now returns the queued messages with their text.
+describe('queued messages from the hub', () => {
+  it('a message still queued in the hub shows as a queued bubble after a reload', async () => {
+    vi.mocked(api.getSessions).mockResolvedValue({
+      connected: [
+        {
+          sessionId: 's1', name: 'one', cwd: '/a', state: 'idle',
+          pendingAppMessageIds: ['p1'],
+          pendingAppMessages: [{ id: 'p1', text: 'sent before the reload', createdAt: '2026-01-01T10:00:00Z' }],
+        },
+      ],
+      others: [],
+    });
+    const { result } = renderHook(() => useLiveSessions());
+    await waitFor(() => expect(result.current.pending.s1?.map((m) => [m.id, m.text, m.failed ?? false])).toEqual([['p1', 'sent before the reload', false]]));
+  });
+  it('is not added twice, and not at all once its event arrived', async () => {
+    const view = {
+      sessionId: 's1', name: 'one', cwd: '/a', state: 'idle' as const,
+      pendingAppMessageIds: ['p1'],
+      pendingAppMessages: [{ id: 'p1', text: 'x', createdAt: '2026-01-01T10:00:00Z' }],
+    };
+    vi.mocked(api.getSessions).mockResolvedValue({ connected: [view], others: [] });
+    vi.mocked(api.getEvents).mockResolvedValue([
+      { kind: 'user', id: 'u1', ts: '2026-01-01T10:00:01Z', text: 'x', origin: 'app', appMessageId: 'p1' },
+    ]);
+    const { result } = renderHook(() => useLiveSessions());
+    await waitFor(() => expect(result.current.pending.s1).toHaveLength(1));
+    act(() => push({ type: 'sessions' }));
+    await act(async () => {});
+    expect(result.current.pending.s1).toHaveLength(1);
+    act(() => result.current.select('s1'));
+    await waitFor(() => expect(result.current.pending.s1 ?? []).toHaveLength(0));
+    act(() => push({ type: 'sessions' }));
+    await act(async () => {});
+    expect(result.current.pending.s1 ?? []).toHaveLength(0);
+  });
+});

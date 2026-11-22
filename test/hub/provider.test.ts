@@ -398,3 +398,15 @@ describe('provider: delivery stalled', () => {
     expect((await p.listSessions()).connected[0].deliveryStalled).toBeUndefined();
   });
 });
+
+describe('provider: queued messages with their text (audit R3-F5)', () => {
+  it('lists queued messages with id, text and createdAt, in queue order', async () => {
+    await reg();
+    const { enqueue } = await import('../../src/core/inbox.js');
+    const m1 = await enqueue('s1', 'first');
+    const m2 = await enqueue('s1', 'second');
+    const v = (await new ClaudeCodeProvider(async () => [live()]).listSessions()).connected[0];
+    expect(v.pendingAppMessageIds).toEqual([m1.id, m2.id]);
+    expect(v.pendingAppMessages).toEqual([m1, m2].map(({ id, text, createdAt }) => ({ id, text, createdAt })));
+  });
+});

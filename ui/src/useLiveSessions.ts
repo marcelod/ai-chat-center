@@ -150,6 +150,22 @@ export function useLiveSessions() {
     [cancelGrace, graceExpired, markFailed, patchPending],
   );
 
+  /** Messages the hub still has queued but this tab does not know (a reload, another tab): show them as queued. */
+  const adoptQueued = useCallback(
+    (res: SessionsResponse) =>
+      updatePending((p) => {
+        let next = p;
+        for (const s of res.connected) {
+          const known = new Set([...(next[s.sessionId] ?? []).map((m) => m.id), ...appIds(eventsRef.current[s.sessionId] ?? [])]);
+          const add = (s.pendingAppMessages ?? []).filter((m) => !known.has(m.id));
+          if (add.length === 0) continue;
+          next = { ...next, [s.sessionId]: [...(next[s.sessionId] ?? []), ...add.map((m) => ({ id: m.id, text: m.text, ts: m.createdAt }))] };
+        }
+        return next;
+      }),
+    [updatePending],
+  );
+
   const putEvents = useCallback((sid: string, events: ChatEvent[]) => {
     const merged = mergeEvents(eventsRef.current[sid] ?? [], events);
     eventsRef.current = { ...eventsRef.current, [sid]: merged };
@@ -179,6 +195,7 @@ export function useLiveSessions() {
         for (const s of res.connected) if (!firstSeen.current.has(s.sessionId)) firstSeen.current.set(s.sessionId, Date.now());
         setData(res);
         setError(false);
+        adoptQueued(res);
         reconcilePending(res, startedAt);
         const now = new Date();
         commit(res.connected.reduce((st, s) => baseline(st, s.sessionId, s.lastEvent?.ts, now), unreadRef.current));
@@ -192,7 +209,7 @@ export function useLiveSessions() {
         void refresh();
       }
     }
-  }, [commit, reconcilePending]);
+  }, [commit, reconcilePending, adoptQueued]);
 
   const loadEvents = useCallback(
     async (sid: string) => {

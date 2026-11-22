@@ -43,6 +43,8 @@ export type SessionView = {
   waitingKind?: 'permission' | 'input';
   lastEvent?: ChatEvent;
   pendingAppMessageIds: string[];
+  /** The same queued messages with their text, so the app can show them after a reload or in another tab. */
+  pendingAppMessages?: { id: string; text: string; createdAt: string }[];
   /** App messages are queued for this idle session and no waiter is running: a terminal prompt resumes delivery. */
   deliveryStalled?: boolean;
 };

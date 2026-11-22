@@ -926,6 +926,7 @@ var ClaudeCodeProvider = class {
         cwd,
         state,
         pendingAppMessageIds: queued.map((m) => m.id),
+        pendingAppMessages: queued.map(({ id, text, createdAt }) => ({ id, text, createdAt })),
         _sort: Date.parse(reg.connectedAt) || 0
       };
       if (waitingKind) view.waitingKind = waitingKind;
