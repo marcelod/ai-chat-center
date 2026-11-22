@@ -24,7 +24,7 @@ export async function enqueue(sid: string, text: string): Promise<InboxMessage> 
   const tmp = path.join(dir, `.${msg.id}.tmp`); // never ends in .msg
   try {
     await fs.writeFile(tmp, JSON.stringify(msg), { encoding: 'utf8', mode: FILE_MODE });
-    await fs.rename(tmp, path.join(dir, name));
+    await withFsRetry(() => fs.rename(tmp, path.join(dir, name)));
   } catch (e) {
     await fs.rm(tmp, { force: true });
     throw e;
@@ -120,7 +120,8 @@ export async function drain(sid: string): Promise<InboxMessage[]> {
       throw e;
     }
     try {
-      await fs.rename(f, claimed);
+      // Transient EPERM/EBUSY/EACCES (antivirus) is retried; ENOENT still means another drain took it.
+      await withFsRetry(() => fs.rename(f, claimed));
     } catch (e) {
       await removeMarker(marker);
       if (isRace(e)) continue; // someone else took it

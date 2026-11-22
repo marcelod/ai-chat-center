@@ -347,3 +347,21 @@ describe('static', () => {
     }
   });
 });
+
+// Audit R3-F7: the only 'error' listener was removed once listening, so an accept-time error (EMFILE)
+// emitted on the server crashed the hub.
+describe('server errors after listen', () => {
+  it('are logged and the hub keeps serving', async () => {
+    const lines: string[] = [];
+    const h = await createHub({ provider: fakeProvider(), token: TOKEN, port: 0, staticDir: path.join(os.tmpdir(), 'nope'), log: (m) => lines.push(m) });
+    try {
+      expect(() => h.server.emit('error', Object.assign(new Error('too many open files'), { code: 'EMFILE' }))).not.toThrow();
+      expect(lines.some((l) => l.includes('EMFILE'))).toBe(true);
+      const port = new URL(h.url).port;
+      const r = await fetch(`http://127.0.0.1:${port}/api/health`);
+      expect(r.status).toBe(200);
+    } finally {
+      await h.close();
+    }
+  });
+});

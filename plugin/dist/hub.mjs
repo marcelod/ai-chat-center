@@ -114,7 +114,7 @@ async function enqueue(sid, text) {
   const tmp = path3.join(dir, `.${msg.id}.tmp`);
   try {
     await fs2.writeFile(tmp, JSON.stringify(msg), { encoding: "utf8", mode: FILE_MODE });
-    await fs2.rename(tmp, path3.join(dir, name));
+    await withFsRetry(() => fs2.rename(tmp, path3.join(dir, name)));
   } catch (e) {
     await fs2.rm(tmp, { force: true });
     throw e;
@@ -1332,9 +1332,11 @@ data: ${JSON.stringify(c)}
     });
   });
   port = server.address().port;
+  server.on("error", (e) => log(`server error: ${e.code ?? ""} ${e.message}`));
   return {
     url: `http://127.0.0.1:${port}`,
     clients: () => clients.size,
+    server,
     close: () => new Promise((resolve) => {
       closed = true;
       stopTimers();

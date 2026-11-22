@@ -170,5 +170,28 @@ describe('inbox', () => {
       expect(names()).toEqual([]);
     }
   });
+
+  // Audit R3-F6: Windows antivirus briefly holds a just-written file; a bare rename made the POST fail (500).
+  it('enqueue retries a transient EPERM/EBUSY/EACCES on its rename', async () => {
+    const real = fsp.rename.bind(fsp);
+    let fails = 2;
+    vi.spyOn(fsp, 'rename').mockImplementation(async (a, b) => {
+      if (String(a).endsWith('.tmp') && fails-- > 0) throw errno('EPERM');
+      return real(a, b);
+    });
+    await enqueue('s1', 'x');
+    vi.restoreAllMocks();
+    expect((await peek('s1')).map((m) => m.text)).toEqual(['x']);
+  });
+  it('the claim rename retries transient errors; ENOENT still means another drain took it', async () => {
+    await enqueue('s1', 'x');
+    const real = fsp.rename.bind(fsp);
+    let fails = 2;
+    vi.spyOn(fsp, 'rename').mockImplementation(async (a, b) => {
+      if (String(b).includes('.claimed-') && fails-- > 0) throw errno('EBUSY');
+      return real(a, b);
+    });
+    expect((await drain('s1')).map((m) => m.text)).toEqual(['x']);
+  });
 });
 

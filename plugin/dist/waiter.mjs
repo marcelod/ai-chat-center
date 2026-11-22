@@ -127,7 +127,7 @@ async function drain(sid) {
       throw e;
     }
     try {
-      await fs2.rename(f, claimed);
+      await withFsRetry(() => fs2.rename(f, claimed));
     } catch (e) {
       await removeMarker(marker);
       if (isRace(e)) continue;

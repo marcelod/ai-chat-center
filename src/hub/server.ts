@@ -103,7 +103,9 @@ async function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
   }
 }
 
-export async function createHub(opts: HubOptions): Promise<{ url: string; clients(): number; close(): Promise<void> }> {
+export async function createHub(
+  opts: HubOptions,
+): Promise<{ url: string; clients(): number; close(): Promise<void>; server: http.Server }> {
   const { provider, token, staticDir } = opts;
   const pollMs = opts.pollMs ?? 500;
   const log = opts.log ?? (() => {});
@@ -331,10 +333,14 @@ export async function createHub(opts: HubOptions): Promise<{ url: string; client
     });
   });
   port = (server.address() as AddressInfo).port;
+  // After listen, an error emitted on the server (EMFILE on accept, say) must not crash the hub: log it
+  // and keep serving.
+  server.on('error', (e: NodeJS.ErrnoException) => log(`server error: ${e.code ?? ''} ${e.message}`));
 
   return {
     url: `http://127.0.0.1:${port}`,
     clients: () => clients.size,
+    server,
     close: () =>
       new Promise<void>((resolve) => {
         closed = true;
