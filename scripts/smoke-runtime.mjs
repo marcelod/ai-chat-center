@@ -6,7 +6,7 @@
 //   <checkout-dir> holds plugin/ (plugin/dist/*.mjs and plugin/hooks/hooks.json).
 // Checks:
 //   1. hook.mjs and waiter.mjs, on an unregistered session: exit 0, no output, nothing written;
-//   2. every hooks.json command line under sh (when sh exists): same result;
+//   2. every hooks.json entry spawned as exec form (command + args, no shell): same result;
 //   3. hub.mjs on a temp home and port: /api/health answers {ok, version} without a pid, and the
 //      challenge form returns a proof made with the token on disk, bound to the port;
 //   4. the UI page is served; then the hub is stopped.
@@ -41,15 +41,23 @@ for (const [file, arg] of [['hook.mjs', 'prompt-submit'], ['hook.mjs', 'notifica
 }
 check(!fs.existsSync(stateHome), 'unregistered session wrote nothing');
 
-// 2. The hooks.json command lines, under the POSIX shell Claude Code uses (Git Bash on Windows).
-const sh = ['sh', 'bash'].find((s) => spawnSync(s, ['-c', 'exit 0']).status === 0);
+// 2. The hooks.json entries, as Claude Code runs exec-form hooks: `command` spawned directly with
+//    `args` (the plugin-root placeholder substituted), no shell on any platform.
 const hooks = JSON.parse(fs.readFileSync(path.join(pluginDir, 'hooks', 'hooks.json'), 'utf8')).hooks;
-const commands = [...new Set(Object.values(hooks).flat().flatMap((g) => g.hooks.map((h) => h.command)))];
-if (!sh) console.log('skip hooks.json command lines: no sh on PATH');
-for (const cmd of sh ? commands : []) {
-  const r = spawnSync(sh, ['-c', cmd], { input, encoding: 'utf8', env: { ...env, CLAUDE_PLUGIN_ROOT: pluginDir }, cwd: home, timeout: 15_000 });
-  check(r.status === 0 && r.stdout === '' && r.stderr === '', `sh: ${cmd.split('; exec ')[1] ?? cmd}: exit ${r.status} ${JSON.stringify((r.stderr ?? '').slice(0, 300))}`);
+const entries = Object.values(hooks).flat().flatMap((g) => g.hooks);
+const seen = new Set();
+for (const h of entries) {
+  const key = JSON.stringify([h.command, h.args]);
+  if (seen.has(key)) continue;
+  seen.add(key);
+  const ok = h.command === 'node' && Array.isArray(h.args) && !('shell' in h);
+  check(ok, `exec form: ${key}`);
+  if (!ok) continue;
+  const args = h.args.map((a) => a.split('${CLAUDE_PLUGIN_ROOT}').join(pluginDir));
+  const r = spawnSync(h.command, args, { input, encoding: 'utf8', env, cwd: home, timeout: 15_000, shell: false });
+  check(!r.error && r.status === 0 && r.stdout === '' && r.stderr === '', `exec ${h.args.join(' ')}: exit ${r.status} ${r.error?.code ?? ''} ${JSON.stringify((r.stderr ?? '').slice(0, 300))}`);
 }
+check(!fs.existsSync(stateHome), 'hooks.json entries on an unregistered session wrote nothing');
 
 // 3. The hub.
 function get(port, p) {

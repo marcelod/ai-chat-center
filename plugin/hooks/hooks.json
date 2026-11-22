@@ -1,14 +1,14 @@
 { "hooks": {
   "SessionStart": [
     { "matcher": "startup|resume", "hooks": [
-      { "type": "command", "command": "command -v node >/dev/null 2>&1 || exit 0; exec node \"${CLAUDE_PLUGIN_ROOT}/dist/waiter.mjs\" start", "asyncRewake": true, "timeout": 86400 } ] },
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/waiter.mjs", "start"], "asyncRewake": true, "timeout": 86400 } ] },
     { "matcher": "clear|fork", "hooks": [
-      { "type": "command", "command": "command -v node >/dev/null 2>&1 || exit 0; exec node \"${CLAUDE_PLUGIN_ROOT}/dist/waiter.mjs\" start", "async": true } ] }
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/waiter.mjs", "start"], "async": true } ] }
   ],
   "Stop": [{ "hooks": [
-    { "type": "command", "command": "command -v node >/dev/null 2>&1 || exit 0; exec node \"${CLAUDE_PLUGIN_ROOT}/dist/waiter.mjs\" stop", "asyncRewake": true, "timeout": 86400 } ] }],
+    { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/waiter.mjs", "stop"], "asyncRewake": true, "timeout": 86400 } ] }],
   "UserPromptSubmit": [{ "hooks": [
-    { "type": "command", "command": "command -v node >/dev/null 2>&1 || exit 0; exec node \"${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs\" prompt-submit" } ] }],
+    { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "prompt-submit"] } ] }],
   "Notification": [{ "hooks": [
-    { "type": "command", "command": "command -v node >/dev/null 2>&1 || exit 0; exec node \"${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs\" notification" } ] }]
+    { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "notification"] } ] }]
 }}
