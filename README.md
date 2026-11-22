@@ -75,7 +75,7 @@ Everything stays on your computer. The hub listens only on 127.0.0.1. The plugin
 - **Environment variables.** `AI_CHAT_CENTER_PORT` sets the first port to try. `AI_CHAT_CENTER_HOME` moves the state folder (default `~/.ai-chat-center`). Set them in the environment Claude Code starts from.
 - **Logs** are in `~/.ai-chat-center/logs/`: `hub.log` (the hub), `hook.log` (`/cc` and the prompt hook) and `waiter.log` (message delivery, including discarded old messages).
 - **Stopping the hub.** End the process whose pid is in `~/.ai-chat-center/hub.json` (for example `kill <pid>`, or `Stop-Process -Id <pid>` on Windows). It starts again on the next `/cc`.
-- **After a plugin update** the old hub is replaced automatically on the next `/cc`. Only an older hub is replaced: a session still running an older copy of the plugin uses a newer hub as it is. Exception: a hub of version 0.2.0 or older cannot prove itself to 0.2.1 and later, so it is left running on its port and the new hub takes the next one. Stop it once (see above) or reboot.
+- **After a plugin update** the old hub is replaced automatically on the next `/cc`. Only an older hub is replaced: a session still running an older copy of the plugin uses a newer hub as it is. Exception: a hub of version 0.2.0 or older cannot prove itself to 0.2.1 and later, so it is left running on its port and the new hub takes the next one. Stop it once (see above) or reboot. App messages still queued by a hub of version 0.2.1 or older are not signed, so 0.2.2 and later drop them (see `waiter.log`); send them again.
 
 ## Uninstall
 

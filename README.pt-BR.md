@@ -75,7 +75,7 @@ Tudo fica no seu computador. O hub escuta apenas em 127.0.0.1. O plugin não lê
 - **Variáveis de ambiente.** `AI_CHAT_CENTER_PORT` define a primeira porta a tentar. `AI_CHAT_CENTER_HOME` muda a pasta de estado (padrão `~/.ai-chat-center`). Defina-as no ambiente em que o Claude Code é iniciado.
 - **Logs** ficam em `~/.ai-chat-center/logs/`: `hub.log` (o hub), `hook.log` (o `/cc` e o hook de prompt) e `waiter.log` (entrega de mensagens, inclusive as antigas descartadas).
 - **Parar o hub.** Encerre o processo cujo pid está em `~/.ai-chat-center/hub.json` (por exemplo `kill <pid>`, ou `Stop-Process -Id <pid>` no Windows). Ele volta a iniciar no próximo `/cc`.
-- **Depois de atualizar o plugin**, o hub antigo é substituído automaticamente no próximo `/cc`. Só um hub mais antigo é substituído: uma sessão que ainda roda uma cópia mais antiga do plugin usa o hub mais novo como ele está. Exceção: um hub da versão 0.2.0 ou anterior não consegue se provar para a 0.2.1 e as seguintes, então ele continua rodando na porta dele e o hub novo usa a próxima. Pare-o uma vez (veja acima) ou reinicie o computador.
+- **Depois de atualizar o plugin**, o hub antigo é substituído automaticamente no próximo `/cc`. Só um hub mais antigo é substituído: uma sessão que ainda roda uma cópia mais antiga do plugin usa o hub mais novo como ele está. Exceção: um hub da versão 0.2.0 ou anterior não consegue se provar para a 0.2.1 e as seguintes, então ele continua rodando na porta dele e o hub novo usa a próxima. Pare-o uma vez (veja acima) ou reinicie o computador. Mensagens do app ainda na fila de um hub da versão 0.2.1 ou anterior não são assinadas, então a 0.2.2 e as seguintes as descartam (veja o `waiter.log`); envie-as de novo.
 
 ## Desinstalação
 

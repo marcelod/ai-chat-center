@@ -288,7 +288,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 // src/core/version.ts
-var VERSION = "0.2.1";
+var VERSION = "0.2.2";
 
 // src/core/healthProof.ts
 import crypto3 from "node:crypto";

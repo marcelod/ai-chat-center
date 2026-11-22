@@ -1080,7 +1080,7 @@ async function saveConfig(c) {
 }
 
 // src/core/version.ts
-var VERSION = "0.2.1";
+var VERSION = "0.2.2";
 
 // src/hub/server.ts
 var MAX_BODY = 64 * 1024;
