@@ -11,6 +11,7 @@ import { wrapMessages } from '../core/protocol.js';
 import { isCcCommand } from '../core/ccCommand.js';
 import { busyAge } from '../core/busy.js';
 import { queryLiveSessions } from '../hub/status.js';
+import { verifyMessage } from '../core/secret.js';
 
 export type { PidLookup };
 /**
@@ -311,7 +312,13 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
           // a turn is running
         } else {
           if (await lockLost()) return NOTHING; // again, right before draining
-          const drained = await drain(sid);
+          const claimed = await drain(sid);
+          // Only what the hub signed: anything else was written into the inbox by something else.
+          const drained = [];
+          for (const m of claimed) if (await verifyMessage(m)) drained.push(m);
+          if (drained.length < claimed.length) {
+            logError(`dropped ${claimed.length - drained.length} unsigned or invalid message(s) in the inbox of session ${sid}`);
+          }
           let msgs = drained;
           if (discardOld) {
             const cutoff = now() - MAX_MESSAGE_AGE_MS;

@@ -4,6 +4,8 @@ import path from 'node:path';
 export interface Paths {
   home: string;
   token: string;
+  /** Per-install secret that signs inbox messages (see secret.ts). */
+  secret: string;
   hubJson: string;
   config: string;
   sessionsDir: string;
@@ -31,6 +33,7 @@ export function paths(): Paths {
   return {
     home,
     token: path.join(home, 'token'),
+    secret: path.join(home, 'install-secret'),
     hubJson: path.join(home, 'hub.json'),
     config: path.join(home, 'config.json'),
     sessionsDir: path.join(home, 'sessions'),

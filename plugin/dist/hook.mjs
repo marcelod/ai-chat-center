@@ -20,6 +20,7 @@ function paths() {
   return {
     home,
     token: path.join(home, "token"),
+    secret: path.join(home, "install-secret"),
     hubJson: path.join(home, "hub.json"),
     config: path.join(home, "config.json"),
     sessionsDir: path.join(home, "sessions"),

@@ -2,7 +2,7 @@ import { createRequire as __acc_createRequire } from 'node:module';
 const require = __acc_createRequire(import.meta.url);
 
 // src/hooks/waiter.ts
-import fs6 from "node:fs";
+import fs7 from "node:fs";
 import path6 from "node:path";
 
 // src/core/paths.ts
@@ -19,6 +19,7 @@ function paths() {
   return {
     home,
     token: path.join(home, "token"),
+    secret: path.join(home, "install-secret"),
     hubJson: path.join(home, "hub.json"),
     config: path.join(home, "config.json"),
     sessionsDir: path.join(home, "sessions"),
@@ -32,7 +33,7 @@ function paths() {
 }
 
 // src/core/registry.ts
-import fs5 from "node:fs/promises";
+import fs6 from "node:fs/promises";
 import path5 from "node:path";
 
 // src/core/fsAtomic.ts
@@ -79,14 +80,38 @@ async function readJson(file) {
 }
 
 // src/core/inbox.ts
-import fs2 from "node:fs/promises";
+import fs3 from "node:fs/promises";
 import path3 from "node:path";
+import crypto3 from "node:crypto";
+
+// src/core/secret.ts
+import fs2 from "node:fs/promises";
 import crypto2 from "node:crypto";
+var SECRET_RE = /^[0-9a-f]{64}$/;
+async function readSecret() {
+  try {
+    const s = (await fs2.readFile(paths().secret, "utf8")).trim();
+    return SECRET_RE.test(s) ? s : null;
+  } catch {
+    return null;
+  }
+}
+var mac = (secret, id, text) => crypto2.createHmac("sha256", secret).update(`${id}|${text}`).digest("hex");
+async function verifyMessage(m) {
+  if (typeof m?.id !== "string" || typeof m.text !== "string" || typeof m.sig !== "string" || m.id.includes("|")) return false;
+  const secret = await readSecret();
+  if (!secret) return false;
+  const want = Buffer.from(mac(secret, m.id, m.text));
+  const got = Buffer.from(m.sig);
+  return want.length === got.length && crypto2.timingSafeEqual(want, got);
+}
+
+// src/core/inbox.ts
 var isRace = (e) => ["ENOENT", "EPERM", "EBUSY"].includes(e.code ?? "");
 async function list(sid) {
   const dir = paths().inboxDir(sid);
   try {
-    return (await fs2.readdir(dir)).filter((n) => n.endsWith(".msg")).sort().map((n) => path3.join(dir, n));
+    return (await fs3.readdir(dir)).filter((n) => n.endsWith(".msg")).sort().map((n) => path3.join(dir, n));
   } catch (e) {
     if (e.code === "ENOENT") return [];
     throw e;
@@ -98,7 +123,7 @@ var CLAIMED_RE = /\.msg\.claimed-(?:(\d{13,})-)?/;
 async function readClaimed(file) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return JSON.parse(await fs2.readFile(file, "utf8"));
+      return JSON.parse(await fs3.readFile(file, "utf8"));
     } catch (e) {
       if (e instanceof SyntaxError) return "malformed";
       if (attempt >= READ_RETRIES) return "unreadable";
@@ -110,24 +135,24 @@ var CLAIM_MARK = ".claim";
 var MARKER_STALE_MS = 6e4;
 async function removeMarker(marker) {
   try {
-    await withFsRetry(() => fs2.rm(marker, { force: true }));
+    await withFsRetry(() => fs3.rm(marker, { force: true }));
   } catch {
   }
 }
 async function drain(sid) {
   const out = [];
   for (const f of await list(sid)) {
-    const claimed = `${f}.claimed-${Date.now()}-${crypto2.randomUUID()}`;
+    const claimed = `${f}.claimed-${Date.now()}-${crypto3.randomUUID()}`;
     const marker = `${f}${CLAIM_MARK}`;
     try {
-      await fs2.writeFile(marker, "", { flag: "wx", mode: FILE_MODE });
+      await fs3.writeFile(marker, "", { flag: "wx", mode: FILE_MODE });
     } catch (e) {
       if (isRace(e) || ["EEXIST", "EACCES"].includes(e.code ?? "")) continue;
       if (out.length > 0) break;
       throw e;
     }
     try {
-      await withFsRetry(() => fs2.rename(f, claimed));
+      await withFsRetry(() => fs3.rename(f, claimed));
     } catch (e) {
       await removeMarker(marker);
       if (isRace(e)) continue;
@@ -138,14 +163,14 @@ async function drain(sid) {
     const m = await readClaimed(claimed);
     if (m === "unreadable") {
       try {
-        await withFsRetry(() => fs2.rename(claimed, f));
+        await withFsRetry(() => fs3.rename(claimed, f));
       } catch {
       }
       continue;
     }
     if (m !== "malformed") out.push(m);
     try {
-      await withFsRetry(() => fs2.rm(claimed, { force: true }));
+      await withFsRetry(() => fs3.rm(claimed, { force: true }));
     } catch {
     }
   }
@@ -155,7 +180,7 @@ async function sweepClaimed(sid, maxAgeMs) {
   const dir = paths().inboxDir(sid);
   let names;
   try {
-    names = await fs2.readdir(dir);
+    names = await fs3.readdir(dir);
   } catch {
     return 0;
   }
@@ -164,8 +189,8 @@ async function sweepClaimed(sid, maxAgeMs) {
   for (const n of names) {
     if (n.endsWith(`.msg${CLAIM_MARK}`)) {
       try {
-        if (now - (await fs2.stat(path3.join(dir, n))).mtimeMs <= Math.min(maxAgeMs, MARKER_STALE_MS)) continue;
-        await withFsRetry(() => fs2.rm(path3.join(dir, n), { force: true }));
+        if (now - (await fs3.stat(path3.join(dir, n))).mtimeMs <= Math.min(maxAgeMs, MARKER_STALE_MS)) continue;
+        await withFsRetry(() => fs3.rm(path3.join(dir, n), { force: true }));
         removed++;
       } catch {
       }
@@ -175,9 +200,9 @@ async function sweepClaimed(sid, maxAgeMs) {
     if (!m) continue;
     const file = path3.join(dir, n);
     try {
-      const at = m[1] ? Number(m[1]) : (await fs2.stat(file)).mtimeMs;
+      const at = m[1] ? Number(m[1]) : (await fs3.stat(file)).mtimeMs;
       if (now - at <= maxAgeMs) continue;
-      await withFsRetry(() => fs2.rm(file, { force: true }));
+      await withFsRetry(() => fs3.rm(file, { force: true }));
       removed++;
     } catch {
     }
@@ -188,7 +213,7 @@ async function clearInbox(sid) {
   const dir = paths().inboxDir(sid);
   let names;
   try {
-    names = await fs2.readdir(dir);
+    names = await fs3.readdir(dir);
   } catch (e) {
     if (e.code === "ENOENT") return;
     throw e;
@@ -196,7 +221,7 @@ async function clearInbox(sid) {
   for (const n of names) {
     if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`)) continue;
     try {
-      await withFsRetry(() => fs2.rm(path3.join(dir, n), { force: true }));
+      await withFsRetry(() => fs3.rm(path3.join(dir, n), { force: true }));
     } catch (e) {
       if (!isRace(e)) throw e;
     }
@@ -204,13 +229,13 @@ async function clearInbox(sid) {
 }
 
 // src/core/busy.ts
-import fs3 from "node:fs/promises";
+import fs4 from "node:fs/promises";
 async function clearBusy(sid) {
   await removeFile(paths().busyFile(sid));
 }
 async function isBusy(sid) {
   try {
-    await fs3.access(paths().busyFile(sid));
+    await fs4.access(paths().busyFile(sid));
     return true;
   } catch {
     return false;
@@ -218,7 +243,7 @@ async function isBusy(sid) {
 }
 async function busyAge(sid, now = Date.now()) {
   try {
-    return now - (await fs3.stat(paths().busyFile(sid))).mtimeMs;
+    return now - (await fs4.stat(paths().busyFile(sid))).mtimeMs;
   } catch {
     return null;
   }
@@ -230,9 +255,9 @@ async function clearWaiting(sid) {
 }
 
 // src/core/lock.ts
-import fs4 from "node:fs/promises";
+import fs5 from "node:fs/promises";
 import path4 from "node:path";
-import crypto3 from "node:crypto";
+import crypto4 from "node:crypto";
 var EMPTY_GRACE_MS = 1e4;
 var LOCK_STALE_MS = 9e4;
 function isAlive(pid) {
@@ -258,30 +283,30 @@ function lockPid(content) {
   return typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? pid : null;
 }
 async function publish(file) {
-  const tmp = `${file}.${crypto3.randomUUID()}.tmp`;
+  const tmp = `${file}.${crypto4.randomUUID()}.tmp`;
   const content = JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() });
   try {
-    await fs4.writeFile(tmp, content, { flag: "wx" });
-    await fs4.link(tmp, file);
+    await fs5.writeFile(tmp, content, { flag: "wx" });
+    await fs5.link(tmp, file);
     return content;
   } catch (e) {
     if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return null;
     throw e;
   } finally {
-    await fs4.rm(tmp, { force: true });
+    await fs5.rm(tmp, { force: true });
   }
 }
 async function staleContent(file) {
   let content;
   let mtimeMs;
   try {
-    content = await fs4.readFile(file, "utf8");
+    content = await fs5.readFile(file, "utf8");
   } catch (e) {
     if (code(e) === "ENOENT") return null;
     content = "";
   }
   try {
-    mtimeMs = (await fs4.stat(file)).mtimeMs;
+    mtimeMs = (await fs5.stat(file)).mtimeMs;
   } catch {
     return null;
   }
@@ -296,8 +321,8 @@ async function reclaim(file, seen) {
   const guard = `${file}.reclaim`;
   if (await publish(guard) === null) {
     try {
-      const st = await fs4.stat(guard);
-      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs4.rm(guard, { force: true });
+      const st = await fs5.stat(guard);
+      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs5.rm(guard, { force: true });
     } catch {
     }
     return null;
@@ -305,7 +330,7 @@ async function reclaim(file, seen) {
   try {
     if (await staleContent(file) !== seen) return null;
     try {
-      await fs4.unlink(file);
+      await fs5.unlink(file);
     } catch (e) {
       if (code(e) !== "ENOENT") {
         if (contention(e)) return null;
@@ -315,7 +340,7 @@ async function reclaim(file, seen) {
     return await publish(file);
   } finally {
     try {
-      if (lockPid(await fs4.readFile(guard, "utf8")) === process.pid) await fs4.rm(guard, { force: true });
+      if (lockPid(await fs5.readFile(guard, "utf8")) === process.pid) await fs5.rm(guard, { force: true });
     } catch {
     }
   }
@@ -333,19 +358,19 @@ async function acquireLockContent(file) {
 }
 async function touchLock(file) {
   try {
-    if (lockPid(await fs4.readFile(file, "utf8")) !== process.pid) return;
+    if (lockPid(await fs5.readFile(file, "utf8")) !== process.pid) return;
     const now = /* @__PURE__ */ new Date();
-    await fs4.utimes(file, now, now);
+    await fs5.utimes(file, now, now);
   } catch {
   }
 }
 async function releaseLock(file) {
   try {
-    if (lockPid(await fs4.readFile(file, "utf8")) !== process.pid) return;
+    if (lockPid(await fs5.readFile(file, "utf8")) !== process.pid) return;
   } catch {
     return;
   }
-  await fs4.rm(file, { force: true });
+  await fs5.rm(file, { force: true });
 }
 async function withLock(file, waitMs, fn) {
   const deadline = Date.now() + waitMs;
@@ -390,7 +415,7 @@ async function getRegistration(sid) {
 async function listRegistrations() {
   let names;
   try {
-    names = await fs5.readdir(paths().sessionsDir);
+    names = await fs6.readdir(paths().sessionsDir);
   } catch (e) {
     if (e.code === "ENOENT") return [];
     throw e;
@@ -516,7 +541,7 @@ async function liveStatus(sid) {
 }
 async function hasQueued(sid) {
   try {
-    return (await fs6.promises.readdir(paths().inboxDir(sid))).some((n) => n.endsWith(".msg"));
+    return (await fs7.promises.readdir(paths().inboxDir(sid))).some((n) => n.endsWith(".msg"));
   } catch {
     return false;
   }
@@ -680,7 +705,12 @@ async function runWaiter(event, input, opts = {}) {
         } else if (await isBusy(sid) && !await dropStaleBusy()) {
         } else {
           if (await lockLost()) return NOTHING;
-          const drained = await drain(sid);
+          const claimed = await drain(sid);
+          const drained = [];
+          for (const m of claimed) if (await verifyMessage(m)) drained.push(m);
+          if (drained.length < claimed.length) {
+            logError(`dropped ${claimed.length - drained.length} unsigned or invalid message(s) in the inbox of session ${sid}`);
+          }
           let msgs = drained;
           if (discardOld) {
             const cutoff = now() - MAX_MESSAGE_AGE_MS;
@@ -710,7 +740,7 @@ async function runWaiter(event, input, opts = {}) {
 }
 async function readLock(file) {
   try {
-    return await fs6.promises.readFile(file, "utf8");
+    return await fs7.promises.readFile(file, "utf8");
   } catch {
     return null;
   }
@@ -723,8 +753,8 @@ async function readStdin() {
 function logError(e) {
   try {
     const dir = paths().logDir;
-    fs6.mkdirSync(dir, { recursive: true, mode: 448 });
-    fs6.appendFileSync(
+    fs7.mkdirSync(dir, { recursive: true, mode: 448 });
+    fs7.appendFileSync(
       path6.join(dir, "waiter.log"),
       `${(/* @__PURE__ */ new Date()).toISOString()} ${e instanceof Error ? e.stack ?? e.message : String(e)}
 `
@@ -736,7 +766,7 @@ function releaseOwnLockSync(sid) {
   try {
     assertSessionId(sid);
     const lock = paths().waiterLock(sid);
-    if (lockPid(fs6.readFileSync(lock, "utf8")) === process.pid) fs6.rmSync(lock, { force: true });
+    if (lockPid(fs7.readFileSync(lock, "utf8")) === process.pid) fs7.rmSync(lock, { force: true });
   } catch {
   }
 }

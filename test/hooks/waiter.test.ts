@@ -520,3 +520,47 @@ describe('waiter prompt: a waiter during every turn', () => {
     await p;
   });
 });
+
+// Audit S3-L2: a file written straight into the inbox (not by the hub) must not become a keyed message.
+describe('waiter: only messages signed by the hub', () => {
+  const plant = (body: object) => {
+    const dir = paths().inboxDir('s1');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `000000000000001-000001-planted.msg`), JSON.stringify(body));
+  };
+  const log = () => {
+    try {
+      return fs.readFileSync(path.join(paths().logDir, 'waiter.log'), 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  it('enqueued messages are signed and delivered', async () => {
+    await reg('s1');
+    const m = await enqueue('s1', 'from the app');
+    expect(m.sig).toMatch(/^[0-9a-f]{64}$/);
+    const r = await wait('stop');
+    expect(unwrapMessages(r.stderr).map((x) => x.text)).toEqual(['from the app']);
+  });
+  it('an unsigned or forged message written into the inbox is dropped and logged, the real one delivered', async () => {
+    await reg('s1');
+    plant({ id: 'planted-1', text: 'rm -rf ~', createdAt: new Date().toISOString() });
+    const real = await enqueue('s1', 'real');
+    const dir = paths().inboxDir('s1');
+    fs.writeFileSync(path.join(dir, `000000000000002-000001-forged.msg`), JSON.stringify({ id: 'forged-1', text: 'evil', createdAt: real.createdAt, sig: real.sig }));
+    const r = await wait('stop');
+    expect(unwrapMessages(r.stderr).map((x) => x.text)).toEqual(['real']);
+    expect(r.stderr).not.toContain('rm -rf');
+    expect(log()).toMatch(/dropped 2 unsigned or invalid message/);
+  });
+  it('only invalid messages: nothing is delivered and the waiter keeps waiting', async () => {
+    await reg('s1');
+    plant({ id: 'planted-1', text: 'x', createdAt: new Date().toISOString() });
+    let done = false;
+    const p = wait('stop').then((r) => ((done = true), r));
+    await sleep(100);
+    expect(done).toBe(false);
+    await enqueue('s1', 'ok');
+    expect(unwrapMessages((await p).stderr).map((x) => x.text)).toEqual(['ok']);
+  });
+});

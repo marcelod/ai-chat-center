@@ -2,10 +2,10 @@ import { createRequire as __acc_createRequire } from 'node:module';
 const require = __acc_createRequire(import.meta.url);
 
 // src/hub/main.ts
-import fs8 from "node:fs/promises";
+import fs9 from "node:fs/promises";
 import fsSync from "node:fs";
 import path8 from "node:path";
-import crypto6 from "node:crypto";
+import crypto7 from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 // src/core/paths.ts
@@ -22,6 +22,7 @@ function paths() {
   return {
     home,
     token: path.join(home, "token"),
+    secret: path.join(home, "install-secret"),
     hubJson: path.join(home, "hub.json"),
     config: path.join(home, "config.json"),
     sessionsDir: path.join(home, "sessions"),
@@ -91,32 +92,74 @@ function proofMatches(token, challenge, port, answer) {
 }
 
 // src/hub/provider.ts
-import fs6 from "node:fs/promises";
+import fs7 from "node:fs/promises";
 import path6 from "node:path";
 
 // src/core/registry.ts
-import fs5 from "node:fs/promises";
+import fs6 from "node:fs/promises";
 import path5 from "node:path";
 
 // src/core/inbox.ts
-import fs2 from "node:fs/promises";
+import fs3 from "node:fs/promises";
 import path3 from "node:path";
+import crypto4 from "node:crypto";
+
+// src/core/secret.ts
+import fs2 from "node:fs/promises";
 import crypto3 from "node:crypto";
+var SECRET_RE = /^[0-9a-f]{64}$/;
+async function readSecret() {
+  try {
+    const s = (await fs2.readFile(paths().secret, "utf8")).trim();
+    return SECRET_RE.test(s) ? s : null;
+  } catch {
+    return null;
+  }
+}
+async function installSecret() {
+  const have = await readSecret();
+  if (have) return have;
+  const file = paths().secret;
+  await ensureDir(paths().home);
+  const fresh = crypto3.randomBytes(32).toString("hex");
+  try {
+    await fs2.writeFile(file, fresh, { flag: "wx", mode: FILE_MODE });
+    return fresh;
+  } catch (e) {
+    if (e.code !== "EEXIST") throw e;
+  }
+  for (let i = 0; i < 20; i++) {
+    const s = await readSecret();
+    if (s) return s;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  const tmp = `${file}.${crypto3.randomUUID()}.tmp`;
+  await fs2.writeFile(tmp, fresh, { mode: FILE_MODE });
+  await withFsRetry(() => fs2.rename(tmp, file));
+  return await readSecret() ?? fresh;
+}
+var mac = (secret, id, text) => crypto3.createHmac("sha256", secret).update(`${id}|${text}`).digest("hex");
+async function signMessage(m) {
+  if (m.id.includes("|")) throw new Error("invalid message id");
+  return { ...m, sig: mac(await installSecret(), m.id, m.text) };
+}
+
+// src/core/inbox.ts
 var counter = 0;
 var isRace = (e) => ["ENOENT", "EPERM", "EBUSY"].includes(e.code ?? "");
 async function enqueue(sid, text) {
   const dir = paths().inboxDir(sid);
   await ensureDir(dir);
   const now = Date.now();
-  const msg = { id: crypto3.randomUUID(), text, createdAt: new Date(now).toISOString() };
+  const msg = await signMessage({ id: crypto4.randomUUID(), text, createdAt: new Date(now).toISOString() });
   counter = (counter + 1) % 1e6;
   const name = `${String(now).padStart(15, "0")}-${String(counter).padStart(6, "0")}-${msg.id}.msg`;
   const tmp = path3.join(dir, `.${msg.id}.tmp`);
   try {
-    await fs2.writeFile(tmp, JSON.stringify(msg), { encoding: "utf8", mode: FILE_MODE });
-    await withFsRetry(() => fs2.rename(tmp, path3.join(dir, name)));
+    await fs3.writeFile(tmp, JSON.stringify(msg), { encoding: "utf8", mode: FILE_MODE });
+    await withFsRetry(() => fs3.rename(tmp, path3.join(dir, name)));
   } catch (e) {
-    await fs2.rm(tmp, { force: true });
+    await fs3.rm(tmp, { force: true });
     throw e;
   }
   return msg;
@@ -124,7 +167,7 @@ async function enqueue(sid, text) {
 async function list(sid) {
   const dir = paths().inboxDir(sid);
   try {
-    return (await fs2.readdir(dir)).filter((n) => n.endsWith(".msg")).sort().map((n) => path3.join(dir, n));
+    return (await fs3.readdir(dir)).filter((n) => n.endsWith(".msg")).sort().map((n) => path3.join(dir, n));
   } catch (e) {
     if (e.code === "ENOENT") return [];
     throw e;
@@ -132,7 +175,7 @@ async function list(sid) {
 }
 async function readMsg(file) {
   try {
-    return JSON.parse(await fs2.readFile(file, "utf8"));
+    return JSON.parse(await fs3.readFile(file, "utf8"));
   } catch (e) {
     if (isRace(e)) return null;
     if (e instanceof SyntaxError) return null;
@@ -152,7 +195,7 @@ async function clearInbox(sid) {
   const dir = paths().inboxDir(sid);
   let names;
   try {
-    names = await fs2.readdir(dir);
+    names = await fs3.readdir(dir);
   } catch (e) {
     if (e.code === "ENOENT") return;
     throw e;
@@ -160,7 +203,7 @@ async function clearInbox(sid) {
   for (const n of names) {
     if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`)) continue;
     try {
-      await withFsRetry(() => fs2.rm(path3.join(dir, n), { force: true }));
+      await withFsRetry(() => fs3.rm(path3.join(dir, n), { force: true }));
     } catch (e) {
       if (!isRace(e)) throw e;
     }
@@ -168,13 +211,13 @@ async function clearInbox(sid) {
 }
 
 // src/core/busy.ts
-import fs3 from "node:fs/promises";
+import fs4 from "node:fs/promises";
 async function clearBusy(sid) {
   await removeFile(paths().busyFile(sid));
 }
 async function busyAge(sid, now = Date.now()) {
   try {
-    return now - (await fs3.stat(paths().busyFile(sid))).mtimeMs;
+    return now - (await fs4.stat(paths().busyFile(sid))).mtimeMs;
   } catch {
     return null;
   }
@@ -189,9 +232,9 @@ async function getWaiting(sid) {
 }
 
 // src/core/lock.ts
-import fs4 from "node:fs/promises";
+import fs5 from "node:fs/promises";
 import path4 from "node:path";
-import crypto4 from "node:crypto";
+import crypto5 from "node:crypto";
 var EMPTY_GRACE_MS = 1e4;
 var LOCK_STALE_MS = 9e4;
 function isAlive(pid) {
@@ -217,30 +260,30 @@ function lockPid(content) {
   return typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? pid : null;
 }
 async function publish(file) {
-  const tmp = `${file}.${crypto4.randomUUID()}.tmp`;
+  const tmp = `${file}.${crypto5.randomUUID()}.tmp`;
   const content = JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() });
   try {
-    await fs4.writeFile(tmp, content, { flag: "wx" });
-    await fs4.link(tmp, file);
+    await fs5.writeFile(tmp, content, { flag: "wx" });
+    await fs5.link(tmp, file);
     return content;
   } catch (e) {
     if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return null;
     throw e;
   } finally {
-    await fs4.rm(tmp, { force: true });
+    await fs5.rm(tmp, { force: true });
   }
 }
 async function staleContent(file) {
   let content;
   let mtimeMs;
   try {
-    content = await fs4.readFile(file, "utf8");
+    content = await fs5.readFile(file, "utf8");
   } catch (e) {
     if (code(e) === "ENOENT") return null;
     content = "";
   }
   try {
-    mtimeMs = (await fs4.stat(file)).mtimeMs;
+    mtimeMs = (await fs5.stat(file)).mtimeMs;
   } catch {
     return null;
   }
@@ -255,8 +298,8 @@ async function reclaim(file, seen) {
   const guard = `${file}.reclaim`;
   if (await publish(guard) === null) {
     try {
-      const st = await fs4.stat(guard);
-      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs4.rm(guard, { force: true });
+      const st = await fs5.stat(guard);
+      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs5.rm(guard, { force: true });
     } catch {
     }
     return null;
@@ -264,7 +307,7 @@ async function reclaim(file, seen) {
   try {
     if (await staleContent(file) !== seen) return null;
     try {
-      await fs4.unlink(file);
+      await fs5.unlink(file);
     } catch (e) {
       if (code(e) !== "ENOENT") {
         if (contention(e)) return null;
@@ -274,7 +317,7 @@ async function reclaim(file, seen) {
     return await publish(file);
   } finally {
     try {
-      if (lockPid(await fs4.readFile(guard, "utf8")) === process.pid) await fs4.rm(guard, { force: true });
+      if (lockPid(await fs5.readFile(guard, "utf8")) === process.pid) await fs5.rm(guard, { force: true });
     } catch {
     }
   }
@@ -292,11 +335,11 @@ async function acquireLockContent(file) {
 }
 async function releaseLock(file) {
   try {
-    if (lockPid(await fs4.readFile(file, "utf8")) !== process.pid) return;
+    if (lockPid(await fs5.readFile(file, "utf8")) !== process.pid) return;
   } catch {
     return;
   }
-  await fs4.rm(file, { force: true });
+  await fs5.rm(file, { force: true });
 }
 async function withLock(file, waitMs, fn) {
   const deadline = Date.now() + waitMs;
@@ -331,7 +374,7 @@ async function getRegistration(sid) {
 async function listRegistrations() {
   let names;
   try {
-    names = await fs5.readdir(paths().sessionsDir);
+    names = await fs6.readdir(paths().sessionsDir);
   } catch (e) {
     if (e.code === "ENOENT") return [];
     throw e;
@@ -375,7 +418,7 @@ async function pruneRegistrations(maxAgeMs, now = Date.now()) {
     });
     if (!pruned.includes(sid)) continue;
     await clearInbox(sid);
-    await fs5.rm(paths().inboxDir(sid), { recursive: true, force: true }).catch(() => {
+    await fs6.rm(paths().inboxDir(sid), { recursive: true, force: true }).catch(() => {
     });
     await clearBusy(sid);
     await clearWaiting(sid);
@@ -846,7 +889,7 @@ var ClaudeCodeProvider = class {
     const oldest = Math.min(...queued.map((m) => Date.parse(m.createdAt)).filter((n) => !Number.isNaN(n)));
     if (!Number.isFinite(oldest) || this.now() - oldest < STALLED_AFTER_MS) return false;
     try {
-      return this.now() - (await fs6.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
+      return this.now() - (await fs7.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
     } catch {
       return true;
     }
@@ -1010,7 +1053,7 @@ var ClaudeCodeProvider = class {
     if (!again || !isActive(again)) {
       const dir = paths().inboxDir(sid);
       try {
-        for (const n of await fs6.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs6.rm(path6.join(dir, n), { force: true });
+        for (const n of await fs7.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs7.rm(path6.join(dir, n), { force: true });
       } catch {
       }
       throw new SessionDisconnectedError(sid);
@@ -1021,9 +1064,9 @@ var ClaudeCodeProvider = class {
 
 // src/hub/server.ts
 import http from "node:http";
-import fs7 from "node:fs/promises";
+import fs8 from "node:fs/promises";
 import path7 from "node:path";
-import crypto5 from "node:crypto";
+import crypto6 from "node:crypto";
 
 // src/core/config.ts
 var LANGS = ["en", "pt-BR"];
@@ -1076,7 +1119,7 @@ function tokenOk(given, expected) {
   const a = Buffer.from(given);
   const b = Buffer.from(expected);
   if (a.length !== b.length) return false;
-  return crypto5.timingSafeEqual(a, b);
+  return crypto6.timingSafeEqual(a, b);
 }
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -1203,9 +1246,9 @@ data: ${JSON.stringify(c)}
     if (target !== root && !target.startsWith(root + path7.sep)) return sendJson(res, 404, { error: "not found" });
     const send = async (file) => {
       try {
-        const st = await fs7.stat(file);
+        const st = await fs8.stat(file);
         if (!st.isFile()) return false;
-        const data = await fs7.readFile(file);
+        const data = await fs8.readFile(file);
         const ext = path7.extname(file).toLowerCase();
         const type = MIME[ext] ?? "application/octet-stream";
         const headers = { "Content-Type": type, "Content-Length": data.length };
@@ -1219,7 +1262,7 @@ data: ${JSON.stringify(c)}
     };
     let rootExists = true;
     try {
-      rootExists = (await fs7.stat(root)).isDirectory();
+      rootExists = (await fs8.stat(root)).isDirectory();
     } catch {
       rootExists = false;
     }
@@ -1367,19 +1410,19 @@ async function prune(log) {
 async function rotateToken() {
   const file = paths().token;
   await ensureDir(path8.dirname(file));
-  const t = crypto6.randomBytes(32).toString("hex");
+  const t = crypto7.randomBytes(32).toString("hex");
   await writeFileAtomic600(file, t);
-  await fs8.chmod(file, 384).catch(() => {
+  await fs9.chmod(file, 384).catch(() => {
   });
   return t;
 }
 async function writeFileAtomic600(file, data) {
-  const tmp = `${file}.${process.pid}.${crypto6.randomUUID()}.tmp`;
+  const tmp = `${file}.${process.pid}.${crypto7.randomUUID()}.tmp`;
   try {
-    await fs8.writeFile(tmp, data, { mode: 384 });
-    await withFsRetry(() => fs8.rename(tmp, file));
+    await fs9.writeFile(tmp, data, { mode: 384 });
+    await withFsRetry(() => fs9.rename(tmp, file));
   } catch (e) {
-    await fs8.rm(tmp, { force: true });
+    await fs9.rm(tmp, { force: true });
     throw e;
   }
 }
@@ -1388,7 +1431,7 @@ async function liveHubExists() {
   if (!info || typeof info.port !== "number") return false;
   let token;
   try {
-    token = (await fs8.readFile(paths().token, "utf8")).trim();
+    token = (await fs9.readFile(paths().token, "utf8")).trim();
   } catch {
     return false;
   }
@@ -1517,7 +1560,7 @@ async function startHub(opts = {}) {
         clearInterval(ownTimer);
         await started.close();
         const cur = await readJson(paths().hubJson);
-        if (cur?.pid === process.pid && cur?.port === port) await fs8.rm(paths().hubJson, { force: true });
+        if (cur?.pid === process.pid && cur?.port === port) await fs9.rm(paths().hubJson, { force: true });
         log("hub stopped");
       }
     };

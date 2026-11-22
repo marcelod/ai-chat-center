@@ -3,8 +3,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { paths } from './paths.js';
 import { ensureDir, FILE_MODE, withFsRetry } from './fsAtomic.js';
+import { signMessage } from './secret.js';
 
-export type InboxMessage = { id: string; text: string; createdAt: string };
+/** `sig`: HMAC by the hub (secret.ts); the waiter delivers only messages whose signature checks out. */
+export type InboxMessage = { id: string; text: string; createdAt: string; sig?: string };
 
 // File name: <epochMs zero-padded to 15>-<counter zero-padded to 6>-<uuid>.msg.
 // Lexical order == time order; the in-process counter breaks ties within the same ms
@@ -18,7 +20,7 @@ export async function enqueue(sid: string, text: string): Promise<InboxMessage> 
   const dir = paths().inboxDir(sid);
   await ensureDir(dir);
   const now = Date.now();
-  const msg: InboxMessage = { id: crypto.randomUUID(), text, createdAt: new Date(now).toISOString() };
+  const msg = await signMessage({ id: crypto.randomUUID(), text, createdAt: new Date(now).toISOString() });
   counter = (counter + 1) % 1_000_000;
   const name = `${String(now).padStart(15, '0')}-${String(counter).padStart(6, '0')}-${msg.id}.msg`;
   const tmp = path.join(dir, `.${msg.id}.tmp`); // never ends in .msg
