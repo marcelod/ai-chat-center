@@ -15,6 +15,14 @@ const SUMMARY_MAX = 120;
 
 const truncate = (s: string, max: number) => (s.length > max ? s.slice(0, max) : s);
 
+/**
+ * Wrapper tags Claude Code puts around parts of a prompt; the bubble shows the inner text only.
+ * Pasted text: `<pasted_content id="N">…</pasted_content id="N">` (the close repeats the id; a plain
+ * close or no close at all is handled too). Agent teams: `<teammate-message teammate_id=… color=…>…</teammate-message>`.
+ */
+const WRAPPER_TAGS = /<\/?(?:pasted_content|teammate-message)(?:\s+[\w-]+="[^"]*")*\s*>/g;
+const unwrapPrompt = (text: string): string => text.replace(WRAPPER_TAGS, '');
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -102,11 +110,13 @@ export class TranscriptParser {
   private attachment(uuid: string, ts: string, a: unknown): ChatEvent[] {
     if (!isRecord(a) || a.type !== 'queued_command' || a.commandMode !== 'prompt') return [];
     if (a.isMeta === true || a.humanTurn !== true) return [];
-    const { text, images } = promptParts(a.prompt);
+    const parts = promptParts(a.prompt);
+    const text = unwrapPrompt(parts.text);
+    const images = parts.images;
     const pasted = Array.isArray(a.imagePasteIds) ? a.imagePasteIds.length : 0;
     if (!text.trim() && !images && !pasted) return [];
     this.open = null;
-    this.queued.push({ text, at: Date.parse(ts) || 0 });
+    this.queued.push({ text: text.trim(), at: Date.parse(ts) || 0 });
     const n = Math.max(images, pasted);
     return [{ kind: 'user', id: uuid, ts, text, origin: 'terminal', ...(n ? { images: n } : {}) }];
   }
@@ -114,7 +124,8 @@ export class TranscriptParser {
   private takeQueued(text: string, ts: string): boolean {
     const at = Date.parse(ts) || 0;
     this.queued = this.queued.filter((q) => at - q.at <= QUEUED_DEDUP_MS);
-    const i = this.queued.findIndex((q) => q.text === text);
+    const want = text.trim();
+    const i = this.queued.findIndex((q) => q.text === want);
     if (i < 0) return false;
     this.queued.splice(i, 1);
     return true;
@@ -155,7 +166,9 @@ export class TranscriptParser {
   private user(uuid: string, ts: string, content: unknown): ChatEvent[] {
     if (Array.isArray(content)) {
       const out: ChatEvent[] = this.toolResults(content);
-      const { text, images } = promptParts(content);
+      const parts = promptParts(content);
+      const text = unwrapPrompt(parts.text);
+      const images = parts.images;
       if ((text.trim() || images) && !text.startsWith(INTERRUPTED) && !this.takeQueued(text, ts)) {
         this.open = null;
         out.push({ kind: 'user', id: uuid, ts, text, origin: 'terminal', ...(images ? { images } : {}) });
@@ -210,10 +223,11 @@ export class TranscriptParser {
     ) {
       return [];
     }
-    if (!content.trim()) return [];
-    if (this.takeQueued(content, ts)) return [];
+    const text = unwrapPrompt(content);
+    if (!text.trim()) return [];
+    if (this.takeQueued(text, ts)) return [];
     this.open = null;
-    return [{ kind: 'user', id: uuid, ts, text: content, origin: 'terminal' }];
+    return [{ kind: 'user', id: uuid, ts, text, origin: 'terminal' }];
   }
 
   private toolResults(blocks: unknown[]): ChatEvent[] {

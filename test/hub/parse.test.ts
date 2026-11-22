@@ -234,3 +234,47 @@ describe('TranscriptParser: current transcript shapes', () => {
     expect(run().find((e) => e.id === 'u14')).toBeUndefined();
   });
 });
+
+// Audit R2-N4 / N5. Shapes only (synthetic text), taken from a read-only survey of real transcripts:
+// pasted text is stored as <pasted_content id="N">…</pasted_content id="N"> (the close tag repeats the
+// id), and agent-team messages arrive as <teammate-message teammate_id=… color=… [summary=…]>…</teammate-message>.
+describe('TranscriptParser: wrappers and queued dedupe', () => {
+  const user = (uuid: string, ts: string, content: unknown) => ({ type: 'user', uuid, timestamp: ts, message: { role: 'user', content } });
+  const queued = (uuid: string, ts: string, prompt: unknown) => ({
+    type: 'attachment', uuid, timestamp: ts,
+    attachment: { type: 'queued_command', commandMode: 'prompt', humanTurn: true, prompt },
+  });
+  const texts = (entries: unknown[]) => {
+    const p = new TranscriptParser();
+    return entries.flatMap((e) => p.push(e)).filter((e) => e.kind === 'user').map((e) => (e as { text: string }).text);
+  };
+
+  it('a queued prompt is not shown twice when the later entry differs only by surrounding whitespace', () => {
+    expect(texts([queued('q1', '2026-03-01T10:00:00Z', 'run the tests'), user('u1', '2026-03-01T10:01:00Z', '  run the tests\n')])).toEqual(['run the tests']);
+    expect(texts([queued('q1', '2026-03-01T10:00:00Z', ' run the tests '), user('u1', '2026-03-01T10:01:00Z', [{ type: 'text', text: 'run the tests' }])])).toEqual([' run the tests ']);
+  });
+
+  it('pasted text shows its inner text, without the tags (string, blocks and queued prompts)', () => {
+    const paste = 'look at this:\n<pasted_content id="1">line one\nline two</pasted_content id="1">\nwhat is wrong?';
+    expect(texts([user('u1', '2026-03-01T10:00:00Z', paste)])).toEqual(['look at this:\nline one\nline two\nwhat is wrong?']);
+    expect(texts([user('u2', '2026-03-01T10:00:00Z', [{ type: 'text', text: '<pasted_content id="2">x</pasted_content id="2">' }])])).toEqual(['x']);
+    expect(texts([queued('q3', '2026-03-01T10:00:00Z', '<pasted_content id="3">a</pasted_content id="3"> and <pasted_content id="4">b</pasted_content id="4">')])).toEqual(['a and b']);
+    // the plain closing form and an unclosed marker are dropped as well
+    expect(texts([user('u4', '2026-03-01T10:00:00Z', '<pasted_content id="5">y</pasted_content>')])).toEqual(['y']);
+    expect(texts([user('u5', '2026-03-01T10:00:00Z', '<pasted_content id="6">z')])).toEqual(['z']);
+  });
+
+  it('a teammate message shows its inner text, without the tags', () => {
+    const tm = '<teammate-message teammate_id="t1" color="blue" summary="done">all tests pass</teammate-message>';
+    expect(texts([user('u1', '2026-03-01T10:00:00Z', tm)])).toEqual(['all tests pass']);
+  });
+
+  it('a queued pasted prompt and its later identical entry are shown once', () => {
+    const paste = '<pasted_content id="1">abc</pasted_content id="1">';
+    expect(texts([queued('q1', '2026-03-01T10:00:00Z', paste), user('u1', '2026-03-01T10:01:00Z', `${paste}\n`)])).toEqual(['abc']);
+  });
+
+  it('text that merely mentions other tags is left alone', () => {
+    expect(texts([user('u1', '2026-03-01T10:00:00Z', 'is <VirtualHost *:80> right?')])).toEqual(['is <VirtualHost *:80> right?']);
+  });
+});
