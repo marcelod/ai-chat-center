@@ -5,6 +5,44 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { startHub } from '../../src/hub/main.js';
+import { ensureHub } from '../../src/hooks/ensureHub.js';
+
+/**
+ * Audit S2-N1: a squatter on the port recorded in a stale hub.json that relays every health challenge
+ * to the real hub (rewriting nothing but the target) and records any token it is handed.
+ */
+async function relaySquatter(target: () => number) {
+  const seen = { relayed: 0, tokens: [] as string[] };
+  const srv = http.createServer(async (q, s) => {
+    const u = new URL(q.url ?? '/', 'http://x');
+    const tok = u.searchParams.get('token');
+    if (tok) seen.tokens.push(tok);
+    const ch = u.searchParams.get('challenge');
+    if (u.pathname === '/api/health' && ch) {
+      try {
+        const r = await fetch(`http://127.0.0.1:${target()}/api/health?challenge=${ch}`, { signal: AbortSignal.timeout(500) });
+        const body = await r.text();
+        seen.relayed++;
+        s.writeHead(r.status, { 'content-type': 'application/json' });
+        return void s.end(body);
+      } catch {
+        /* nothing to relay to */
+      }
+    }
+    s.writeHead(404);
+    s.end();
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  return { srv, port: (srv.address() as { port: number }).port, seen };
+}
+
+async function freePort(): Promise<number> {
+  const s = http.createServer();
+  await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
+  const p = (s.address() as { port: number }).port;
+  await new Promise<void>((r) => s.close(() => r()));
+  return p;
+}
 
 let home: string;
 let prev: string | undefined;
@@ -59,6 +97,47 @@ describe('main', () => {
     } finally {
       await h?.close();
       fake.close();
+    }
+  });
+  // Audit S2-N1 (DoS variant): the squatter relays the new hub's own self-check back to it. The proof is
+  // for the hub's own port, not the recorded one, so the hub does not take it for a live hub and stays up.
+  it('squatter cannot make new hubs shut down', async () => {
+    const base = await freePort();
+    const sq = await relaySquatter(() => base);
+    await fsp.writeFile(path.join(home, 'hub.json'), JSON.stringify({ pid: 1, port: sq.port }));
+    await fsp.writeFile(path.join(home, 'token'), 'f'.repeat(64));
+    process.env.AI_CHAT_CENTER_PORT = String(base);
+    const h = await startHub();
+    try {
+      expect(h).not.toBeNull();
+      expect(h!.port).not.toBe(sq.port);
+      expect(JSON.parse(await fsp.readFile(path.join(home, 'hub.json'), 'utf8')).port).toBe(h!.port);
+    } finally {
+      await h?.close();
+      sq.srv.close();
+    }
+  });
+  // Audit S2-N1: between the token rotation and the hub.json write, hub.json still names the squatter
+  // port while the token on disk is live. A relayed (genuine) proof must not earn the squatter the URL.
+  it('a port-forwarding squatter never gets a url: ensureHub only pairs the token with the verified port', async () => {
+    const h = await startHub();
+    const sq = await relaySquatter(() => h!.port);
+    const hubJson = path.join(home, 'hub.json');
+    const real = await fsp.readFile(hubJson, 'utf8');
+    await fsp.writeFile(hubJson, JSON.stringify({ pid: 1, port: sq.port })); // stale record, live token
+    try {
+      const url = await ensureHub({
+        spawnHub: () => void setTimeout(() => void fsp.writeFile(hubJson, real), 300),
+        pollMs: 20,
+        timeoutMs: 5000,
+      });
+      expect(sq.seen.relayed).toBeGreaterThan(1);
+      expect(new URL(url).port).toBe(String(h!.port));
+      expect(new URL(url).port).not.toBe(String(sq.port));
+      expect(sq.seen.tokens).toEqual([]);
+    } finally {
+      await h!.close();
+      sq.srv.close();
     }
   });
   it('creates a token when missing, and a second start defers to the live hub', async () => {

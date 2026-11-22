@@ -55,7 +55,11 @@ async function writeFileAtomic600(file: string, data: string): Promise<void> {
   }
 }
 
-/** True only when the hub recorded in hub.json proves it knows the token on disk (see ensureHub). */
+/**
+ * True only when the hub recorded in hub.json proves it knows the token on disk AND listens on the
+ * recorded port (see ensureHub). A timeout (1 s), an error or a bad proof all mean "no live hub", so a
+ * squatter on a stale port can neither stall nor stop a starting hub.
+ */
 async function liveHubExists(): Promise<boolean> {
   const info = await readJson<{ pid?: number; port?: number }>(paths().hubJson);
   if (!info || typeof info.port !== 'number') return false;
@@ -76,7 +80,7 @@ async function liveHubExists(): Promise<boolean> {
       typeof j.pid === 'number' &&
       typeof j.version === 'string' &&
       typeof j.proof === 'string' &&
-      proofMatches(token, challenge, { pid: j.pid, version: j.version, proof: j.proof })
+      proofMatches(token, challenge, info.port, { pid: j.pid, version: j.version, proof: j.proof })
     );
   } catch {
     return false;

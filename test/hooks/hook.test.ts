@@ -253,11 +253,11 @@ describe('ensureHub', () => {
     await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
     return { srv, port: (srv.address() as { port: number }).port };
   };
-  const proofOf = (token: string, challenge: string, pid: number, version: string) =>
-    crypto.createHmac('sha256', token).update(`${challenge}.${pid}.${version}`).digest('hex');
-  /** A health() that answers like a real hub holding `token`. */
-  const realHub = (token: string, pid: number, version = VERSION) => async (_port: number, challenge: string) => ({
-    ok: true as const, version, pid, proof: proofOf(token, challenge, pid, version),
+  const proofOf = (token: string, challenge: string, port: number, pid: number, version: string) =>
+    crypto.createHmac('sha256', token).update(`${challenge}|${port}|${pid}|${version}`).digest('hex');
+  /** A health() that answers like a real hub holding `token` and listening on the dialed port. */
+  const realHub = (token: string, pid: number, version = VERSION) => async (port: number, challenge: string) => ({
+    ok: true as const, version, pid, proof: proofOf(token, challenge, port, pid, version),
   });
 
   it('checkHealth sends a challenge and returns the proven answer, or null', async () => {
@@ -281,7 +281,7 @@ describe('ensureHub', () => {
   it('returns the url without spawning when the hub proves the token on disk and has this version', async () => {
     const { srv, port } = await serve((u) => {
       const c = u.searchParams.get('challenge')!;
-      return JSON.stringify({ ok: true, version: VERSION, pid: 1, proof: proofOf('tok', c, 1, VERSION) });
+      return JSON.stringify({ ok: true, version: VERSION, pid: 1, proof: proofOf('tok', c, port, 1, VERSION) });
     });
     writeHub(port);
     let spawned = 0;
@@ -308,7 +308,19 @@ describe('ensureHub', () => {
     }
   });
 
-  it('a proven hub of another version is killed and replaced', async () => {
+  // Audit S2-N1: a squatter on the recorded port relays the challenge to the real hub on another port.
+  // The genuine proof it returns is bound to the real hub's port, so it fails on the port we dialed.
+  it('a relayed proof (genuine, but for another port) is rejected: no url for the squatter port', async () => {
+    writeHub(7777, 'tok', 1);
+    const relay = (realPort: number) => async (_port: number, challenge: string) => realHub('tok', 1)(realPort, challenge);
+    let spawned = 0;
+    await expect(
+      ensureHub({ spawnHub: () => void spawned++, health: relay(7778), pollMs: 5, timeoutMs: 30 }),
+    ).rejects.toThrow();
+    expect(spawned).toBe(1);
+  });
+
+  it('a proven hub of an older version is killed and replaced', async () => {
     writeHub(7777, 'tok', 1234);
     const killed: number[] = [];
     let current = realHub('tok', 1234, '0.0.1');
@@ -324,6 +336,29 @@ describe('ensureHub', () => {
     });
     expect(killed).toEqual([1234]);
     expect(url).toBe('http://127.0.0.1:7778/?token=tok2');
+  });
+
+  // Audit S2-N4: two installed plugin versions must not keep replacing each other's hub.
+  it('a proven hub of a newer version is used as is: never killed, nothing spawned', async () => {
+    writeHub(7777, 'tok', 1234);
+    const killed: number[] = [];
+    let spawned = 0;
+    const url = await ensureHub({
+      health: realHub('tok', 1234, '99.0.0'),
+      kill: (pid) => void killed.push(pid),
+      spawnHub: () => void spawned++,
+      pollMs: 5,
+    });
+    expect(url).toBe('http://127.0.0.1:7777/?token=tok');
+    expect(killed).toEqual([]);
+    expect(spawned).toBe(0);
+  });
+  it('compares versions as semver, not as strings', async () => {
+    const { compareVersions } = await import('../../src/hooks/ensureHub.js');
+    expect(compareVersions('0.10.0', '0.9.9')).toBeGreaterThan(0);
+    expect(compareVersions('0.2.0', '0.2.1')).toBeLessThan(0);
+    expect(compareVersions('1.0.0', '1.0.0')).toBe(0);
+    expect(Number.isNaN(compareVersions('garbage', '1.0.0'))).toBe(true);
   });
 
   it('spawns when hub is down and polls until healthy', async () => {

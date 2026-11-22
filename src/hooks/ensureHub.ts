@@ -79,11 +79,29 @@ function readHub(): { port: number; token: string } | null {
 
 const urlOf = (h: { port: number; token: string }) => `http://127.0.0.1:${h.port}/?token=${h.token}`;
 
+/** Semver order of `a` vs `b` (major.minor.patch; a pre-release sorts before its release). NaN if either is unparsable. */
+export function compareVersions(a: string, b: string): number {
+  const parse = (v: string) => /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(v.trim());
+  const x = parse(a);
+  const y = parse(b);
+  if (!x || !y) return NaN;
+  for (let i = 1; i <= 3; i++) {
+    const d = Number(x[i]) - Number(y[i]);
+    if (d !== 0) return Math.sign(d);
+  }
+  if (x[4] === y[4]) return 0;
+  if (x[4] === undefined) return 1;
+  if (y[4] === undefined) return -1;
+  return x[4] < y[4] ? -1 : 1;
+}
+
 /**
- * Returns the hub URL, starting the hub if it is not answering (or replacing one of another version).
- * A hub is trusted only when it proves, with an HMAC over a fresh random challenge, that it knows the
- * token on disk. Anything else on the recorded port is foreign: its URL is never returned (that would
- * hand it the token); a hub of our own is started instead (it skips busy ports).
+ * Returns the hub URL, starting the hub if it is not answering (or replacing one of an OLDER version;
+ * a newer one is used as is). A hub is trusted only when it proves, with an HMAC over a fresh random
+ * challenge, that it knows the token on disk and listens on the very port we dialed. Anything else on
+ * the recorded port is foreign, including a squatter that relays the challenge to the real hub: its URL
+ * is never returned (that would hand it the token); a hub of our own is started instead (it skips busy
+ * ports and rewrites hub.json under the hub lock). A token is only ever paired with a verified port.
  */
 export async function ensureHub(opts: EnsureHubOptions = {}): Promise<string> {
   const health = opts.health ?? checkHealth;
@@ -103,15 +121,17 @@ export async function ensureHub(opts: EnsureHubOptions = {}): Promise<string> {
   const proven = async (h: { port: number; token: string }) => {
     const challenge = newChallenge();
     const r = await health(h.port, challenge);
-    return r && proofMatches(h.token, challenge, r) ? r : null;
+    return r && proofMatches(h.token, challenge, h.port, r) ? r : null;
   };
 
   const hub = readHub();
   if (hub) {
     const h = await proven(hub);
     if (h) {
-      if (h.version === VERSION) return urlOf(hub);
-      // A proven hub from another plugin version: stop it and wait (bounded) until it is gone, or the
+      // Same or newer (another installed copy of the plugin): use it. Killing a newer hub would make two
+      // installed versions keep replacing each other, rotating the token every time.
+      if (!(compareVersions(h.version, VERSION) < 0)) return urlOf(hub);
+      // A proven hub of an older plugin version: stop it and wait (bounded) until it is gone, or the
       // new hub would see it answering and defer to it.
       kill(h.pid);
       const until = Date.now() + 3000;
@@ -126,7 +146,7 @@ export async function ensureHub(opts: EnsureHubOptions = {}): Promise<string> {
     const cur = readHub();
     if (!cur) continue;
     const h = await proven(cur);
-    if (h && h.version === VERSION) return urlOf(cur);
+    if (h && compareVersions(h.version, VERSION) >= 0) return urlOf(cur);
   }
   throw new Error('AI Chat Center hub did not start in time');
 }

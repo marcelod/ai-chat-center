@@ -8,7 +8,7 @@
 //   1. hook.mjs and waiter.mjs, on an unregistered session: exit 0, no output, nothing written;
 //   2. every hooks.json command line under sh (when sh exists): same result;
 //   3. hub.mjs on a temp home and port: /api/health answers {ok, version} without a pid, and the
-//      challenge form returns a proof made with the token on disk;
+//      challenge form returns a proof made with the token on disk, bound to the port;
 //   4. the UI page is served; then the hub is stopped.
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -88,8 +88,8 @@ try {
     const token = fs.readFileSync(path.join(stateHome, 'token'), 'utf8').trim();
     const challenge = crypto.randomBytes(16).toString('hex');
     const proven = JSON.parse((await get(info.port, `/api/health?challenge=${challenge}`)).body);
-    const expected = crypto.createHmac('sha256', token).update(`${challenge}.${proven.pid}.${proven.version}`).digest('hex');
-    check(proven.ok === true && proven.pid === hub.pid && proven.proof === expected, '/api/health?challenge= proves the token on disk');
+    const expected = crypto.createHmac('sha256', token).update(`${challenge}|${info.port}|${proven.pid}|${proven.version}`).digest('hex');
+    check(proven.ok === true && proven.pid === hub.pid && proven.proof === expected, '/api/health?challenge= proves the token on disk and the port');
     const page = await get(info.port, '/');
     check(page.status === 200 && page.body.includes('<html'), `GET / -> ${page.status}`);
   }

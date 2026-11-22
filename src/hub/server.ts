@@ -234,11 +234,12 @@ export async function createHub(opts: HubOptions): Promise<{ url: string; client
     const method = req.method ?? 'GET';
     if (p === '/api/health' && method === 'GET') {
       // Unauthenticated: reveals nothing but the version. With a challenge it proves knowledge of the
-      // token, so ensureHub never hands the token URL to an impostor on this port.
+      // token, so ensureHub never hands the token URL to an impostor on this port. The proof binds the
+      // port this server listens on: relayed through another port, it no longer verifies.
       const challenge = url.searchParams.get('challenge');
       if (challenge === null) return sendJson(res, 200, { ok: true, version: VERSION });
       if (!CHALLENGE_RE.test(challenge)) throw new HttpError(400, 'invalid challenge');
-      const proof = healthProof(token, challenge, process.pid, VERSION);
+      const proof = healthProof(token, challenge, port, process.pid, VERSION);
       return sendJson(res, 200, { ok: true, version: VERSION, pid: process.pid, proof });
     }
 

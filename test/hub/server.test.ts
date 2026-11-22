@@ -99,14 +99,15 @@ describe('auth and host checks', () => {
     expect(JSON.parse(r.body)).toEqual({ ok: true, version: VERSION });
   });
   // Audit SEC-F1: a squatter on the port could pass the old pid check and receive the token URL.
-  // The challenge form proves knowledge of the token: HMAC-SHA256(token, challenge.pid.version).
-  it('health with a challenge returns pid and an HMAC proof over challenge, pid and version', async () => {
+  // The challenge form proves knowledge of the token: HMAC-SHA256(token, challenge|port|pid|version).
+  // Audit S2-N1: the proof binds the port the hub listens on, so a relay on another port is caught.
+  it('health with a challenge returns pid and an HMAC proof over challenge, listening port, pid and version', async () => {
     const u = await start(fakeProvider());
     const challenge = crypto.randomBytes(16).toString('hex');
     const r = await req(u, `/api/health?challenge=${challenge}`);
     expect(r.status).toBe(200);
     const body = JSON.parse(r.body);
-    const proof = crypto.createHmac('sha256', TOKEN).update(`${challenge}.${process.pid}.${VERSION}`).digest('hex');
+    const proof = crypto.createHmac('sha256', TOKEN).update(`${challenge}|${u.port}|${process.pid}|${VERSION}`).digest('hex');
     expect(body).toEqual({ ok: true, version: VERSION, pid: process.pid, proof });
     for (const bad of ['xyz', 'a'.repeat(31), 'A'.repeat(32), 'a'.repeat(33)]) {
       expect((await req(u, `/api/health?challenge=${bad}`)).status).toBe(400);
