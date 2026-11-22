@@ -19,5 +19,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test-setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
+    // Generous: a loaded CI runner must not time out tests whose result does not depend on time.
+    testTimeout: 30_000,
   },
 });
