@@ -195,8 +195,7 @@ describe('main', () => {
       await new Promise((r) => setTimeout(r, 150));
       expect(idle).toBe(0);
       await markDisconnected('a', 'off');
-      await new Promise((r) => setTimeout(r, 200));
-      expect(idle).toBe(1);
+      await vi.waitFor(() => expect(idle).toBe(1), { timeout: 5000, interval: 10 });
     } finally {
       await h!.close();
     }
@@ -257,6 +256,9 @@ describe('main', () => {
     expect(EXIT_CHECK_MS).toBe(5 * 60_000);
   });
   it('an open browser stream keeps the hub alive', async () => {
+    // An active session holds the hub until the stream is open, however slow the machine is.
+    const { register, markDisconnected } = await import('../../src/core/registry.js');
+    await register({ sessionId: 'a', transcriptPath: '/t', cwd: '/c', pid: process.pid });
     let idle = 0;
     const h = await startHub({ idleMs: 60, idleCheckMs: 10, onIdle: () => void idle++ });
     const token = (await fsp.readFile(path.join(home, 'token'), 'utf8')).trim();
@@ -264,6 +266,7 @@ describe('main', () => {
     try {
       const res = await fetch(`http://127.0.0.1:${h!.port}/api/stream`, { headers: { authorization: `Bearer ${token}` }, signal: ac.signal });
       expect(res.status).toBe(200);
+      await markDisconnected('a', 'off');
       await new Promise((r) => setTimeout(r, 150));
       expect(idle).toBe(0);
     } finally {

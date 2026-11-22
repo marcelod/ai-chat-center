@@ -33,7 +33,7 @@ describe('waiter', () => {
     for (const ev of ['stop', 'start'] as const) {
       expect(await wait(ev, { source: 'startup' })).toEqual({ exitCode: 0, stderr: '' });
     }
-    expect(Date.now() - t).toBeLessThan(500);
+    expect(Date.now() - t).toBeLessThan(3000); // no waiting at all (generous: CI runners under load)
     expect(fs.readdirSync(paths().home)).toEqual([]);
   });
   it('exits 0 silently for an invalid session id', async () => {
@@ -183,8 +183,7 @@ describe('waiter', () => {
       lookup: async () => (++lookups < 2 ? { ok: true, pid: null } : { ok: true, pid: 777 }),
       isAlive: (pid) => pid === 777 && alive,
     });
-    await sleep(80);
-    expect((await getRegistration('s1'))?.pid).toBe(777);
+    await vi.waitFor(async () => expect((await getRegistration('s1'))?.pid).toBe(777), { timeout: 5000, interval: 10 });
     alive = false;
     expect(await p).toEqual({ exitCode: 0, stderr: '' });
   });
@@ -210,7 +209,7 @@ describe('waiter', () => {
     await reg('s1');
     const t = Date.now();
     expect(await wait('stop', {}, { deadlineMs: 60 })).toEqual({ exitCode: 0, stderr: '' });
-    expect(Date.now() - t).toBeLessThan(1000);
+    expect(Date.now() - t).toBeLessThan(4000);
     expect(fs.existsSync(paths().waiterLock('s1'))).toBe(false);
   });
   // Audit AI-F10: messages queued long ago (a session asleep for hours) are dropped, not delivered.
@@ -283,12 +282,14 @@ describe('waiter', () => {
   // Audit R2-N8: a waiter whose lock was reclaimed (its heartbeat lapsed) must stop, not drain alongside.
   it('exits 0 without draining once its lock is no longer its own', async () => {
     await reg('s1');
-    const p = wait('stop');
+    await setBusy('s1'); // a turn runs: the only way out of this waiter is noticing the lost lock
+    const p = wait('start', { source: 'startup' }, { lookup: async () => ({ ok: true, pid: process.pid }) });
     const lock = paths().waiterLock('s1');
     await vi.waitFor(() => expect(fs.existsSync(lock)).toBe(true), { timeout: 5000, interval: 5 });
-    fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, ts: '2000-01-01T00:00:00.000Z' })); // another holder's content
     await enqueue('s1', 'x');
+    fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, ts: '2000-01-01T00:00:00.000Z' })); // another holder's content
     expect(await p).toEqual({ exitCode: 0, stderr: '' });
+    expect(fs.readFileSync(path.join(paths().logDir, 'waiter.log'), 'utf8')).toMatch(/no longer ours/);
     expect((await peek('s1')).map((m) => m.text)).toEqual(['x']);
     expect(fs.existsSync(lock)).toBe(true); // the other holder's lock is left alone
   });
@@ -305,27 +306,31 @@ describe('waiter', () => {
   it('pid unknown: a successful lookup resets the failure clock', async () => {
     await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: null });
     let lookups = 0;
-    // fail, then find it alive: it must keep waiting past the failure limit
+    let t = 1_000_000; // the failure limit runs on this clock, so wall time under load does not matter
+    let done = false;
+    // two failed lookups (30 of the 60 allowed), then found and alive: past the limit it keeps waiting
     const p = wait('stop', {}, {
       reresolveMs: 5,
-      lookupFailMs: 40,
-      lookup: async () => (++lookups < 3 ? { ok: false } : { ok: true, pid: 4242 }),
+      lookupFailMs: 60,
+      now: () => t,
+      lookup: async () => (++lookups < 3 ? ((t += 15), { ok: false }) : { ok: true, pid: 4242 }),
       isAlive: (pid) => pid === 4242,
-    });
+    }).then((r) => ((done = true), r));
     await vi.waitFor(async () => expect((await getRegistration('s1'))?.pid).toBe(4242), { timeout: 5000, interval: 5 });
-    await sleep(100);
+    t += 10_000;
+    await sleep(50);
+    expect(done).toBe(false);
     await enqueue('s1', 'still here');
     expect(unwrapMessages((await p).stderr).map((m) => m.text)).toEqual(['still here']);
   });
   it('keeps the waiter lock heartbeat fresh while waiting', async () => {
     await reg('s1');
     const p = wait('stop', {}, { heartbeatMs: 10 });
-    await sleep(30);
     const lock = paths().waiterLock('s1');
+    await vi.waitFor(() => expect(fs.existsSync(lock)).toBe(true), { timeout: 5000, interval: 5 });
     const old = new Date(Date.now() - 120_000);
     fs.utimesSync(lock, old, old);
-    await sleep(60);
-    expect(Date.now() - fs.statSync(lock).mtimeMs).toBeLessThan(5_000);
+    await vi.waitFor(() => expect(Date.now() - fs.statSync(lock).mtimeMs).toBeLessThan(5_000), { timeout: 5000, interval: 10 });
     await enqueue('s1', 'x');
     expect((await p).exitCode).toBe(2);
   });

@@ -15,6 +15,17 @@ let home: string;
 let hub: { url: string; close(): Promise<void> } | undefined;
 let prevHome: string | undefined;
 
+/** Waits (bounded) until the poll count stays the same for 200 ms: the chain stopped. */
+async function stopsPolling(p: { pollCalls: number }): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const n = p.pollCalls;
+    await new Promise((r) => setTimeout(r, 200));
+    if (p.pollCalls === n) return;
+    if (Date.now() > deadline) throw new Error('polling never stopped');
+  }
+}
+
 function fakeProvider(over: Partial<Provider> = {}): Provider & { pollCalls: number; queue: ProviderChange[][] } {
   const p: any = {
     pollCalls: 0,
@@ -246,17 +257,15 @@ describe('stream', () => {
     const b = await openStream(u, '/api/stream', auth);
     await a.next(/retry/); await b.next(/retry/);
     const before = p.pollCalls;
-    await new Promise((r) => setTimeout(r, 500));
+    const t0 = Date.now();
+    await vi.waitFor(() => expect(p.pollCalls - before).toBeGreaterThanOrEqual(6), { timeout: 10_000, interval: 10 });
     const calls = p.pollCalls - before;
-    expect(calls).toBeGreaterThan(3);
-    expect(calls).toBeLessThan(14); // two timers would give ~20
+    // one 50 ms chain: at most elapsed/50 (+1); two timers would give about twice that
+    expect(calls).toBeLessThanOrEqual(Math.floor((Date.now() - t0) / 50) + 1);
     p.queue.push([{ type: 'sessions' }]);
     await a.next(/event: sessions/); await b.next(/event: sessions/);
     a.req.destroy(); b.req.destroy();
-    await new Promise((r) => setTimeout(r, 150));
-    const stopped = p.pollCalls;
-    await new Promise((r) => setTimeout(r, 200));
-    expect(p.pollCalls).toBe(stopped);
+    await stopsPolling(p);
   });
   it('reconnect during in-flight poll keeps a single poll chain', async () => {
     let active = 0, maxActive = 0, calls = 0;
@@ -278,13 +287,13 @@ describe('stream', () => {
     await b.next(/retry/);
     await new Promise((r) => setTimeout(r, 200));
     const before = calls;
-    await new Promise((r) => setTimeout(r, 1000));
-    const rate = calls - before;
+    const t0 = Date.now();
+    await vi.waitFor(() => expect(calls - before).toBeGreaterThanOrEqual(5), { timeout: 10_000, interval: 10 });
     expect(maxActive).toBe(1);
-    expect(rate).toBeGreaterThan(4);
-    expect(rate).toBeLessThan(10); // one chain: ~1000/140 = 7
+    // one chain: each poll lasts 120 ms, so at most elapsed/120 (+1); two chains would double it
+    expect(calls - before).toBeLessThanOrEqual(Math.floor((Date.now() - t0) / 120) + 1);
     b.req.destroy();
-    await new Promise((r) => setTimeout(r, 300));
+    await stopsPolling({ get pollCalls() { return calls; } });
   });
   it('invalid session id returns 404', async () => {
     const u = await start(fakeProvider());

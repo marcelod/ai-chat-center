@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # Pinned action SHAs (with a version comment) are bumped by Dependabot.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly

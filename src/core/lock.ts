@@ -37,15 +37,17 @@ export function lockPid(content: string): number | null {
 }
 
 /** Publish the lock atomically: write `{pid, ts}` to a unique tmp file, then link() it
- *  (fails with EEXIST if held). The lock file is never observable empty. */
-async function publish(file: string): Promise<boolean> {
+ *  (fails with EEXIST if held). The lock file is never observable empty. Returns the content
+ *  published, or null when the lock is held. */
+async function publish(file: string): Promise<string | null> {
   const tmp = `${file}.${crypto.randomUUID()}.tmp`;
+  const content = JSON.stringify({ pid: process.pid, ts: new Date().toISOString() });
   try {
-    await fs.writeFile(tmp, JSON.stringify({ pid: process.pid, ts: new Date().toISOString() }), { flag: 'wx' });
+    await fs.writeFile(tmp, content, { flag: 'wx' });
     await fs.link(tmp, file);
-    return true;
+    return content;
   } catch (e) {
-    if (['EEXIST', 'EPERM', 'EBUSY'].includes(code(e) ?? '')) return false;
+    if (['EEXIST', 'EPERM', 'EBUSY'].includes(code(e) ?? '')) return null;
     throw e;
   } finally {
     await fs.rm(tmp, { force: true });
@@ -85,23 +87,27 @@ const contention = (e: unknown) => ['EEXIST', 'EPERM', 'EBUSY'].includes(code(e)
  * exact stale content `seen`. Exported for tests.
  */
 export async function reclaimStaleLock(file: string, seen: string): Promise<boolean> {
+  return (await reclaim(file, seen)) !== null;
+}
+
+async function reclaim(file: string, seen: string): Promise<string | null> {
   const guard = `${file}.reclaim`;
-  if (!(await publish(guard))) {
+  if ((await publish(guard)) === null) {
     try {
       const st = await fs.stat(guard);
       if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs.rm(guard, { force: true });
     } catch {
       /* ignore */
     }
-    return false;
+    return null;
   }
   try {
-    if ((await staleContent(file)) !== seen) return false;
+    if ((await staleContent(file)) !== seen) return null;
     try {
       await fs.unlink(file);
     } catch (e) {
       if (code(e) !== 'ENOENT') {
-        if (contention(e)) return false;
+        if (contention(e)) return null;
         throw e;
       }
     }
@@ -116,11 +122,21 @@ export async function reclaimStaleLock(file: string, seen: string): Promise<bool
 }
 
 export async function acquireLock(file: string): Promise<boolean> {
+  return (await acquireLockContent(file)) !== null;
+}
+
+/**
+ * Like acquireLock, but returns the exact content published (`{pid, ts}`), or null when not acquired.
+ * A long-lived holder compares the file against it to tell whether it still owns the lock: the heartbeat
+ * (touchLock) changes only the mtime, so any other content means the lock was reclaimed.
+ */
+export async function acquireLockContent(file: string): Promise<string | null> {
   await ensureDir(path.dirname(file));
-  if (await publish(file)) return true;
+  const mine = await publish(file);
+  if (mine !== null) return mine;
   const seen = await staleContent(file);
-  if (seen === null) return false;
-  return reclaimStaleLock(file, seen);
+  if (seen === null) return null;
+  return reclaim(file, seen);
 }
 
 /** Heartbeat: refreshes the mtime of a lock this process holds. Best effort. */

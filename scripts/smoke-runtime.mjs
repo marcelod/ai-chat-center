@@ -107,7 +107,12 @@ try {
   hub.kill();
   await new Promise((r) => (hub.exitCode !== null ? r() : hub.once('exit', r)));
 }
-fs.rmSync(home, { recursive: true, force: true });
+try {
+  // Windows may hold the hub's cwd or logs for a moment after the kill.
+  fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+} catch (e) {
+  console.log(`note: could not remove ${home}: ${e?.code ?? e}`);
+}
 
 if (failures.length) {
   console.error(`runtime smoke FAILED (${failures.length})`);

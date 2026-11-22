@@ -6,7 +6,7 @@ import { clearBusy, isBusy } from '../core/busy.js';
 import { lookupClaudePid, type PidLookup } from './claudePid.js';
 import { drain, sweepClaimed } from '../core/inbox.js';
 import { clearWaiting } from '../core/waiting.js';
-import { acquireLock, releaseLock, touchLock, lockPid, isAlive as pidAlive } from '../core/lock.js';
+import { acquireLockContent, releaseLock, touchLock, lockPid, isAlive as pidAlive } from '../core/lock.js';
 import { wrapMessages } from '../core/protocol.js';
 
 export type { PidLookup };
@@ -57,7 +57,7 @@ export interface WaiterOptions {
   reresolveMs?: number;
   /** Time budget, after which the waiter exits 0. Default WAITER_BUDGET_MS. */
   deadlineMs?: number;
-  /** Clock for message ages. Default Date.now. */
+  /** Clock for message ages and for the lookup-failure limit. Default Date.now. */
   now?: () => number;
   /** How often the waiter lock heartbeat is refreshed. Default 10 s. */
   heartbeatMs?: number;
@@ -126,10 +126,10 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
     if (r.ok) {
       misses = r.pid === null ? misses + 1 : 0;
       failingSince = null;
-    } else failingSince ??= lastLookupAt;
+    } else failingSince ??= now();
     return r;
   };
-  const failingTooLong = () => failingSince !== null && Date.now() - failingSince >= lookupFailMs;
+  const failingTooLong = () => failingSince !== null && now() - failingSince >= lookupFailMs;
 
   if (event === 'start') {
     try {
@@ -165,10 +165,10 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
   }
 
   const lock = paths().waiterLock(sid);
-  if (!(await acquireLock(lock))) return NOTHING;
   // The exact content we published ({pid, ts}): touchLock only changes the mtime, so any other content
   // means the lock was reclaimed (our heartbeat lapsed, e.g. a suspended machine) by another waiter.
-  const mine = await readLock(lock);
+  const mine = await acquireLockContent(lock);
+  if (mine === null) return NOTHING;
   let lastBeat = Date.now();
   let deadChecked = false;
   try {
@@ -181,10 +181,12 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
       if (Date.now() - startedAt >= deadlineMs) return NOTHING;
       // Never exit on a transient fs error: log it, wait, try again.
       try {
-        if (mine === null || (await readLock(lock)) !== mine) {
+        const lockLost = async () => {
+          if ((await readLock(lock)) === mine) return false;
           logError(`waiter lock for session ${sid} is no longer ours: exiting without draining`);
-          return NOTHING;
-        }
+          return true;
+        };
+        if (await lockLost()) return NOTHING;
         const reg = await activeReg(sid);
         if (!reg) return NOTHING;
         if (Date.now() - lastBeat >= heartbeatMs) {
@@ -216,6 +218,7 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
           continue;
         }
         if (!(await isBusy(sid))) {
+          if (await lockLost()) return NOTHING; // again, right before draining
           const drained = await drain(sid);
           let msgs = drained;
           if (discardOld) {
@@ -243,7 +246,7 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
     }
   } finally {
     // Only our own lock: after a reclaim, the file belongs to the new holder.
-    if (mine !== null && (await readLock(lock)) === mine) await releaseLock(lock);
+    if ((await readLock(lock)) === mine) await releaseLock(lock);
   }
 }
 
