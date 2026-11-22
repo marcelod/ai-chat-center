@@ -28,6 +28,7 @@ function paths() {
     waiterLock: (sid) => (assertSessionId(sid), path.join(home, "waiters", `${sid}.lock`)),
     waitingFile: (sid) => (assertSessionId(sid), path.join(home, "waiting", `${sid}.json`)),
     busyFile: (sid) => (assertSessionId(sid), path.join(home, "busy", sid)),
+    deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
     logDir: path.join(home, "logs")
   };
 }
@@ -80,210 +81,47 @@ async function readJson(file) {
 }
 
 // src/core/inbox.ts
-import fs3 from "node:fs/promises";
-import path3 from "node:path";
-import crypto3 from "node:crypto";
+import fs4 from "node:fs/promises";
+import path4 from "node:path";
+import crypto4 from "node:crypto";
 
 // src/core/secret.ts
 import fs2 from "node:fs/promises";
 import crypto2 from "node:crypto";
 var SECRET_RE = /^[0-9a-f]{64}$/;
-async function readSecret() {
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function readOnce() {
   try {
     const s = (await fs2.readFile(paths().secret, "utf8")).trim();
-    return SECRET_RE.test(s) ? s : null;
-  } catch {
-    return null;
+    return SECRET_RE.test(s) ? { ok: true, secret: s } : { ok: false, reason: "malformed" };
+  } catch (e) {
+    return { ok: false, reason: e.code === "ENOENT" ? "missing" : "unreadable" };
   }
 }
-var mac = (secret, id, text) => crypto2.createHmac("sha256", secret).update(`${id}|${text}`).digest("hex");
-async function verifyMessage(m) {
-  if (typeof m?.id !== "string" || typeof m.text !== "string" || typeof m.sig !== "string" || m.id.includes("|")) return false;
-  const secret = await readSecret();
-  if (!secret) return false;
-  const want = Buffer.from(mac(secret, m.id, m.text));
+async function loadSecret(opts = {}) {
+  const tries = opts.tries ?? 5;
+  const delayMs = opts.delayMs ?? 250;
+  let r = { ok: false, reason: "unreadable" };
+  for (let i = 0; i < tries; i++) {
+    r = await readOnce();
+    if (r.ok || r.reason === "missing") return r;
+    if (i < tries - 1) await sleep(delayMs);
+  }
+  return r;
+}
+var mac = (secret, sid, m) => crypto2.createHmac("sha256", secret).update(`v2|${sid}|${m.id}|${m.createdAt}|${m.text}`).digest("hex");
+var separatorFree = (m) => typeof m.id === "string" && typeof m.createdAt === "string" && !m.id.includes("|") && !m.createdAt.includes("|");
+function verifyMessage(m, sid, secret) {
+  if (!m || typeof m.text !== "string" || typeof m.sig !== "string" || !separatorFree(m)) return false;
+  const want = Buffer.from(mac(secret, sid, m));
   const got = Buffer.from(m.sig);
   return want.length === got.length && crypto2.timingSafeEqual(want, got);
 }
 
-// src/core/inbox.ts
-var isRace = (e) => ["ENOENT", "EPERM", "EBUSY"].includes(e.code ?? "");
-async function list(sid) {
-  const dir = paths().inboxDir(sid);
-  try {
-    return (await fs3.readdir(dir)).filter((n) => n.endsWith(".msg")).sort().map((n) => path3.join(dir, n));
-  } catch (e) {
-    if (e.code === "ENOENT") return [];
-    throw e;
-  }
-}
-var READ_RETRIES = 3;
-var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-var CLAIMED_RE = /\.msg\.claimed-(?:(\d{13,})-)?/;
-async function readClaimed(file) {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return JSON.parse(await fs3.readFile(file, "utf8"));
-    } catch (e) {
-      if (e instanceof SyntaxError) return "malformed";
-      if (attempt >= READ_RETRIES) return "unreadable";
-      await sleep(20 + Math.floor(Math.random() * 31));
-    }
-  }
-}
-var CLAIM_MARK = ".claim";
-var MARKER_STALE_MS = 6e4;
-async function removeMarker(marker) {
-  try {
-    await withFsRetry(() => fs3.rm(marker, { force: true }));
-  } catch {
-  }
-}
-var UNSIGNED = ".unsigned";
-async function drain(sid, judge = () => "deliver", record) {
-  const out = [];
-  const toDelete = [];
-  for (const f of await list(sid)) {
-    const claimed = `${f}.claimed-${Date.now()}-${crypto3.randomUUID()}`;
-    const marker = `${f}${CLAIM_MARK}`;
-    try {
-      await fs3.writeFile(marker, String(process.pid), { flag: "wx", mode: FILE_MODE });
-    } catch (e) {
-      if (isRace(e) || ["EEXIST", "EACCES"].includes(e.code ?? "")) continue;
-      if (out.length > 0 || toDelete.length > 0) break;
-      throw e;
-    }
-    try {
-      await withFsRetry(() => fs3.rename(f, claimed));
-    } catch (e) {
-      await removeMarker(marker);
-      if (isRace(e)) continue;
-      if (out.length > 0 || toDelete.length > 0) break;
-      throw e;
-    }
-    await removeMarker(marker);
-    const m = await readClaimed(claimed);
-    if (m === "unreadable") {
-      try {
-        await withFsRetry(() => fs3.rename(claimed, f));
-      } catch {
-      }
-      continue;
-    }
-    const verdict = m === "malformed" ? "drop" : await judge(m);
-    if (verdict === "unsigned") {
-      try {
-        await withFsRetry(() => fs3.rename(claimed, `${f}${UNSIGNED}`));
-      } catch {
-      }
-      continue;
-    }
-    if (verdict === "deliver") out.push(m);
-    toDelete.push(claimed);
-  }
-  if (record && out.length > 0) await record(out).catch(() => {
-  });
-  for (const claimed of toDelete) {
-    try {
-      await withFsRetry(() => fs3.rm(claimed, { force: true }));
-    } catch {
-    }
-  }
-  return out;
-}
-async function sweepClaimed(sid, maxAgeMs) {
-  const dir = paths().inboxDir(sid);
-  let names;
-  try {
-    names = await fs3.readdir(dir);
-  } catch {
-    return 0;
-  }
-  let removed = 0;
-  const now = Date.now();
-  for (const n of names) {
-    if (n.endsWith(`.msg${CLAIM_MARK}`)) {
-      try {
-        if (now - (await fs3.stat(path3.join(dir, n))).mtimeMs <= Math.min(maxAgeMs, MARKER_STALE_MS)) continue;
-        await withFsRetry(() => fs3.rm(path3.join(dir, n), { force: true }));
-        removed++;
-      } catch {
-      }
-      continue;
-    }
-    const m = CLAIMED_RE.exec(n);
-    if (!m) continue;
-    const file = path3.join(dir, n);
-    try {
-      const at = m[1] ? Number(m[1]) : (await fs3.stat(file)).mtimeMs;
-      if (now - at <= maxAgeMs) continue;
-      await withFsRetry(() => fs3.rm(file, { force: true }));
-      removed++;
-    } catch {
-    }
-  }
-  return removed;
-}
-async function clearInbox(sid) {
-  const dir = paths().inboxDir(sid);
-  let names;
-  try {
-    names = await fs3.readdir(dir);
-  } catch (e) {
-    if (e.code === "ENOENT") return;
-    throw e;
-  }
-  for (const n of names) {
-    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`) && !n.endsWith(`.msg${UNSIGNED}`)) continue;
-    try {
-      await withFsRetry(() => fs3.rm(path3.join(dir, n), { force: true }));
-    } catch (e) {
-      if (!isRace(e)) throw e;
-    }
-  }
-}
-
-// src/core/busy.ts
-import fs4 from "node:fs/promises";
-async function clearBusy(sid) {
-  await removeFile(paths().busyFile(sid));
-}
-async function clearBusyIfOlder(sid, before) {
-  let mtimeMs;
-  try {
-    mtimeMs = (await fs4.stat(paths().busyFile(sid))).mtimeMs;
-  } catch {
-    return true;
-  }
-  if (mtimeMs >= before) return false;
-  await removeFile(paths().busyFile(sid));
-  return true;
-}
-async function isBusy(sid) {
-  try {
-    await fs4.access(paths().busyFile(sid));
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function busyAge(sid, now = Date.now()) {
-  try {
-    return now - (await fs4.stat(paths().busyFile(sid))).mtimeMs;
-  } catch {
-    return null;
-  }
-}
-
-// src/core/waiting.ts
-async function clearWaiting(sid) {
-  await removeFile(paths().waitingFile(sid));
-}
-
 // src/core/lock.ts
-import fs5 from "node:fs/promises";
-import path4 from "node:path";
-import crypto4 from "node:crypto";
+import fs3 from "node:fs/promises";
+import path3 from "node:path";
+import crypto3 from "node:crypto";
 var EMPTY_GRACE_MS = 1e4;
 var LOCK_STALE_MS = 9e4;
 function isAlive(pid) {
@@ -309,30 +147,30 @@ function lockPid(content) {
   return typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? pid : null;
 }
 async function publish(file) {
-  const tmp = `${file}.${crypto4.randomUUID()}.tmp`;
+  const tmp = `${file}.${crypto3.randomUUID()}.tmp`;
   const content = JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() });
   try {
-    await fs5.writeFile(tmp, content, { flag: "wx" });
-    await fs5.link(tmp, file);
+    await fs3.writeFile(tmp, content, { flag: "wx" });
+    await fs3.link(tmp, file);
     return content;
   } catch (e) {
     if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return null;
     throw e;
   } finally {
-    await fs5.rm(tmp, { force: true });
+    await fs3.rm(tmp, { force: true });
   }
 }
 async function staleContent(file) {
   let content;
   let mtimeMs;
   try {
-    content = await fs5.readFile(file, "utf8");
+    content = await fs3.readFile(file, "utf8");
   } catch (e) {
     if (code(e) === "ENOENT") return null;
     content = "";
   }
   try {
-    mtimeMs = (await fs5.stat(file)).mtimeMs;
+    mtimeMs = (await fs3.stat(file)).mtimeMs;
   } catch {
     return null;
   }
@@ -347,8 +185,8 @@ async function reclaim(file, seen) {
   const guard = `${file}.reclaim`;
   if (await publish(guard) === null) {
     try {
-      const st = await fs5.stat(guard);
-      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs5.rm(guard, { force: true });
+      const st = await fs3.stat(guard);
+      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs3.rm(guard, { force: true });
     } catch {
     }
     return null;
@@ -356,7 +194,7 @@ async function reclaim(file, seen) {
   try {
     if (await staleContent(file) !== seen) return null;
     try {
-      await fs5.unlink(file);
+      await fs3.unlink(file);
     } catch (e) {
       if (code(e) !== "ENOENT") {
         if (contention(e)) return null;
@@ -366,7 +204,7 @@ async function reclaim(file, seen) {
     return await publish(file);
   } finally {
     try {
-      if (lockPid(await fs5.readFile(guard, "utf8")) === process.pid) await fs5.rm(guard, { force: true });
+      if (lockPid(await fs3.readFile(guard, "utf8")) === process.pid) await fs3.rm(guard, { force: true });
     } catch {
     }
   }
@@ -375,7 +213,7 @@ async function acquireLock(file) {
   return await acquireLockContent(file) !== null;
 }
 async function acquireLockContent(file) {
-  await ensureDir(path4.dirname(file));
+  await ensureDir(path3.dirname(file));
   const mine = await publish(file);
   if (mine !== null) return mine;
   const seen = await staleContent(file);
@@ -384,19 +222,19 @@ async function acquireLockContent(file) {
 }
 async function touchLock(file) {
   try {
-    if (lockPid(await fs5.readFile(file, "utf8")) !== process.pid) return;
+    if (lockPid(await fs3.readFile(file, "utf8")) !== process.pid) return;
     const now = /* @__PURE__ */ new Date();
-    await fs5.utimes(file, now, now);
+    await fs3.utimes(file, now, now);
   } catch {
   }
 }
 async function releaseLock(file) {
   try {
-    if (lockPid(await fs5.readFile(file, "utf8")) !== process.pid) return;
+    if (lockPid(await fs3.readFile(file, "utf8")) !== process.pid) return;
   } catch {
     return;
   }
-  await fs5.rm(file, { force: true });
+  await fs3.rm(file, { force: true });
 }
 async function withLock(file, waitMs, fn) {
   const deadline = Date.now() + waitMs;
@@ -414,6 +252,217 @@ async function withLock(file, waitMs, fn) {
   } finally {
     if (held) await releaseLock(file);
   }
+}
+
+// src/core/inbox.ts
+var isRace = (e) => ["ENOENT", "EPERM", "EBUSY"].includes(e.code ?? "");
+async function list(sid) {
+  const dir = paths().inboxDir(sid);
+  try {
+    return (await fs4.readdir(dir)).filter((n) => n.endsWith(".msg")).sort().map((n) => path4.join(dir, n));
+  } catch (e) {
+    if (e.code === "ENOENT") return [];
+    throw e;
+  }
+}
+async function readMsg(file) {
+  try {
+    return JSON.parse(await fs4.readFile(file, "utf8"));
+  } catch (e) {
+    if (isRace(e)) return null;
+    if (e instanceof SyntaxError) return null;
+    throw e;
+  }
+}
+var READ_RETRIES = 3;
+var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+var CLAIMED_RE = /\.msg\.claimed-(?:(\d{13,})-)?/;
+async function readClaimed(file) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return JSON.parse(await fs4.readFile(file, "utf8"));
+    } catch (e) {
+      if (e instanceof SyntaxError) return "malformed";
+      if (attempt >= READ_RETRIES) return "unreadable";
+      await sleep2(20 + Math.floor(Math.random() * 31));
+    }
+  }
+}
+var CLAIM_MARK = ".claim";
+var MARKER_STALE_MS = 6e4;
+async function removeMarker(marker) {
+  try {
+    await withFsRetry(() => fs4.rm(marker, { force: true }));
+  } catch {
+  }
+}
+var UNSIGNED = ".unsigned";
+async function drain(sid, judge = () => "deliver", record) {
+  const out = [];
+  const toDelete = [];
+  for (const f of await list(sid)) {
+    const claimed = `${f}.claimed-${Date.now()}-${crypto4.randomUUID()}`;
+    const marker = `${f}${CLAIM_MARK}`;
+    try {
+      await fs4.writeFile(marker, String(process.pid), { flag: "wx", mode: FILE_MODE });
+    } catch (e) {
+      if (e.code === "EEXIST") {
+        if (!await markerOwnerAlive(marker)) await removeMarker(marker);
+        continue;
+      }
+      if (isRace(e) || e.code === "EACCES") continue;
+      if (out.length > 0 || toDelete.length > 0) break;
+      throw e;
+    }
+    try {
+      await withFsRetry(() => fs4.rename(f, claimed));
+    } catch (e) {
+      await removeMarker(marker);
+      if (isRace(e)) continue;
+      if (out.length > 0 || toDelete.length > 0) break;
+      throw e;
+    }
+    await removeMarker(marker);
+    const m = await readClaimed(claimed);
+    if (m === "unreadable") {
+      try {
+        await withFsRetry(() => fs4.rename(claimed, f));
+      } catch {
+      }
+      continue;
+    }
+    const verdict = m === "malformed" ? "drop" : await judge(m);
+    if (verdict === "unsigned") {
+      try {
+        await withFsRetry(() => fs4.rename(claimed, `${f}${UNSIGNED}`));
+      } catch {
+      }
+      continue;
+    }
+    if (verdict === "deliver") out.push(m);
+    toDelete.push(claimed);
+  }
+  if (record && out.length > 0) await record(out).catch(() => {
+  });
+  for (const claimed of toDelete) {
+    try {
+      await withFsRetry(() => fs4.rm(claimed, { force: true }));
+    } catch {
+    }
+  }
+  return out;
+}
+async function markerOwnerAlive(marker) {
+  try {
+    const t = (await fs4.readFile(marker, "utf8")).trim();
+    return !/^\d+$/.test(t) || isAlive(Number(t));
+  } catch {
+    return true;
+  }
+}
+async function sweepClaimed(sid, maxAgeMs, delivered = /* @__PURE__ */ new Set()) {
+  const dir = paths().inboxDir(sid);
+  let names;
+  try {
+    names = await fs4.readdir(dir);
+  } catch {
+    return 0;
+  }
+  let swept = 0;
+  const now = Date.now();
+  for (const n of names) {
+    if (n.endsWith(`.msg${CLAIM_MARK}`)) {
+      const marker = path4.join(dir, n);
+      try {
+        const stale = !await markerOwnerAlive(marker) || now - (await fs4.stat(marker)).mtimeMs > Math.min(maxAgeMs, MARKER_STALE_MS);
+        if (!stale) continue;
+        await withFsRetry(() => fs4.rm(marker, { force: true }));
+        swept++;
+      } catch {
+      }
+      continue;
+    }
+    const m = CLAIMED_RE.exec(n);
+    if (!m) continue;
+    const file = path4.join(dir, n);
+    try {
+      const at = m[1] ? Number(m[1]) : (await fs4.stat(file)).mtimeMs;
+      if (now - at <= maxAgeMs) continue;
+      const msg = await readMsg(file);
+      if (msg && typeof msg.id === "string" && delivered.has(msg.id)) await withFsRetry(() => fs4.rm(file, { force: true }));
+      else await withFsRetry(() => fs4.rename(file, path4.join(dir, n.slice(0, m.index + ".msg".length))));
+      swept++;
+    } catch {
+    }
+  }
+  return swept;
+}
+async function clearInbox(sid) {
+  const dir = paths().inboxDir(sid);
+  let names;
+  try {
+    names = await fs4.readdir(dir);
+  } catch (e) {
+    if (e.code === "ENOENT") return;
+    throw e;
+  }
+  for (const n of names) {
+    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`) && !n.endsWith(`.msg${UNSIGNED}`)) continue;
+    try {
+      await withFsRetry(() => fs4.rm(path4.join(dir, n), { force: true }));
+    } catch (e) {
+      if (!isRace(e)) throw e;
+    }
+  }
+}
+
+// src/core/busy.ts
+import fs5 from "node:fs/promises";
+async function clearBusy(sid) {
+  await removeFile(paths().busyFile(sid));
+}
+async function clearBusyIfOlder(sid, before) {
+  let mtimeMs;
+  try {
+    mtimeMs = (await fs5.stat(paths().busyFile(sid))).mtimeMs;
+  } catch {
+    return true;
+  }
+  if (mtimeMs >= before) return false;
+  await removeFile(paths().busyFile(sid));
+  return true;
+}
+async function isBusy(sid) {
+  try {
+    await fs5.access(paths().busyFile(sid));
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function busyAge(sid, now = Date.now()) {
+  try {
+    return now - (await fs5.stat(paths().busyFile(sid))).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+// src/core/waiting.ts
+async function clearWaiting(sid) {
+  await removeFile(paths().waitingFile(sid));
+}
+
+// src/core/delivered.ts
+var DELIVERED_KEEP = 500;
+async function readDelivered(sid) {
+  const ids = await readJson(paths().deliveredFile(sid));
+  return new Set(Array.isArray(ids) ? ids.filter((x) => typeof x === "string") : []);
+}
+async function recordDelivered(sid, ids) {
+  const prev = [...await readDelivered(sid)];
+  const next = [...prev.filter((x) => !ids.includes(x)), ...ids].slice(-DELIVERED_KEEP);
+  await writeJsonAtomic(paths().deliveredFile(sid), next);
 }
 
 // src/core/registry.ts
@@ -554,9 +603,10 @@ var HEARTBEAT_MS = 1e4;
 var STALE_BUSY_MS = 1e4;
 var BUSY_CHECK_MS = 15e3;
 var PROMPT_SETTLE_MS = 3e3;
+var MAX_CLOCK_SKEW_MS = 2 * 6e4;
 var SWITCH_SOURCES = /* @__PURE__ */ new Set(["startup", "resume", "clear", "fork"]);
 var NOTHING = { exitCode: 0, stderr: "" };
-var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+var sleep3 = (ms) => new Promise((r) => setTimeout(r, ms));
 async function activeReg(sid) {
   const r = await getRegistration(sid);
   return r && isActive(r) ? r : null;
@@ -570,6 +620,14 @@ async function hasQueued(sid) {
     return (await fs7.promises.readdir(paths().inboxDir(sid))).some((n) => n.endsWith(".msg"));
   } catch {
     return false;
+  }
+}
+async function inboxHasMessages(sid) {
+  try {
+    return (await fs7.promises.readdir(paths().inboxDir(sid))).some((n) => n.endsWith(".msg"));
+  } catch (e) {
+    if (e.code === "ENOENT") return false;
+    throw e;
   }
 }
 async function sessionSwitch(sid, input, lookup, lookupOther) {
@@ -673,6 +731,7 @@ async function runWaiter(event, input, opts = {}) {
   let lastBeat = Date.now();
   let deadChecked = false;
   let lastStatusAt = -Infinity;
+  let secretWarned = false;
   const dropStaleBusy = async () => {
     const age = await busyAge(sid);
     if (age === null) return true;
@@ -687,7 +746,7 @@ async function runWaiter(event, input, opts = {}) {
   };
   try {
     try {
-      await sweepClaimed(sid, CLAIMED_SWEEP_MS);
+      await sweepClaimed(sid, CLAIMED_SWEEP_MS, await readDelivered(sid));
     } catch (e) {
       logError(e);
     }
@@ -731,14 +790,40 @@ async function runWaiter(event, input, opts = {}) {
         } else if (await isBusy(sid) && !await dropStaleBusy()) {
         } else {
           if (await lockLost()) return NOTHING;
-          let unsigned = 0;
-          const drained = await drain(sid, async (m) => {
-            if (await verifyMessage(m)) return "deliver";
-            unsigned++;
-            return "unsigned";
-          });
-          if (unsigned > 0) {
-            logError(`kept ${unsigned} unsigned or invalid message(s) aside (not delivered) in the inbox of session ${sid}`);
+          const sec = await inboxHasMessages(sid) ? await loadSecret() : null;
+          let drained = [];
+          if (sec && !sec.ok) {
+            if (!secretWarned) logError(`the install secret is ${sec.reason}: nothing is taken from the inbox of session ${sid} until it can be read`);
+            secretWarned = true;
+          } else if (sec?.ok) {
+            secretWarned = false;
+            const delivered = await readDelivered(sid);
+            const t = Date.now();
+            const since = Date.parse(reg.connectedAt);
+            let unsigned = 0;
+            const dropped = [];
+            drained = await drain(
+              sid,
+              (m) => {
+                if (!verifyMessage(m, sid, sec.secret)) return unsigned++, "unsigned";
+                const at = Date.parse(m.createdAt);
+                if (delivered.has(m.id)) return dropped.push(`${m.id} (already delivered)`), "drop";
+                if (!(at <= t + MAX_CLOCK_SKEW_MS)) return dropped.push(`${m.id} (dated in the future)`), "drop";
+                if (Number.isFinite(since) && at < since) return dropped.push(`${m.id} (older than this connection)`), "drop";
+                return "deliver";
+              },
+              async (ms) => {
+                try {
+                  await recordDelivered(sid, ms.map((m) => m.id));
+                } catch (e) {
+                  logError(e);
+                }
+              }
+            );
+            if (unsigned > 0) {
+              logError(`kept ${unsigned} unsigned or invalid message(s) aside (not delivered) in the inbox of session ${sid}`);
+            }
+            if (dropped.length > 0) logError(`dropped signed message(s) in the inbox of session ${sid}: ${dropped.join(", ")}`);
           }
           let msgs = drained;
           if (discardOld) {
@@ -761,7 +846,7 @@ async function runWaiter(event, input, opts = {}) {
       } catch (e) {
         logError(e);
       }
-      await sleep2(pollMs);
+      await sleep3(pollMs);
     }
   } finally {
     if (await readLock(lock) === mine) await releaseLock(lock);

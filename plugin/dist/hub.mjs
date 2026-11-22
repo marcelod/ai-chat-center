@@ -31,6 +31,7 @@ function paths() {
     waiterLock: (sid) => (assertSessionId(sid), path.join(home, "waiters", `${sid}.lock`)),
     waitingFile: (sid) => (assertSessionId(sid), path.join(home, "waiting", `${sid}.json`)),
     busyFile: (sid) => (assertSessionId(sid), path.join(home, "busy", sid)),
+    deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
     logDir: path.join(home, "logs")
   };
 }
@@ -100,149 +101,72 @@ import fs6 from "node:fs/promises";
 import path5 from "node:path";
 
 // src/core/inbox.ts
-import fs3 from "node:fs/promises";
-import path3 from "node:path";
-import crypto4 from "node:crypto";
+import fs4 from "node:fs/promises";
+import path4 from "node:path";
+import crypto5 from "node:crypto";
 
 // src/core/secret.ts
 import fs2 from "node:fs/promises";
 import crypto3 from "node:crypto";
 var SECRET_RE = /^[0-9a-f]{64}$/;
-async function readSecret() {
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function readOnce() {
   try {
     const s = (await fs2.readFile(paths().secret, "utf8")).trim();
-    return SECRET_RE.test(s) ? s : null;
-  } catch {
-    return null;
+    return SECRET_RE.test(s) ? { ok: true, secret: s } : { ok: false, reason: "malformed" };
+  } catch (e) {
+    return { ok: false, reason: e.code === "ENOENT" ? "missing" : "unreadable" };
   }
 }
+async function loadSecret(opts = {}) {
+  const tries = opts.tries ?? 5;
+  const delayMs = opts.delayMs ?? 250;
+  let r = { ok: false, reason: "unreadable" };
+  for (let i = 0; i < tries; i++) {
+    r = await readOnce();
+    if (r.ok || r.reason === "missing") return r;
+    if (i < tries - 1) await sleep(delayMs);
+  }
+  return r;
+}
 async function installSecret() {
-  const have = await readSecret();
-  if (have) return have;
+  const have = await loadSecret({ tries: 5, delayMs: 40 });
+  if (have.ok) return have.secret;
+  if (have.reason === "unreadable") throw new Error("the install secret cannot be read right now");
   const file = paths().secret;
   await ensureDir(paths().home);
   const fresh = crypto3.randomBytes(32).toString("hex");
-  try {
-    await fs2.writeFile(file, fresh, { flag: "wx", mode: FILE_MODE });
-    return fresh;
-  } catch (e) {
-    if (e.code !== "EEXIST") throw e;
-  }
-  for (let i = 0; i < 20; i++) {
-    const s = await readSecret();
-    if (s) return s;
-    await new Promise((r) => setTimeout(r, 10));
+  if (have.reason === "missing") {
+    try {
+      await fs2.writeFile(file, fresh, { flag: "wx", mode: FILE_MODE });
+      return fresh;
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+    }
+    for (let i = 0; i < 20; i++) {
+      const s = await readOnce();
+      if (s.ok) return s.secret;
+      if (s.reason === "unreadable") throw new Error("the install secret cannot be read right now");
+      await sleep(10);
+    }
   }
   const tmp = `${file}.${crypto3.randomUUID()}.tmp`;
   await fs2.writeFile(tmp, fresh, { mode: FILE_MODE });
   await withFsRetry(() => fs2.rename(tmp, file));
-  return await readSecret() ?? fresh;
+  const after = await readOnce();
+  return after.ok ? after.secret : fresh;
 }
-var mac = (secret, id, text) => crypto3.createHmac("sha256", secret).update(`${id}|${text}`).digest("hex");
-async function signMessage(m) {
-  if (m.id.includes("|")) throw new Error("invalid message id");
-  return { ...m, sig: mac(await installSecret(), m.id, m.text) };
-}
-
-// src/core/inbox.ts
-var counter = 0;
-var isRace = (e) => ["ENOENT", "EPERM", "EBUSY"].includes(e.code ?? "");
-async function enqueue(sid, text) {
-  const dir = paths().inboxDir(sid);
-  await ensureDir(dir);
-  const now = Date.now();
-  const msg = await signMessage({ id: crypto4.randomUUID(), text, createdAt: new Date(now).toISOString() });
-  counter = (counter + 1) % 1e6;
-  const name = `${String(now).padStart(15, "0")}-${String(counter).padStart(6, "0")}-${msg.id}.msg`;
-  const tmp = path3.join(dir, `.${msg.id}.tmp`);
-  try {
-    await fs3.writeFile(tmp, JSON.stringify(msg), { encoding: "utf8", mode: FILE_MODE });
-    await withFsRetry(() => fs3.rename(tmp, path3.join(dir, name)));
-  } catch (e) {
-    await fs3.rm(tmp, { force: true });
-    throw e;
-  }
-  return msg;
-}
-async function list(sid) {
-  const dir = paths().inboxDir(sid);
-  try {
-    return (await fs3.readdir(dir)).filter((n) => n.endsWith(".msg")).sort().map((n) => path3.join(dir, n));
-  } catch (e) {
-    if (e.code === "ENOENT") return [];
-    throw e;
-  }
-}
-async function readMsg(file) {
-  try {
-    return JSON.parse(await fs3.readFile(file, "utf8"));
-  } catch (e) {
-    if (isRace(e)) return null;
-    if (e instanceof SyntaxError) return null;
-    throw e;
-  }
-}
-async function peek(sid) {
-  const out = [];
-  for (const f of await list(sid)) {
-    const m = await readMsg(f);
-    if (m) out.push(m);
-  }
-  return out;
-}
-var CLAIM_MARK = ".claim";
-var UNSIGNED = ".unsigned";
-async function countUnsigned(sid) {
-  try {
-    return (await fs3.readdir(paths().inboxDir(sid))).filter((n) => n.endsWith(`.msg${UNSIGNED}`)).length;
-  } catch {
-    return 0;
-  }
-}
-async function clearInbox(sid) {
-  const dir = paths().inboxDir(sid);
-  let names;
-  try {
-    names = await fs3.readdir(dir);
-  } catch (e) {
-    if (e.code === "ENOENT") return;
-    throw e;
-  }
-  for (const n of names) {
-    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`) && !n.endsWith(`.msg${UNSIGNED}`)) continue;
-    try {
-      await withFsRetry(() => fs3.rm(path3.join(dir, n), { force: true }));
-    } catch (e) {
-      if (!isRace(e)) throw e;
-    }
-  }
-}
-
-// src/core/busy.ts
-import fs4 from "node:fs/promises";
-async function clearBusy(sid) {
-  await removeFile(paths().busyFile(sid));
-}
-async function busyAge(sid, now = Date.now()) {
-  try {
-    return now - (await fs4.stat(paths().busyFile(sid))).mtimeMs;
-  } catch {
-    return null;
-  }
-}
-
-// src/core/waiting.ts
-async function clearWaiting(sid) {
-  await removeFile(paths().waitingFile(sid));
-}
-async function getWaiting(sid) {
-  return readJson(paths().waitingFile(sid));
+var mac = (secret, sid, m) => crypto3.createHmac("sha256", secret).update(`v2|${sid}|${m.id}|${m.createdAt}|${m.text}`).digest("hex");
+var separatorFree = (m) => typeof m.id === "string" && typeof m.createdAt === "string" && !m.id.includes("|") && !m.createdAt.includes("|");
+async function signMessage(sid, m) {
+  if (!separatorFree(m) || sid.includes("|")) throw new Error("invalid message id or time");
+  return { ...m, sig: mac(await installSecret(), sid, m) };
 }
 
 // src/core/lock.ts
-import fs5 from "node:fs/promises";
-import path4 from "node:path";
-import crypto5 from "node:crypto";
+import fs3 from "node:fs/promises";
+import path3 from "node:path";
+import crypto4 from "node:crypto";
 var EMPTY_GRACE_MS = 1e4;
 var LOCK_STALE_MS = 9e4;
 function isAlive(pid) {
@@ -268,30 +192,30 @@ function lockPid(content) {
   return typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? pid : null;
 }
 async function publish(file) {
-  const tmp = `${file}.${crypto5.randomUUID()}.tmp`;
+  const tmp = `${file}.${crypto4.randomUUID()}.tmp`;
   const content = JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() });
   try {
-    await fs5.writeFile(tmp, content, { flag: "wx" });
-    await fs5.link(tmp, file);
+    await fs3.writeFile(tmp, content, { flag: "wx" });
+    await fs3.link(tmp, file);
     return content;
   } catch (e) {
     if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return null;
     throw e;
   } finally {
-    await fs5.rm(tmp, { force: true });
+    await fs3.rm(tmp, { force: true });
   }
 }
 async function staleContent(file) {
   let content;
   let mtimeMs;
   try {
-    content = await fs5.readFile(file, "utf8");
+    content = await fs3.readFile(file, "utf8");
   } catch (e) {
     if (code(e) === "ENOENT") return null;
     content = "";
   }
   try {
-    mtimeMs = (await fs5.stat(file)).mtimeMs;
+    mtimeMs = (await fs3.stat(file)).mtimeMs;
   } catch {
     return null;
   }
@@ -306,8 +230,8 @@ async function reclaim(file, seen) {
   const guard = `${file}.reclaim`;
   if (await publish(guard) === null) {
     try {
-      const st = await fs5.stat(guard);
-      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs5.rm(guard, { force: true });
+      const st = await fs3.stat(guard);
+      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs3.rm(guard, { force: true });
     } catch {
     }
     return null;
@@ -315,7 +239,7 @@ async function reclaim(file, seen) {
   try {
     if (await staleContent(file) !== seen) return null;
     try {
-      await fs5.unlink(file);
+      await fs3.unlink(file);
     } catch (e) {
       if (code(e) !== "ENOENT") {
         if (contention(e)) return null;
@@ -325,7 +249,7 @@ async function reclaim(file, seen) {
     return await publish(file);
   } finally {
     try {
-      if (lockPid(await fs5.readFile(guard, "utf8")) === process.pid) await fs5.rm(guard, { force: true });
+      if (lockPid(await fs3.readFile(guard, "utf8")) === process.pid) await fs3.rm(guard, { force: true });
     } catch {
     }
   }
@@ -334,7 +258,7 @@ async function acquireLock(file) {
   return await acquireLockContent(file) !== null;
 }
 async function acquireLockContent(file) {
-  await ensureDir(path4.dirname(file));
+  await ensureDir(path3.dirname(file));
   const mine = await publish(file);
   if (mine !== null) return mine;
   const seen = await staleContent(file);
@@ -343,11 +267,11 @@ async function acquireLockContent(file) {
 }
 async function releaseLock(file) {
   try {
-    if (lockPid(await fs5.readFile(file, "utf8")) !== process.pid) return;
+    if (lockPid(await fs3.readFile(file, "utf8")) !== process.pid) return;
   } catch {
     return;
   }
-  await fs5.rm(file, { force: true });
+  await fs3.rm(file, { force: true });
 }
 async function withLock(file, waitMs, fn) {
   const deadline = Date.now() + waitMs;
@@ -365,6 +289,106 @@ async function withLock(file, waitMs, fn) {
   } finally {
     if (held) await releaseLock(file);
   }
+}
+
+// src/core/inbox.ts
+var counter = 0;
+var isRace = (e) => ["ENOENT", "EPERM", "EBUSY"].includes(e.code ?? "");
+async function enqueue(sid, text) {
+  const dir = paths().inboxDir(sid);
+  await ensureDir(dir);
+  const now = Date.now();
+  const msg = await signMessage(sid, { id: crypto5.randomUUID(), text, createdAt: new Date(now).toISOString() });
+  counter = (counter + 1) % 1e6;
+  const name = `${String(now).padStart(15, "0")}-${String(counter).padStart(6, "0")}-${msg.id}.msg`;
+  const tmp = path4.join(dir, `.${msg.id}.tmp`);
+  try {
+    await fs4.writeFile(tmp, JSON.stringify(msg), { encoding: "utf8", mode: FILE_MODE });
+    await withFsRetry(() => fs4.rename(tmp, path4.join(dir, name)));
+  } catch (e) {
+    await fs4.rm(tmp, { force: true });
+    throw e;
+  }
+  return msg;
+}
+async function list(sid) {
+  const dir = paths().inboxDir(sid);
+  try {
+    return (await fs4.readdir(dir)).filter((n) => n.endsWith(".msg")).sort().map((n) => path4.join(dir, n));
+  } catch (e) {
+    if (e.code === "ENOENT") return [];
+    throw e;
+  }
+}
+async function readMsg(file) {
+  try {
+    return JSON.parse(await fs4.readFile(file, "utf8"));
+  } catch (e) {
+    if (isRace(e)) return null;
+    if (e instanceof SyntaxError) return null;
+    throw e;
+  }
+}
+async function peek(sid) {
+  const out = [];
+  for (const f of await list(sid)) {
+    const m = await readMsg(f);
+    if (m) out.push(m);
+  }
+  return out;
+}
+var CLAIM_MARK = ".claim";
+var UNSIGNED = ".unsigned";
+async function countUnsigned(sid) {
+  try {
+    return (await fs4.readdir(paths().inboxDir(sid))).filter((n) => n.endsWith(`.msg${UNSIGNED}`)).length;
+  } catch {
+    return 0;
+  }
+}
+async function clearInbox(sid) {
+  const dir = paths().inboxDir(sid);
+  let names;
+  try {
+    names = await fs4.readdir(dir);
+  } catch (e) {
+    if (e.code === "ENOENT") return;
+    throw e;
+  }
+  for (const n of names) {
+    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`) && !n.endsWith(`.msg${UNSIGNED}`)) continue;
+    try {
+      await withFsRetry(() => fs4.rm(path4.join(dir, n), { force: true }));
+    } catch (e) {
+      if (!isRace(e)) throw e;
+    }
+  }
+}
+
+// src/core/busy.ts
+import fs5 from "node:fs/promises";
+async function clearBusy(sid) {
+  await removeFile(paths().busyFile(sid));
+}
+async function busyAge(sid, now = Date.now()) {
+  try {
+    return now - (await fs5.stat(paths().busyFile(sid))).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+// src/core/waiting.ts
+async function clearWaiting(sid) {
+  await removeFile(paths().waitingFile(sid));
+}
+async function getWaiting(sid) {
+  return readJson(paths().waitingFile(sid));
+}
+
+// src/core/delivered.ts
+async function clearDelivered(sid) {
+  await removeFile(paths().deliveredFile(sid));
 }
 
 // src/core/registry.ts
@@ -430,6 +454,7 @@ async function pruneRegistrations(maxAgeMs, now = Date.now()) {
     });
     await clearBusy(sid);
     await clearWaiting(sid);
+    await clearDelivered(sid);
   }
   return pruned;
 }

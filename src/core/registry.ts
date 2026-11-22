@@ -5,6 +5,7 @@ import { readJson, removeFile, writeJsonAtomic } from './fsAtomic.js';
 import { clearInbox } from './inbox.js';
 import { clearBusy } from './busy.js';
 import { clearWaiting } from './waiting.js';
+import { clearDelivered } from './delivered.js';
 import { withLock } from './lock.js';
 
 /** How long a registration write waits for the per-session lock before proceeding anyway. */
@@ -140,6 +141,7 @@ export async function pruneRegistrations(maxAgeMs: number, now = Date.now()): Pr
     await fs.rm(paths().inboxDir(sid), { recursive: true, force: true }).catch(() => {});
     await clearBusy(sid);
     await clearWaiting(sid);
+    await clearDelivered(sid);
   }
   return pruned;
 }

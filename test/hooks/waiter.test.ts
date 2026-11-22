@@ -8,6 +8,7 @@ import { register, markDisconnected, getRegistration } from '../../src/core/regi
 import { setBusy, isBusy } from '../../src/core/busy.js';
 import { setWaiting, getWaiting } from '../../src/core/waiting.js';
 import { enqueue, peek } from '../../src/core/inbox.js';
+import { signMessage } from '../../src/core/secret.js';
 import { unwrapMessages } from '../../src/core/protocol.js';
 import { paths } from '../../src/core/paths.js';
 
@@ -215,16 +216,16 @@ describe('waiter', () => {
   // Audit AI-F10: messages queued long ago (a session asleep for hours) are dropped, not delivered.
   // Audit S2-N6: only when an old session is resumed (start + resume), never at the end of a turn.
   it('start on resume: discards and logs messages older than 30 minutes, delivers the fresh ones', async () => {
-    await reg('s1');
-    const old = await enqueue('s1', 'stale');
+    // connected 2 h ago: the stale message (31 min old, re-signed with that time) is not older than the connection
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: process.pid, connectedAt: new Date(Date.now() - 2 * 3600_000).toISOString() });
+    await enqueue('s1', 'stale');
     await enqueue('s1', 'fresh');
-    const now = Date.parse(old.createdAt) + 31 * 60_000;
-    // only "stale" is older than 30 min at this clock: rewrite "fresh" as recent
+    const now = Date.now();
     const dir = paths().inboxDir('s1');
     for (const n of fs.readdirSync(dir)) {
       const f = path.join(dir, n);
       const m = JSON.parse(fs.readFileSync(f, 'utf8'));
-      if (m.text === 'fresh') fs.writeFileSync(f, JSON.stringify({ ...m, createdAt: new Date(now - 1000).toISOString() }));
+      if (m.text === 'stale') fs.writeFileSync(f, JSON.stringify(await signMessage('s1', { ...m, createdAt: new Date(now - 31 * 60_000).toISOString() })));
     }
     const r = await wait('start', { source: 'resume' }, { now: () => now, lookup: async () => ({ ok: true, pid: process.pid }) });
     expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['fresh']);
@@ -271,12 +272,20 @@ describe('waiter', () => {
     expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['x']);
     expect(fs.readFileSync(path.join(paths().logDir, 'waiter.log'), 'utf8')).toMatch(/EIO/);
   });
-  it('sweeps claimed files older than 1 hour when it starts', async () => {
+  // Audit R4-L3: a claimed file older than 1 hour was left by a waiter that died mid-drain. Unless its id
+  // was delivered, it is put back and delivered (a second delivery is safer than a lost message).
+  it('at start, puts back claimed files older than 1 hour (deleting those already delivered)', async () => {
     await reg('s1');
     const dir = paths().inboxDir('s1');
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, `x.msg.claimed-${Date.now() - 2 * 3600_000}-u`), '{}');
-    expect(await wait('stop', {}, { deadlineMs: 50 })).toEqual({ exitCode: 0, stderr: '' });
+    const a = await enqueue('s1', 'left behind');
+    const b = await enqueue('s1', 'already delivered');
+    const old = Date.now() - 2 * 3600_000;
+    for (const n of fs.readdirSync(dir)) fs.renameSync(path.join(dir, n), path.join(dir, `${n}.claimed-${old}-u`));
+    const { recordDelivered } = await import('../../src/core/delivered.js');
+    await recordDelivered('s1', [b.id]);
+    const r = await wait('stop');
+    expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['left behind']);
+    expect(unwrapMessages(r.stderr).map((m) => m.id)).toEqual([a.id]);
     expect(fs.readdirSync(dir)).toEqual([]);
   });
   // Audit R2-N8: a waiter whose lock was reclaimed (its heartbeat lapsed) must stop, not drain alongside.
@@ -607,5 +616,90 @@ describe('waiter stop: clears only the busy marker of the turn that ended', () =
     const r = await wait('stop', {}, { spawnedAt: Date.now() - 1000 });
     expect(r.exitCode).toBe(2);
     expect(await isBusy('s1')).toBe(false);
+  });
+});
+
+// Audit S4-S1 / S4-S2: the signature binds the session and the time; a delivered id is never delivered
+// again; the secret is read (with retries) before anything is claimed, and is never needed to delete.
+describe('waiter: signature scope, replay and the secret', () => {
+  const waiterLog = () => {
+    try {
+      return fs.readFileSync(path.join(paths().logDir, 'waiter.log'), 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  const put = (sid: string, m: object, name = `000000000000009-000001-${(m as { id: string }).id}.msg`) => {
+    const dir = paths().inboxDir(sid);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, name), JSON.stringify(m));
+    return path.join(dir, name);
+  };
+  const inbox = (sid: string) => fs.readdirSync(paths().inboxDir(sid));
+
+  it('a message signed for another session is not delivered (kept aside)', async () => {
+    await reg('s1');
+    await reg('s2');
+    const m = await enqueue('s1', 'for s1 only');
+    fs.rmSync(paths().inboxDir('s1'), { recursive: true });
+    put('s2', m);
+    expect(await wait('stop', { session_id: 's2' }, { deadlineMs: 150 })).toEqual({ exitCode: 0, stderr: '' });
+    expect(inbox('s2').filter((n) => n.endsWith('.msg.unsigned'))).toHaveLength(1);
+  });
+  it('a delivered message dropped into the inbox again is not delivered twice (replay)', async () => {
+    await reg('s1');
+    const m = await enqueue('s1', 'once');
+    expect(unwrapMessages((await wait('stop')).stderr).map((x) => x.text)).toEqual(['once']);
+    put('s1', m);
+    expect(await wait('stop', {}, { deadlineMs: 150 })).toEqual({ exitCode: 0, stderr: '' });
+    expect(inbox('s1')).toEqual([]);
+    expect(waiterLog()).toMatch(/already delivered/);
+  });
+  it('a signed message dated in the future, or before this connection, is dropped', async () => {
+    await reg('s1');
+    const base = { text: 'x' };
+    put('s1', await signMessage('s1', { ...base, id: 'future', createdAt: new Date(Date.now() + 10 * 60_000).toISOString() }));
+    put('s1', await signMessage('s1', { ...base, id: 'before', createdAt: new Date(Date.now() - 3600_000).toISOString() }), '000000000000008-000001-before.msg');
+    const ok = await enqueue('s1', 'ok');
+    const r = await wait('stop');
+    expect(unwrapMessages(r.stderr).map((x) => x.id)).toEqual([ok.id]);
+    expect(waiterLog()).toMatch(/future \(dated in the future\)/);
+    expect(waiterLog()).toMatch(/before \(older than this connection\)/);
+    expect(inbox('s1')).toEqual([]);
+  });
+  it('a message signed within the clock skew (2 min ahead) is delivered', async () => {
+    await reg('s1');
+    put('s1', await signMessage('s1', { id: 'soon', text: 'skew', createdAt: new Date(Date.now() + 60_000).toISOString() }));
+    expect(unwrapMessages((await wait('stop')).stderr).map((x) => x.text)).toEqual(['skew']);
+  });
+  for (const code of ['EACCES', 'EBUSY']) {
+    it(`a secret that cannot be read (${code}) claims nothing: messages stay queued and are delivered once it can`, async () => {
+      await reg('s1');
+      await enqueue('s1', 'kept safe');
+      const before = fs.readFileSync(paths().secret, 'utf8');
+      const real = fsp.readFile.bind(fsp);
+      let blocked = true;
+      vi.spyOn(fsp, 'readFile').mockImplementation((async (file: unknown, ...rest: unknown[]) => {
+        if (blocked && String(file) === paths().secret) throw errno(code);
+        return (real as (...a: unknown[]) => Promise<unknown>)(file, ...rest);
+      }) as typeof fsp.readFile);
+      let done = false;
+      const p = wait('stop').then((r) => ((done = true), r));
+      await sleep(1500);
+      expect(done).toBe(false);
+      expect(inbox('s1').filter((n) => n.endsWith('.msg'))).toHaveLength(1); // untouched: not claimed, not deleted
+      expect(waiterLog()).toMatch(/install secret is unreadable/);
+      blocked = false;
+      expect(unwrapMessages((await p).stderr).map((x) => x.text)).toEqual(['kept safe']);
+      expect(fs.readFileSync(paths().secret, 'utf8')).toBe(before); // never replaced
+    });
+  }
+  it('a missing secret claims nothing either', async () => {
+    await reg('s1');
+    await enqueue('s1', 'x');
+    fs.rmSync(paths().secret);
+    expect(await wait('stop', {}, { deadlineMs: 200 })).toEqual({ exitCode: 0, stderr: '' });
+    expect(inbox('s1').filter((n) => n.endsWith('.msg'))).toHaveLength(1);
+    expect(waiterLog()).toMatch(/install secret is missing/);
   });
 });

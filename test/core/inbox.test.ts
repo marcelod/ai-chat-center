@@ -109,21 +109,44 @@ describe('inbox', () => {
     expect(names()[0]).toMatch(/\.msg$/);
     expect((await drain('s1')).map((m) => m.text)).toEqual(['stuck']);
   });
-  it('sweepClaimed deletes claimed files older than the limit and keeps fresh ones and queued messages', async () => {
+  // Audit R4-L3: an old claimed file is put back as .msg (re-delivery is safer than loss), unless its id
+  // is among the delivered ones: then it is deleted.
+  it('sweepClaimed puts back claimed files older than the limit, deletes delivered ones, keeps fresh ones', async () => {
     await enqueue('s1', 'queued');
     const dir = paths().inboxDir('s1');
     const old = Date.now() - 2 * 3600_000;
-    fs.writeFileSync(path.join(dir, `x.msg.claimed-${old}-u1`), '{}');
+    fs.writeFileSync(path.join(dir, `001-000001-x.msg.claimed-${old}-u1`), JSON.stringify({ id: 'x', text: 'x', createdAt: '' }));
+    fs.writeFileSync(path.join(dir, `002-000001-d.msg.claimed-${old}-u3`), JSON.stringify({ id: 'd', text: 'd', createdAt: '' }));
     fs.writeFileSync(path.join(dir, `y.msg.claimed-${Date.now()}-u2`), '{}');
     // older naming (no claim time): falls back to the file mtime
     fs.writeFileSync(path.join(dir, 'z.msg.claimed-0d6e2c9a-uuid'), '{}');
     fs.utimesSync(path.join(dir, 'z.msg.claimed-0d6e2c9a-uuid'), new Date(old), new Date(old));
-    expect(await sweepClaimed('s1', 3600_000)).toBe(2);
+    expect(await sweepClaimed('s1', 3600_000, new Set(['d']))).toBe(3);
     const left = names();
     expect(left.some((n) => n.startsWith('y.msg.claimed-'))).toBe(true);
-    expect(left.filter((n) => n.endsWith('.msg'))).toHaveLength(1);
-    expect(left).toHaveLength(2);
+    expect(left).toContain('001-000001-x.msg');
+    expect(left).toContain('z.msg');
+    expect(left.some((n) => n.startsWith('002-'))).toBe(false);
+    expect(left).toHaveLength(4);
     expect(await sweepClaimed('nobody', 3600_000)).toBe(0);
+  });
+  it('a claim marker whose holder died is removed at once, by the sweep and by the next drain', async () => {
+    await enqueue('s1', 'a');
+    const [f] = names();
+    const marker = path.join(paths().inboxDir('s1'), `${f}.claim`);
+    const { spawnSync } = await import('node:child_process');
+    const dead = spawnSync(process.execPath, ['-e', '']).pid!;
+    fs.writeFileSync(marker, String(dead));
+    expect(await drain('s1')).toEqual([]); // held: skipped this pass, the dead holder's marker removed
+    expect(fs.existsSync(marker)).toBe(false);
+    expect((await drain('s1')).map((m) => m.text)).toEqual(['a']);
+    await enqueue('s1', 'b');
+    const [g] = names();
+    fs.writeFileSync(path.join(paths().inboxDir('s1'), `${g}.claim`), String(dead));
+    expect(await sweepClaimed('s1', 3600_000)).toBe(1);
+    fs.writeFileSync(path.join(paths().inboxDir('s1'), `${g}.claim`), String(process.pid)); // a live holder
+    expect(await sweepClaimed('s1', 3600_000)).toBe(0);
+    expect(await drain('s1')).toEqual([]);
   });
 
   // CI, windows-latest: 4 concurrent drains of 50 messages delivered 51. Windows renames through an open

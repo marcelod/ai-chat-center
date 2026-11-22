@@ -11,7 +11,8 @@ import { wrapMessages } from '../core/protocol.js';
 import { isCcCommand } from '../core/ccCommand.js';
 import { busyAge } from '../core/busy.js';
 import { queryLiveSessions } from '../hub/status.js';
-import { verifyMessage } from '../core/secret.js';
+import { loadSecret, verifyMessage } from '../core/secret.js';
+import { readDelivered, recordDelivered } from '../core/delivered.js';
 
 export type { PidLookup };
 /**
@@ -59,6 +60,8 @@ export const BUSY_CHECK_MS = 15_000;
  * before this delay, so it never delivers into the turn that has just started.
  */
 export const PROMPT_SETTLE_MS = 3000;
+/** A signed message dated more than this in the future is dropped. */
+export const MAX_CLOCK_SKEW_MS = 2 * 60_000;
 const SWITCH_SOURCES = new Set(['startup', 'resume', 'clear', 'fork']);
 
 const NOTHING: WaiterResult = { exitCode: 0, stderr: '' };
@@ -112,6 +115,16 @@ async function hasQueued(sid: string): Promise<boolean> {
     return (await fs.promises.readdir(paths().inboxDir(sid))).some((n) => n.endsWith('.msg'));
   } catch {
     return false;
+  }
+}
+
+/** Like hasQueued, but a read error other than a missing folder is thrown (logged by the loop). */
+async function inboxHasMessages(sid: string): Promise<boolean> {
+  try {
+    return (await fs.promises.readdir(paths().inboxDir(sid))).some((n) => n.endsWith('.msg'));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw e;
   }
 }
 
@@ -251,6 +264,7 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
   let lastBeat = Date.now();
   let deadChecked = false;
   let lastStatusAt = -Infinity;
+  let secretWarned = false;
   /**
    * True once a busy marker left by an interrupted turn was dropped. Only with messages queued (the
    * lookup costs a `claude agents` run), a marker older than staleBusyMs, at most every busyCheckMs.
@@ -269,7 +283,7 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
   };
   try {
     try {
-      await sweepClaimed(sid, CLAIMED_SWEEP_MS);
+      await sweepClaimed(sid, CLAIMED_SWEEP_MS, await readDelivered(sid));
     } catch (e) {
       logError(e);
     }
@@ -322,14 +336,44 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
           // Only what the hub signed is delivered. Anything else (written by an older hub that did not sign,
           // or by something else) is kept aside as .unsigned, judged before anything is deleted; the app
           // tells the user it was not delivered.
-          let unsigned = 0;
-          const drained = await drain(sid, async (m) => {
-            if (await verifyMessage(m)) return 'deliver';
-            unsigned++;
-            return 'unsigned';
-          });
-          if (unsigned > 0) {
-            logError(`kept ${unsigned} unsigned or invalid message(s) aside (not delivered) in the inbox of session ${sid}`);
+          // The secret is read (with retries) BEFORE anything is claimed: when it cannot be read, this pass is
+          // skipped and every message stays queued (audit S4-S2). A signed message is still dropped when its
+          // id was already delivered (a replay), when it is dated in the future, or when it predates this
+          // connection (S4-S1).
+          const sec = (await inboxHasMessages(sid)) ? await loadSecret() : null;
+          let drained: Awaited<ReturnType<typeof drain>> = [];
+          if (sec && !sec.ok) {
+            if (!secretWarned) logError(`the install secret is ${sec.reason}: nothing is taken from the inbox of session ${sid} until it can be read`);
+            secretWarned = true;
+          } else if (sec?.ok) {
+            secretWarned = false;
+            const delivered = await readDelivered(sid);
+            const t = Date.now(); // the wall clock: createdAt was written by the hub on this machine
+            const since = Date.parse(reg.connectedAt);
+            let unsigned = 0;
+            const dropped: string[] = [];
+            drained = await drain(
+              sid,
+              (m) => {
+                if (!verifyMessage(m, sid, sec.secret)) return (unsigned++, 'unsigned');
+                const at = Date.parse(m.createdAt);
+                if (delivered.has(m.id)) return (dropped.push(`${m.id} (already delivered)`), 'drop');
+                if (!(at <= t + MAX_CLOCK_SKEW_MS)) return (dropped.push(`${m.id} (dated in the future)`), 'drop');
+                if (Number.isFinite(since) && at < since) return (dropped.push(`${m.id} (older than this connection)`), 'drop');
+                return 'deliver';
+              },
+              async (ms) => {
+                try {
+                  await recordDelivered(sid, ms.map((m) => m.id));
+                } catch (e) {
+                  logError(e);
+                }
+              },
+            );
+            if (unsigned > 0) {
+              logError(`kept ${unsigned} unsigned or invalid message(s) aside (not delivered) in the inbox of session ${sid}`);
+            }
+            if (dropped.length > 0) logError(`dropped signed message(s) in the inbox of session ${sid}: ${dropped.join(', ')}`);
           }
           let msgs = drained;
           if (discardOld) {

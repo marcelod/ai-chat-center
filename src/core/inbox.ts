@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { paths } from './paths.js';
 import { ensureDir, FILE_MODE, withFsRetry } from './fsAtomic.js';
 import { signMessage } from './secret.js';
+import { isAlive } from './lock.js';
 
 /** `sig`: HMAC by the hub (secret.ts); the waiter delivers only messages whose signature checks out. */
 export type InboxMessage = { id: string; text: string; createdAt: string; sig?: string };
@@ -20,7 +21,7 @@ export async function enqueue(sid: string, text: string): Promise<InboxMessage> 
   const dir = paths().inboxDir(sid);
   await ensureDir(dir);
   const now = Date.now();
-  const msg = await signMessage({ id: crypto.randomUUID(), text, createdAt: new Date(now).toISOString() });
+  const msg = await signMessage(sid, { id: crypto.randomUUID(), text, createdAt: new Date(now).toISOString() });
   counter = (counter + 1) % 1_000_000;
   const name = `${String(now).padStart(15, '0')}-${String(counter).padStart(6, '0')}-${msg.id}.msg`;
   const tmp = path.join(dir, `.${msg.id}.tmp`); // never ends in .msg
@@ -131,7 +132,12 @@ export async function drain(
     try {
       await fs.writeFile(marker, String(process.pid), { flag: 'wx', mode: FILE_MODE });
     } catch (e) {
-      if (isRace(e) || ['EEXIST', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '')) continue; // held
+      if ((e as NodeJS.ErrnoException).code === 'EEXIST') {
+        // Held. A marker whose holder died (killed mid-claim) is removed: the next pass claims the message.
+        if (!(await markerOwnerAlive(marker))) await removeMarker(marker);
+        continue;
+      }
+      if (isRace(e) || (e as NodeJS.ErrnoException).code === 'EACCES') continue; // held
       if (out.length > 0 || toDelete.length > 0) break;
       throw e;
     }
@@ -186,13 +192,26 @@ export async function countUnsigned(sid: string): Promise<number> {
   }
 }
 
+/** False only when the marker names a pid that is dead (an empty marker, from 0.2.2, counts as alive). */
+async function markerOwnerAlive(marker: string): Promise<boolean> {
+  try {
+    const t = (await fs.readFile(marker, 'utf8')).trim();
+    return !/^\d+$/.test(t) || isAlive(Number(t));
+  } catch {
+    return true;
+  }
+}
+
 /**
- * Removes claim markers older than a minute (or maxAgeMs if shorter), never the message they guarded.
- * Deletes claimed files older than `maxAgeMs` (by the claim time in their name, else their mtime): left
- * behind by a drain that delivered them but could not delete them. Call it only while holding the
- * session's waiter lock. Returns how many were removed.
+ * Housekeeping, called only while holding the session's waiter lock (at waiter start). Returns how many
+ * files it removed or put back.
+ * - A claim marker whose holder pid is dead, or older than a minute (or maxAgeMs if shorter), is removed:
+ *   never the message it guarded, which becomes claimable again.
+ * - A claimed file older than `maxAgeMs` (by the claim time in its name, else its mtime) was left by a drain
+ *   that died or could not delete it. Its id in `delivered`: it was delivered, delete it. Otherwise it is
+ *   renamed back to its .msg name (audit R4-L3: a second delivery is safer than a lost message).
  */
-export async function sweepClaimed(sid: string, maxAgeMs: number): Promise<number> {
+export async function sweepClaimed(sid: string, maxAgeMs: number, delivered: ReadonlySet<string> = new Set()): Promise<number> {
   const dir = paths().inboxDir(sid);
   let names: string[];
   try {
@@ -200,16 +219,16 @@ export async function sweepClaimed(sid: string, maxAgeMs: number): Promise<numbe
   } catch {
     return 0;
   }
-  let removed = 0;
+  let swept = 0;
   const now = Date.now();
   for (const n of names) {
     if (n.endsWith(`.msg${CLAIM_MARK}`)) {
-      // A claim marker left behind (its holder died, or could not delete it): remove the marker only.
-      // The message, if still queued, becomes claimable again.
+      const marker = path.join(dir, n);
       try {
-        if (now - (await fs.stat(path.join(dir, n))).mtimeMs <= Math.min(maxAgeMs, MARKER_STALE_MS)) continue;
-        await withFsRetry(() => fs.rm(path.join(dir, n), { force: true }));
-        removed++;
+        const stale = !(await markerOwnerAlive(marker)) || now - (await fs.stat(marker)).mtimeMs > Math.min(maxAgeMs, MARKER_STALE_MS);
+        if (!stale) continue;
+        await withFsRetry(() => fs.rm(marker, { force: true }));
+        swept++;
       } catch {
         /* next time */
       }
@@ -221,13 +240,15 @@ export async function sweepClaimed(sid: string, maxAgeMs: number): Promise<numbe
     try {
       const at = m[1] ? Number(m[1]) : (await fs.stat(file)).mtimeMs;
       if (now - at <= maxAgeMs) continue;
-      await withFsRetry(() => fs.rm(file, { force: true }));
-      removed++;
+      const msg = await readMsg(file);
+      if (msg && typeof msg.id === 'string' && delivered.has(msg.id)) await withFsRetry(() => fs.rm(file, { force: true }));
+      else await withFsRetry(() => fs.rename(file, path.join(dir, n.slice(0, m.index + '.msg'.length))));
+      swept++;
     } catch {
       /* gone, or still held: next time */
     }
   }
-  return removed;
+  return swept;
 }
 
 /** Deletes every queued message (and stray temp file) of a session. Used when it disconnects or reconnects. */

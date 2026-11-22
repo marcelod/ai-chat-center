@@ -29,6 +29,7 @@ function paths() {
     waiterLock: (sid) => (assertSessionId(sid), path.join(home, "waiters", `${sid}.lock`)),
     waitingFile: (sid) => (assertSessionId(sid), path.join(home, "waiting", `${sid}.json`)),
     busyFile: (sid) => (assertSessionId(sid), path.join(home, "busy", sid)),
+    deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
     logDir: path.join(home, "logs")
   };
 }
@@ -80,49 +81,12 @@ async function readJson(file) {
 import path5 from "node:path";
 
 // src/core/inbox.ts
-import fs2 from "node:fs/promises";
-import path3 from "node:path";
-var isRace = (e) => ["ENOENT", "EPERM", "EBUSY"].includes(e.code ?? "");
-var CLAIM_MARK = ".claim";
-var UNSIGNED = ".unsigned";
-async function clearInbox(sid) {
-  const dir = paths().inboxDir(sid);
-  let names;
-  try {
-    names = await fs2.readdir(dir);
-  } catch (e) {
-    if (e.code === "ENOENT") return;
-    throw e;
-  }
-  for (const n of names) {
-    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`) && !n.endsWith(`.msg${UNSIGNED}`)) continue;
-    try {
-      await withFsRetry(() => fs2.rm(path3.join(dir, n), { force: true }));
-    } catch (e) {
-      if (!isRace(e)) throw e;
-    }
-  }
-}
-
-// src/core/busy.ts
-async function setBusy(sid) {
-  await writeJsonAtomic(paths().busyFile(sid), { at: (/* @__PURE__ */ new Date()).toISOString() });
-}
-async function clearBusy(sid) {
-  await removeFile(paths().busyFile(sid));
-}
-
-// src/core/waiting.ts
-async function setWaiting(sid, kind) {
-  await writeJsonAtomic(paths().waitingFile(sid), { kind, at: (/* @__PURE__ */ new Date()).toISOString() });
-}
-async function clearWaiting(sid) {
-  await removeFile(paths().waitingFile(sid));
-}
-
-// src/core/lock.ts
 import fs3 from "node:fs/promises";
 import path4 from "node:path";
+
+// src/core/lock.ts
+import fs2 from "node:fs/promises";
+import path3 from "node:path";
 import crypto2 from "node:crypto";
 var EMPTY_GRACE_MS = 1e4;
 var LOCK_STALE_MS = 9e4;
@@ -152,27 +116,27 @@ async function publish(file) {
   const tmp = `${file}.${crypto2.randomUUID()}.tmp`;
   const content = JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() });
   try {
-    await fs3.writeFile(tmp, content, { flag: "wx" });
-    await fs3.link(tmp, file);
+    await fs2.writeFile(tmp, content, { flag: "wx" });
+    await fs2.link(tmp, file);
     return content;
   } catch (e) {
     if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return null;
     throw e;
   } finally {
-    await fs3.rm(tmp, { force: true });
+    await fs2.rm(tmp, { force: true });
   }
 }
 async function staleContent(file) {
   let content;
   let mtimeMs;
   try {
-    content = await fs3.readFile(file, "utf8");
+    content = await fs2.readFile(file, "utf8");
   } catch (e) {
     if (code(e) === "ENOENT") return null;
     content = "";
   }
   try {
-    mtimeMs = (await fs3.stat(file)).mtimeMs;
+    mtimeMs = (await fs2.stat(file)).mtimeMs;
   } catch {
     return null;
   }
@@ -187,8 +151,8 @@ async function reclaim(file, seen) {
   const guard = `${file}.reclaim`;
   if (await publish(guard) === null) {
     try {
-      const st = await fs3.stat(guard);
-      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs3.rm(guard, { force: true });
+      const st = await fs2.stat(guard);
+      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs2.rm(guard, { force: true });
     } catch {
     }
     return null;
@@ -196,7 +160,7 @@ async function reclaim(file, seen) {
   try {
     if (await staleContent(file) !== seen) return null;
     try {
-      await fs3.unlink(file);
+      await fs2.unlink(file);
     } catch (e) {
       if (code(e) !== "ENOENT") {
         if (contention(e)) return null;
@@ -206,7 +170,7 @@ async function reclaim(file, seen) {
     return await publish(file);
   } finally {
     try {
-      if (lockPid(await fs3.readFile(guard, "utf8")) === process.pid) await fs3.rm(guard, { force: true });
+      if (lockPid(await fs2.readFile(guard, "utf8")) === process.pid) await fs2.rm(guard, { force: true });
     } catch {
     }
   }
@@ -215,7 +179,7 @@ async function acquireLock(file) {
   return await acquireLockContent(file) !== null;
 }
 async function acquireLockContent(file) {
-  await ensureDir(path4.dirname(file));
+  await ensureDir(path3.dirname(file));
   const mine = await publish(file);
   if (mine !== null) return mine;
   const seen = await staleContent(file);
@@ -224,11 +188,11 @@ async function acquireLockContent(file) {
 }
 async function releaseLock(file) {
   try {
-    if (lockPid(await fs3.readFile(file, "utf8")) !== process.pid) return;
+    if (lockPid(await fs2.readFile(file, "utf8")) !== process.pid) return;
   } catch {
     return;
   }
-  await fs3.rm(file, { force: true });
+  await fs2.rm(file, { force: true });
 }
 async function withLock(file, waitMs, fn) {
   const deadline = Date.now() + waitMs;
@@ -246,6 +210,45 @@ async function withLock(file, waitMs, fn) {
   } finally {
     if (held) await releaseLock(file);
   }
+}
+
+// src/core/inbox.ts
+var isRace = (e) => ["ENOENT", "EPERM", "EBUSY"].includes(e.code ?? "");
+var CLAIM_MARK = ".claim";
+var UNSIGNED = ".unsigned";
+async function clearInbox(sid) {
+  const dir = paths().inboxDir(sid);
+  let names;
+  try {
+    names = await fs3.readdir(dir);
+  } catch (e) {
+    if (e.code === "ENOENT") return;
+    throw e;
+  }
+  for (const n of names) {
+    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`) && !n.endsWith(`.msg${UNSIGNED}`)) continue;
+    try {
+      await withFsRetry(() => fs3.rm(path4.join(dir, n), { force: true }));
+    } catch (e) {
+      if (!isRace(e)) throw e;
+    }
+  }
+}
+
+// src/core/busy.ts
+async function setBusy(sid) {
+  await writeJsonAtomic(paths().busyFile(sid), { at: (/* @__PURE__ */ new Date()).toISOString() });
+}
+async function clearBusy(sid) {
+  await removeFile(paths().busyFile(sid));
+}
+
+// src/core/waiting.ts
+async function setWaiting(sid, kind) {
+  await writeJsonAtomic(paths().waitingFile(sid), { kind, at: (/* @__PURE__ */ new Date()).toISOString() });
+}
+async function clearWaiting(sid) {
+  await removeFile(paths().waitingFile(sid));
 }
 
 // src/core/registry.ts
