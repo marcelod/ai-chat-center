@@ -19,7 +19,7 @@ export type { PidLookup };
  * during every turn: an interrupted turn (Esc) fires no Stop, and before this nothing re-armed delivery.
  */
 export type WaiterEvent = 'start' | 'stop' | 'prompt';
-export type WaiterInput = { session_id: string; source?: string; transcript_path?: string; prompt?: string };
+export type WaiterInput = { session_id: string; source?: string; transcript_path?: string; prompt?: string; cwd?: string };
 /** Live status of a session from `claude agents`, or null when the lookup failed or does not list it. */
 export type LiveStatus = 'busy' | 'idle' | 'waiting' | null;
 
@@ -114,11 +114,30 @@ async function hasQueued(sid: string): Promise<boolean> {
  * disconnect it. On resume/startup of this session's own active registration, refresh its pid and
  * transcript path (a resumed session may run in a new process and write a new transcript).
  */
-async function sessionSwitch(sid: string, input: WaiterInput, lookup: () => Promise<PidLookup>): Promise<void> {
+async function sessionSwitch(
+  sid: string,
+  input: WaiterInput,
+  lookup: () => Promise<PidLookup>,
+  lookupOther: (id: string) => Promise<PidLookup>,
+): Promise<void> {
   const source = input.source ?? '';
   if (!SWITCH_SOURCES.has(source)) return;
   const active = (await listRegistrations()).filter(isActive);
   const others = active.filter((r) => r.sessionId !== sid && r.pid !== null);
+  if (source === 'clear') {
+    // A registration whose pid was never resolved could be the conversation this /clear replaced: resolve
+    // it now. Listed: record its pid (compared below). Not listed: it is gone or replaced, disconnect it.
+    // Lookup failed: disconnect it only when it ran in this same folder.
+    for (const u of active.filter((r) => r.sessionId !== sid && r.pid === null)) {
+      const r = await lookupOther(u.sessionId);
+      if (r.ok && r.pid !== null) {
+        await updateRegistration(u.sessionId, { pid: r.pid }, { ifConnectedAt: u.connectedAt });
+        others.push({ ...u, pid: r.pid });
+      } else if (r.ok || (typeof input.cwd === 'string' && u.cwd === input.cwd)) {
+        await markDisconnected(u.sessionId, 'clear');
+      }
+    }
+  }
   const own = active.find((r) => r.sessionId === sid);
   const refresh = own !== undefined && (source === 'resume' || source === 'startup');
   if (others.length === 0 && !refresh) return; // only pay for `claude agents` when someone uses the plugin
@@ -185,7 +204,7 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
 
   if (event === 'start') {
     try {
-      await sessionSwitch(sid, input, lookup);
+      await sessionSwitch(sid, input, lookup, lookupFn);
     } catch (e) {
       logError(e);
     }

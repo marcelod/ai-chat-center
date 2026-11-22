@@ -521,11 +521,22 @@ async function hasQueued(sid) {
     return false;
   }
 }
-async function sessionSwitch(sid, input, lookup) {
+async function sessionSwitch(sid, input, lookup, lookupOther) {
   const source = input.source ?? "";
   if (!SWITCH_SOURCES.has(source)) return;
   const active = (await listRegistrations()).filter(isActive);
   const others = active.filter((r2) => r2.sessionId !== sid && r2.pid !== null);
+  if (source === "clear") {
+    for (const u of active.filter((r2) => r2.sessionId !== sid && r2.pid === null)) {
+      const r2 = await lookupOther(u.sessionId);
+      if (r2.ok && r2.pid !== null) {
+        await updateRegistration(u.sessionId, { pid: r2.pid }, { ifConnectedAt: u.connectedAt });
+        others.push({ ...u, pid: r2.pid });
+      } else if (r2.ok || typeof input.cwd === "string" && u.cwd === input.cwd) {
+        await markDisconnected(u.sessionId, "clear");
+      }
+    }
+  }
   const own = active.find((r2) => r2.sessionId === sid);
   const refresh = own !== void 0 && (source === "resume" || source === "startup");
   if (others.length === 0 && !refresh) return;
@@ -579,7 +590,7 @@ async function runWaiter(event, input, opts = {}) {
   const failingTooLong = () => failingSince !== null && now() - failingSince >= lookupFailMs;
   if (event === "start") {
     try {
-      await sessionSwitch(sid, input, lookup);
+      await sessionSwitch(sid, input, lookup, lookupFn);
     } catch (e) {
       logError(e);
     }

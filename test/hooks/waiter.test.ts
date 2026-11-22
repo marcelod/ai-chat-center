@@ -359,10 +359,39 @@ describe('waiter start: same-process session switches', () => {
     await wait('start', { session_id: 'B', source: 'clear' }, { lookup: async () => (lookups++, { ok: true, pid: 42 }) });
     expect(lookups).toBe(0);
   });
-  it('an unresolvable pid disconnects nothing (null never matches)', async () => {
-    await register({ sessionId: 'A', transcriptPath: '/a', cwd: '/x', pid: null });
+  it('an unresolvable own pid disconnects no registration with a known pid (null never matches)', async () => {
+    await register({ sessionId: 'A', transcriptPath: '/a', cwd: '/x', pid: 42 });
     await wait('start', { session_id: 'B', source: 'clear' });
     expect((await getRegistration('A'))?.disconnectedAt).toBeUndefined();
+  });
+  // Audit S3-L5: a registration whose pid was never resolved survived /clear, so the old conversation
+  // stayed "connected" and its waiter could deliver app messages into the cleared one. Resolve it first.
+  describe('clear: registrations with an unknown pid', () => {
+    const byId = (m: Record<string, PidLookup>) => async (id: string): Promise<PidLookup> => m[id] ?? { ok: true, pid: null };
+    it('not listed by claude agents: disconnected', async () => {
+      await register({ sessionId: 'A', transcriptPath: '/a', cwd: '/x', pid: null });
+      await wait('start', { session_id: 'B', source: 'clear', cwd: '/y' }, { lookup: byId({ B: { ok: true, pid: 42 } }) });
+      expect((await getRegistration('A'))?.disconnectReason).toBe('clear');
+    });
+    it('listed with this very claude pid: disconnected', async () => {
+      await register({ sessionId: 'A', transcriptPath: '/a', cwd: '/x', pid: null });
+      await wait('start', { session_id: 'B', source: 'clear' }, { lookup: byId({ A: { ok: true, pid: 42 }, B: { ok: true, pid: 42 } }) });
+      expect((await getRegistration('A'))?.disconnectReason).toBe('clear');
+    });
+    it('listed with another pid: its pid is recorded and it stays connected', async () => {
+      await register({ sessionId: 'A', transcriptPath: '/a', cwd: '/x', pid: null });
+      await wait('start', { session_id: 'B', source: 'clear' }, { lookup: byId({ A: { ok: true, pid: 55 }, B: { ok: true, pid: 42 } }) });
+      const a = await getRegistration('A');
+      expect(a?.disconnectedAt).toBeUndefined();
+      expect(a?.pid).toBe(55);
+    });
+    it('lookup failing: disconnected when in the same folder, kept otherwise', async () => {
+      await register({ sessionId: 'A', transcriptPath: '/a', cwd: '/x', pid: null });
+      await register({ sessionId: 'C', transcriptPath: '/c', cwd: '/elsewhere', pid: null });
+      await wait('start', { session_id: 'B', source: 'clear', cwd: '/x' }, { lookup: async () => ({ ok: false }) });
+      expect((await getRegistration('A'))?.disconnectReason).toBe('clear');
+      expect((await getRegistration('C'))?.disconnectedAt).toBeUndefined();
+    });
   });
   it('compact or an unknown source does nothing', async () => {
     await register({ sessionId: 'A', transcriptPath: '/a', cwd: '/x', pid: 42 });
