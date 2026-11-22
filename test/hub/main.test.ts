@@ -140,6 +140,32 @@ describe('main', () => {
       sq.srv.close();
     }
   });
+  // Audit R4-C1: hub.json left by a hub killed without cleanup names the port the new hub binds again.
+  // Its last check then reaches itself: that is not another live hub.
+  it('a stale hub.json naming the port this hub binds does not make it defer to itself', async () => {
+    const port = await freePort();
+    const { spawnSync } = await import('node:child_process');
+    const dead = spawnSync(process.execPath, ['-e', '']).pid!;
+    await fsp.writeFile(path.join(home, 'hub.json'), JSON.stringify({ pid: dead, port }));
+    process.env.AI_CHAT_CENTER_PORT = String(port);
+    const h = await startHub();
+    try {
+      expect(h).not.toBeNull();
+      expect(h!.port).toBe(port);
+      expect(JSON.parse(await fsp.readFile(path.join(home, 'hub.json'), 'utf8'))).toEqual({ pid: process.pid, port });
+    } finally {
+      await h?.close();
+    }
+  });
+  it('logs why it does not start when another live hub answers', async () => {
+    const h = await startHub();
+    try {
+      expect(await startHub()).toBeNull();
+      expect(await fsp.readFile(path.join(home, 'logs', 'hub.log'), 'utf8')).toMatch(/another live hub answers/);
+    } finally {
+      await h!.close();
+    }
+  });
   it('creates a token when missing, and a second start defers to the live hub', async () => {
     const h = await startHub();
     try {

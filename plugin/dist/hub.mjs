@@ -1426,9 +1426,10 @@ async function writeFileAtomic600(file, data) {
     throw e;
   }
 }
-async function liveHubExists() {
+async function liveHubExists(self) {
   const info = await readJson(paths().hubJson);
   if (!info || typeof info.port !== "number") return false;
+  if (self && info.port === self.port) return false;
   let token;
   try {
     token = (await fs9.readFile(paths().token, "utf8")).trim();
@@ -1462,7 +1463,6 @@ async function acquireHubLock(lock) {
   }
 }
 async function startHub(opts = {}) {
-  if (await liveHubExists()) return null;
   const logDir = paths().logDir;
   await ensureDir(logDir);
   const logFile = path8.join(logDir, "hub.log");
@@ -1475,11 +1475,16 @@ async function startHub(opts = {}) {
     } catch {
     }
   };
+  const deferred = (when) => {
+    log(`another live hub answers on the port in hub.json (${when}): not starting (pid ${process.pid})`);
+    return null;
+  };
+  if (await liveHubExists()) return deferred("before the lock");
   const lock = path8.join(paths().home, "hub.lock");
   const locked2 = await acquireHubLock(lock);
   let hub;
   try {
-    if (await liveHubExists()) return null;
+    if (await liveHubExists()) return deferred("under the lock");
     const token = await rotateToken();
     secret = token;
     const base = pickPort();
@@ -1496,11 +1501,11 @@ async function startHub(opts = {}) {
       }
     }
     if (!hub) throw lastErr;
-    if (await liveHubExists()) {
-      await hub.close();
-      return null;
-    }
     const port = Number(new URL(hub.url).port);
+    if (await liveHubExists({ port })) {
+      await hub.close();
+      return deferred(`after binding port ${port}`);
+    }
     await writeJsonAtomic(paths().hubJson, { pid: process.pid, port });
     log(`hub listening on ${hub.url}`);
     await prune(log);

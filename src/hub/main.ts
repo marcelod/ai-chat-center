@@ -73,10 +73,16 @@ async function writeFileAtomic600(file: string, data: string): Promise<void> {
  * True only when the hub recorded in hub.json proves it knows the token on disk AND listens on the
  * recorded port (see ensureHub). A timeout (1 s), an error or a bad proof all mean "no live hub", so a
  * squatter on a stale port can neither stall nor stop a starting hub.
+ *
+ * `self`: the port this starting hub is bound to. A hub that died without its cleanup (SIGKILL, a crash,
+ * any kill on Windows) leaves hub.json naming its port; the new hub may bind that same port, and dialing
+ * it then reaches ITSELF, which proves the token it has just written. That is not another hub (audit
+ * R4-C1: the new hub used to exit, and every /cc failed until hub.json was deleted by hand).
  */
-async function liveHubExists(): Promise<boolean> {
+async function liveHubExists(self?: { port: number }): Promise<boolean> {
   const info = await readJson<{ pid?: number; port?: number }>(paths().hubJson);
   if (!info || typeof info.port !== 'number') return false;
+  if (self && info.port === self.port) return false; // we hold that port: whatever answers there is us
   let token: string;
   try {
     token = (await fs.readFile(paths().token, 'utf8')).trim();
@@ -120,7 +126,6 @@ async function acquireHubLock(lock: string): Promise<boolean> {
 
 /** Start the hub. Resolves null when another live hub already runs. */
 export async function startHub(opts: StartHubOptions = {}): Promise<{ port: number; close(): Promise<void> } | null> {
-  if (await liveHubExists()) return null;
   const logDir = paths().logDir;
   await ensureDir(logDir);
   const logFile = path.join(logDir, 'hub.log');
@@ -133,12 +138,17 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
       /* logging must never crash the hub */
     }
   };
+  const deferred = (when: string) => {
+    log(`another live hub answers on the port in hub.json (${when}): not starting (pid ${process.pid})`);
+    return null;
+  };
+  if (await liveHubExists()) return deferred('before the lock');
   const lock = path.join(paths().home, 'hub.lock');
   // If the lock stays busy for 5 s we proceed anyway (it may be stale); the re-checks below still guard.
   const locked = await acquireHubLock(lock);
   let hub: Awaited<ReturnType<typeof createHub>> | undefined;
   try {
-    if (await liveHubExists()) return null;
+    if (await liveHubExists()) return deferred('under the lock');
     const token = await rotateToken();
     secret = token;
 
@@ -156,11 +166,11 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
       }
     }
     if (!hub) throw lastErr;
-    if (await liveHubExists()) {
-      await hub.close();
-      return null;
-    }
     const port = Number(new URL(hub.url).port);
+    if (await liveHubExists({ port })) {
+      await hub.close();
+      return deferred(`after binding port ${port}`);
+    }
     await writeJsonAtomic(paths().hubJson, { pid: process.pid, port });
     log(`hub listening on ${hub.url}`);
     await prune(log);

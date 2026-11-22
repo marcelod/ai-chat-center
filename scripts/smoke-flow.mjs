@@ -10,6 +10,8 @@
 //      process (the hook must exit without waiting for the hub);
 //   2. POST a message to the hub API with the token;
 //   3. waiter.mjs stop: exits 2 with the keyed, escaped block; a second waiter delivers nothing;
+//   3b. the hub is killed without its cleanup (SIGKILL; on Windows TerminateProcess, as a reboot, Task
+//      Manager or Stop-Process would): hub.json still names its port. /cc must start a new hub at once;
 //   4. an interrupted turn: the prompt hook sets busy and a `waiter prompt` starts, no Stop follows (Esc);
 //      a later app message is still delivered by that waiter once the busy marker is stale;
 //   5. hook.mjs prompt-submit "/cc off": disconnects; a POST then returns 409.
@@ -101,7 +103,7 @@ try {
   hubPort = hub.port;
   hubPid = hub.pid;
   check(hubPort === Number(port) && isAlive(hubPid), `hub detached and running: pid ${hubPid}, port ${hubPort}`);
-  const token = fs.readFileSync(path.join(state, 'token'), 'utf8').trim();
+  let token = fs.readFileSync(path.join(state, 'token'), 'utf8').trim();
   const s = await request('GET', '/api/sessions', token);
   check(s.status === 200 && JSON.parse(s.body).connected.some((x) => x.sessionId === sid), `session listed as connected (${s.status})`);
 
@@ -120,6 +122,29 @@ try {
   check((w2.status === null || w2.status === 0) && (w2.stderr ?? '') === '', `a second waiter delivers nothing: status ${w2.status} signal ${w2.signal}`);
   // The killed waiter may leave its lock behind (no signal handler runs on Windows): its pid is dead, so
   // the next waiter reclaims it.
+
+  // 3b. The hub dies without its cleanup (audit R4-C1: the next hub bound the same port, reached itself
+  // through the stale hub.json, took that for another live hub and exited; /cc then failed for good).
+  process.kill(hubPid, 'SIGKILL');
+  for (let i = 0; i < 50 && isAlive(hubPid); i++) await sleep(100);
+  check(!isAlive(hubPid) && fs.existsSync(path.join(state, 'hub.json')), `hub ${hubPid} killed without cleanup, hub.json left behind`);
+  const t3 = Date.now();
+  const again = run('hook.mjs', 'prompt-submit', { session_id: sid, transcript_path: tp, cwd: home, prompt: '/cc' });
+  const ms3 = Date.now() - t3;
+  let out3 = {};
+  try {
+    out3 = JSON.parse(again.stdout || '{}');
+  } catch {
+    /* checked below */
+  }
+  const ctx3 = out3.hookSpecificOutput?.additionalContext ?? '';
+  const hub3 = JSON.parse(fs.readFileSync(path.join(state, 'hub.json'), 'utf8'));
+  check(ctx3.startsWith('AI Chat Center: connected') && ms3 < 4000, `/cc after the kill: ${JSON.stringify(ctx3.split('\n')[0])} in ${ms3} ms`);
+  check(hub3.pid !== hubPid && isAlive(hub3.pid), `hub.json names the new hub: pid ${hub3.pid}, port ${hub3.port}`);
+  hubPid = hub3.pid;
+  hubPort = hub3.port;
+  token = fs.readFileSync(path.join(state, 'token'), 'utf8').trim();
+  check(key === /AI Chat Center key: ([0-9a-f]{32})/.exec(ctx3)?.[1], 'the active connection keeps its key');
 
   // 4. A turn starts (prompt hook + prompt waiter) and is interrupted: Claude Code fires no Stop.
   const t4 = Date.now();
