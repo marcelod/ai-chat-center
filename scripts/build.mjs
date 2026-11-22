@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { renderNotices } from './third-party-notices.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(root, 'plugin', 'dist');
@@ -26,7 +27,7 @@ await build({
   outExtension: { '.js': '.mjs' },
   banner: { js: "import { createRequire as __acc_createRequire } from 'node:module';\nconst require = __acc_createRequire(import.meta.url);" },
   define: { 'process.env.NODE_ENV': '"production"' },
-  legalComments: 'none',
+  legalComments: 'eof',
   logLevel: 'info',
 });
 
@@ -43,4 +44,8 @@ if (ui.status !== 0) {
 }
 
 await fs.cp(path.join(root, 'ui', 'dist'), path.join(dist, 'ui'), { recursive: true });
+
+// The installed plugin is only plugin/: it carries its own license and the third-party notices.
+await fs.copyFile(path.join(root, 'LICENSE'), path.join(root, 'plugin', 'LICENSE'));
+await fs.writeFile(path.join(root, 'plugin', 'THIRD-PARTY-NOTICES.md'), renderNotices(root));
 console.log('plugin/dist ready');

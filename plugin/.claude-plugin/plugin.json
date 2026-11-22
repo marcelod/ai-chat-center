@@ -1,6 +1,6 @@
 {
   "name": "ai-chat-center",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Follow and reply to your terminal AI coding sessions from a WhatsApp-style local web app.",
   "author": {
     "name": "Marcelo Diniz"

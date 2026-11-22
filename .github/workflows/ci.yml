@@ -2,32 +2,86 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Development toolchain (vitest 5, jsdom) needs Node 22.12+.
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        node: ['20', '22']
+        node: ['22', '24']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+          cache-dependency-path: package-lock.json
       - run: npm ci
+      - run: npx tsc -p tsconfig.json
+      - run: npm -w ui run typecheck
       - run: npm test
       - run: npm -w ui test
       - run: npm run test:build
-      - name: Committed plugin/dist must match the build
+
+  # The committed plugin/dist must be exactly what the build produces, and a dist change since the
+  # last release tag needs a version bump (test/core/version.test.ts, which needs the tags).
+  dist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Committed plugin build must match
+        run: |
+          git diff --exit-code -- plugin
+          untracked="$(git ls-files -o --exclude-standard plugin)"
+          if [ -n "$untracked" ]; then echo "untracked build output: $untracked" >&2; exit 1; fi
+      - run: npx vitest run test/core/version.test.ts
+
+  # The plugin as Claude Code runs it: whatever Node 18+ is on PATH, no npm install.
+  runtime-smoke:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['18', '20', '22', '24']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Smoke-test a git archive of HEAD
         shell: bash
         run: |
-          if [ -n "$(git status --porcelain plugin/dist)" ]; then
-            git status --porcelain plugin/dist
-            git diff --stat plugin/dist
-            echo "plugin/dist is out of date: run npm run build and commit" >&2
-            exit 1
-          fi
+          dir="$RUNNER_TEMP/acc"
+          mkdir -p "$dir"
+          git archive HEAD | tar -x -C "$dir"
+          node "$dir/scripts/smoke-runtime.mjs" "$dir"

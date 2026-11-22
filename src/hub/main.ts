@@ -8,13 +8,22 @@ import { ensureDir, readJson, withFsRetry, writeJsonAtomic } from '../core/fsAto
 import { newChallenge, proofMatches } from '../core/healthProof.js';
 import { ClaudeCodeProvider } from './provider.js';
 import { acquireLock, releaseLock } from '../core/lock.js';
-import { pruneRegistrations } from '../core/registry.js';
+import { isActive, listRegistrations, pruneRegistrations } from '../core/registry.js';
 import { createHub } from './server.js';
 
 const TOKEN_RE = /^[0-9a-f]{64}$/;
 /** Disconnected registrations older than this are deleted (with their inbox, busy and waiting files). */
 export const PRUNE_AGE_MS = 30 * 86_400_000;
 const PRUNE_EVERY_MS = 10 * 60_000;
+/** The hub exits after this long with no browser connected and no active session. */
+export const IDLE_EXIT_MS = 2 * 3600_000;
+
+export interface StartHubOptions {
+  idleMs?: number;
+  idleCheckMs?: number;
+  /** Called once when the hub has been idle for idleMs. Default (main): close and exit. */
+  onIdle?: () => void;
+}
 
 async function prune(log: (m: string) => void): Promise<void> {
   try {
@@ -92,7 +101,7 @@ async function acquireHubLock(lock: string): Promise<boolean> {
 }
 
 /** Start the hub. Resolves null when another live hub already runs. */
-export async function startHub(): Promise<{ port: number; close(): Promise<void> } | null> {
+export async function startHub(opts: StartHubOptions = {}): Promise<{ port: number; close(): Promise<void> } | null> {
   if (await liveHubExists()) return null;
   const logDir = paths().logDir;
   await ensureDir(logDir);
@@ -140,6 +149,25 @@ export async function startHub(): Promise<{ port: number; close(): Promise<void>
     const pruneTimer = setInterval(() => void prune(log), PRUNE_EVERY_MS);
 
     const started = hub;
+    const idleMs = opts.idleMs ?? IDLE_EXIT_MS;
+    let lastUsed = Date.now();
+    let idleFired = false;
+    const idleTimer = setInterval(async () => {
+      try {
+        if (started.clients() > 0 || (await listRegistrations()).some(isActive)) {
+          lastUsed = Date.now();
+          return;
+        }
+      } catch {
+        lastUsed = Date.now(); // unsure: stay up
+        return;
+      }
+      if (!idleFired && Date.now() - lastUsed >= idleMs) {
+        idleFired = true;
+        log(`idle for ${Math.round(idleMs / 60_000)} min with no browser and no connected session: exiting`);
+        opts.onIdle?.();
+      }
+    }, opts.idleCheckMs ?? 60_000);
     let done = false;
     return {
       port,
@@ -147,6 +175,7 @@ export async function startHub(): Promise<{ port: number; close(): Promise<void>
         if (done) return;
         done = true;
         clearInterval(pruneTimer);
+        clearInterval(idleTimer);
         await started.close();
         const cur = await readJson<{ pid?: number; port?: number }>(paths().hubJson);
         if (cur?.pid === process.pid && cur?.port === port) await fs.rm(paths().hubJson, { force: true });
@@ -159,9 +188,10 @@ export async function startHub(): Promise<{ port: number; close(): Promise<void>
 }
 
 export async function main(): Promise<void> {
-  const hub = await startHub();
+  let hub: Awaited<ReturnType<typeof startHub>> = null;
+  const stop = () => void (hub ? hub.close() : Promise.resolve()).finally(() => process.exit(0));
+  hub = await startHub({ onIdle: stop });
   if (!hub) process.exit(0);
-  const stop = () => void hub.close().finally(() => process.exit(0));
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 }

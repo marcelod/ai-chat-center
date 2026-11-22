@@ -105,4 +105,40 @@ describe('main', () => {
       await h!.close();
     }
   });
+
+  // Audit AI-F11: the hub exits on its own after 2 h with no browser connected and no active session.
+  it('calls onIdle once nothing has used it for idleMs, and not while a session is active', async () => {
+    const { register, markDisconnected } = await import('../../src/core/registry.js');
+    await register({ sessionId: 'a', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    let idle = 0;
+    const h = await startHub({ idleMs: 60, idleCheckMs: 10, onIdle: () => void idle++ });
+    try {
+      await new Promise((r) => setTimeout(r, 150));
+      expect(idle).toBe(0);
+      await markDisconnected('a', 'off');
+      await new Promise((r) => setTimeout(r, 200));
+      expect(idle).toBe(1);
+    } finally {
+      await h!.close();
+    }
+  });
+  it('an open browser stream keeps the hub alive', async () => {
+    let idle = 0;
+    const h = await startHub({ idleMs: 60, idleCheckMs: 10, onIdle: () => void idle++ });
+    const token = (await fsp.readFile(path.join(home, 'token'), 'utf8')).trim();
+    const ac = new AbortController();
+    try {
+      const res = await fetch(`http://127.0.0.1:${h!.port}/api/stream`, { headers: { authorization: `Bearer ${token}` }, signal: ac.signal });
+      expect(res.status).toBe(200);
+      await new Promise((r) => setTimeout(r, 150));
+      expect(idle).toBe(0);
+    } finally {
+      ac.abort();
+      await h!.close();
+    }
+  });
+  it('the default idle limit is 2 hours', async () => {
+    const { IDLE_EXIT_MS } = await import('../../src/hub/main.js');
+    expect(IDLE_EXIT_MS).toBe(2 * 3600_000);
+  });
 });
