@@ -5,7 +5,7 @@ const require = __acc_createRequire(import.meta.url);
 import fs8 from "node:fs/promises";
 import fsSync from "node:fs";
 import path8 from "node:path";
-import crypto4 from "node:crypto";
+import crypto6 from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 // src/core/paths.ts
@@ -26,6 +26,7 @@ function paths() {
     config: path.join(home, "config.json"),
     sessionsDir: path.join(home, "sessions"),
     inboxDir: (sid) => (assertSessionId(sid), path.join(home, "inbox", sid)),
+    sessionLock: (sid) => (assertSessionId(sid), path.join(home, "sessions", `${sid}.lock`)),
     waiterLock: (sid) => (assertSessionId(sid), path.join(home, "waiters", `${sid}.lock`)),
     waitingFile: (sid) => (assertSessionId(sid), path.join(home, "waiting", `${sid}.json`)),
     busyFile: (sid) => (assertSessionId(sid), path.join(home, "busy", sid)),
@@ -36,17 +37,33 @@ function paths() {
 // src/core/fsAtomic.ts
 import fs from "node:fs/promises";
 import path2 from "node:path";
+import crypto from "node:crypto";
 var DIR_MODE = 448;
 var FILE_MODE = 384;
 async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true, mode: DIR_MODE });
 }
+var TRANSIENT = /* @__PURE__ */ new Set(["EPERM", "EBUSY", "EACCES"]);
+var RETRIES = 5;
+async function withFsRetry(op) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await op();
+    } catch (e) {
+      if (attempt >= RETRIES || !TRANSIENT.has(e.code ?? "")) throw e;
+      await new Promise((r) => setTimeout(r, 20 + Math.floor(Math.random() * 31)));
+    }
+  }
+}
+function removeFile(file) {
+  return withFsRetry(() => fs.rm(file, { force: true }));
+}
 async function writeJsonAtomic(file, data) {
   await ensureDir(path2.dirname(file));
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  const tmp = `${file}.${crypto.randomUUID()}.tmp`;
   try {
     await fs.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: "utf8", mode: FILE_MODE });
-    await fs.rename(tmp, file);
+    await withFsRetry(() => fs.rename(tmp, file));
   } catch (e) {
     await fs.rm(tmp, { force: true });
     throw e;
@@ -60,25 +77,38 @@ async function readJson(file) {
   }
 }
 
+// src/core/healthProof.ts
+import crypto2 from "node:crypto";
+var CHALLENGE_RE = /^[0-9a-f]{32}$/;
+var newChallenge = () => crypto2.randomBytes(16).toString("hex");
+function healthProof(token, challenge, pid, version) {
+  return crypto2.createHmac("sha256", token).update(`${challenge}.${pid}.${version}`).digest("hex");
+}
+function proofMatches(token, challenge, answer) {
+  const want = Buffer.from(healthProof(token, challenge, answer.pid, answer.version));
+  const got = Buffer.from(String(answer.proof));
+  return want.length === got.length && crypto2.timingSafeEqual(want, got);
+}
+
 // src/hub/provider.ts
-import fs5 from "node:fs/promises";
-import path5 from "node:path";
+import fs6 from "node:fs/promises";
+import path6 from "node:path";
 
 // src/core/registry.ts
-import fs4 from "node:fs/promises";
-import path4 from "node:path";
+import fs5 from "node:fs/promises";
+import path5 from "node:path";
 
 // src/core/inbox.ts
 import fs2 from "node:fs/promises";
 import path3 from "node:path";
-import crypto from "node:crypto";
+import crypto3 from "node:crypto";
 var counter = 0;
 var isRace = (e) => ["ENOENT", "EPERM", "EBUSY"].includes(e.code ?? "");
 async function enqueue(sid, text) {
   const dir = paths().inboxDir(sid);
   await ensureDir(dir);
   const now = Date.now();
-  const msg = { id: crypto.randomUUID(), text, createdAt: new Date(now).toISOString() };
+  const msg = { id: crypto3.randomUUID(), text, createdAt: new Date(now).toISOString() };
   counter = (counter + 1) % 1e6;
   const name = `${String(now).padStart(15, "0")}-${String(counter).padStart(6, "0")}-${msg.id}.msg`;
   const tmp = path3.join(dir, `.${msg.id}.tmp`);
@@ -127,9 +157,9 @@ async function clearInbox(sid) {
     throw e;
   }
   for (const n of names) {
-    if (!n.endsWith(".msg") && !n.endsWith(".tmp")) continue;
+    if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-")) continue;
     try {
-      await fs2.rm(path3.join(dir, n), { force: true });
+      await withFsRetry(() => fs2.rm(path3.join(dir, n), { force: true }));
     } catch (e) {
       if (!isRace(e)) throw e;
     }
@@ -139,7 +169,7 @@ async function clearInbox(sid) {
 // src/core/busy.ts
 import fs3 from "node:fs/promises";
 async function clearBusy(sid) {
-  await fs3.rm(paths().busyFile(sid), { force: true });
+  await removeFile(paths().busyFile(sid));
 }
 async function busyAge(sid, now = Date.now()) {
   try {
@@ -149,10 +179,143 @@ async function busyAge(sid, now = Date.now()) {
   }
 }
 
+// src/core/waiting.ts
+async function clearWaiting(sid) {
+  await removeFile(paths().waitingFile(sid));
+}
+async function getWaiting(sid) {
+  return readJson(paths().waitingFile(sid));
+}
+
+// src/core/lock.ts
+import fs4 from "node:fs/promises";
+import path4 from "node:path";
+import crypto4 from "node:crypto";
+var EMPTY_GRACE_MS = 1e4;
+var LOCK_STALE_MS = 9e4;
+function isAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
+var code = (e) => e.code;
+function lockPid(content) {
+  const t = content.trim();
+  let pid = null;
+  if (/^\d+$/.test(t)) pid = parseInt(t, 10);
+  else {
+    try {
+      pid = JSON.parse(t)?.pid;
+    } catch {
+    }
+  }
+  return typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+async function publish(file) {
+  const tmp = `${file}.${crypto4.randomUUID()}.tmp`;
+  try {
+    await fs4.writeFile(tmp, JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() }), { flag: "wx" });
+    await fs4.link(tmp, file);
+    return true;
+  } catch (e) {
+    if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return false;
+    throw e;
+  } finally {
+    await fs4.rm(tmp, { force: true });
+  }
+}
+async function staleContent(file) {
+  let content;
+  let mtimeMs;
+  try {
+    content = await fs4.readFile(file, "utf8");
+  } catch (e) {
+    if (code(e) === "ENOENT") return null;
+    content = "";
+  }
+  try {
+    mtimeMs = (await fs4.stat(file)).mtimeMs;
+  } catch {
+    return null;
+  }
+  const age = Date.now() - mtimeMs;
+  const pid = lockPid(content);
+  if (pid !== null) return !isAlive(pid) || age > LOCK_STALE_MS ? content : null;
+  return age > EMPTY_GRACE_MS ? content : null;
+}
+var GUARD_STALE_MS = 1e4;
+var contention = (e) => ["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "");
+async function reclaimStaleLock(file, seen) {
+  const guard = `${file}.reclaim`;
+  if (!await publish(guard)) {
+    try {
+      const st = await fs4.stat(guard);
+      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs4.rm(guard, { force: true });
+    } catch {
+    }
+    return false;
+  }
+  try {
+    if (await staleContent(file) !== seen) return false;
+    try {
+      await fs4.unlink(file);
+    } catch (e) {
+      if (code(e) !== "ENOENT") {
+        if (contention(e)) return false;
+        throw e;
+      }
+    }
+    return await publish(file);
+  } finally {
+    try {
+      if (lockPid(await fs4.readFile(guard, "utf8")) === process.pid) await fs4.rm(guard, { force: true });
+    } catch {
+    }
+  }
+}
+async function acquireLock(file) {
+  await ensureDir(path4.dirname(file));
+  if (await publish(file)) return true;
+  const seen = await staleContent(file);
+  if (seen === null) return false;
+  return reclaimStaleLock(file, seen);
+}
+async function releaseLock(file) {
+  try {
+    if (lockPid(await fs4.readFile(file, "utf8")) !== process.pid) return;
+  } catch {
+    return;
+  }
+  await fs4.rm(file, { force: true });
+}
+async function withLock(file, waitMs, fn) {
+  const deadline = Date.now() + waitMs;
+  let held = false;
+  for (; ; ) {
+    if (await acquireLock(file)) {
+      held = true;
+      break;
+    }
+    if (Date.now() >= deadline) break;
+    await new Promise((r) => setTimeout(r, 10 + Math.floor(Math.random() * 15)));
+  }
+  try {
+    return await fn();
+  } finally {
+    if (held) await releaseLock(file);
+  }
+}
+
 // src/core/registry.ts
+var SESSION_LOCK_WAIT_MS = 2e3;
+var locked = (sid, fn) => withLock(paths().sessionLock(sid), SESSION_LOCK_WAIT_MS, fn);
 function regFile(sid) {
   assertSessionId(sid);
-  return path4.join(paths().sessionsDir, `${sid}.json`);
+  return path5.join(paths().sessionsDir, `${sid}.json`);
 }
 var isActive = (r) => !r.disconnectedAt;
 var trustedKeys = (r) => [...r.previousKeys ?? [], ...r.key ? [r.key] : []];
@@ -162,7 +325,7 @@ async function getRegistration(sid) {
 async function listRegistrations() {
   let names;
   try {
-    names = await fs4.readdir(paths().sessionsDir);
+    names = await fs5.readdir(paths().sessionsDir);
   } catch (e) {
     if (e.code === "ENOENT") return [];
     throw e;
@@ -170,22 +333,48 @@ async function listRegistrations() {
   const out = [];
   for (const n of names) {
     if (!n.endsWith(".json")) continue;
-    const r = await readJson(path4.join(paths().sessionsDir, n));
+    const r = await readJson(path5.join(paths().sessionsDir, n));
     if (r) out.push(r);
   }
   return out;
 }
 async function markDisconnected(sid, reason) {
-  const r = await getRegistration(sid);
-  if (!r) return;
-  await writeJsonAtomic(regFile(sid), { ...r, disconnectedAt: (/* @__PURE__ */ new Date()).toISOString(), disconnectReason: reason });
+  const done = await locked(sid, async () => {
+    const r = await getRegistration(sid);
+    if (!r) return false;
+    if (isActive(r)) await writeJsonAtomic(regFile(sid), { ...r, disconnectedAt: (/* @__PURE__ */ new Date()).toISOString(), disconnectReason: reason });
+    return true;
+  });
+  if (!done) return;
   await clearInbox(sid);
   await clearBusy(sid);
 }
-
-// src/core/waiting.ts
-async function getWaiting(sid) {
-  return readJson(paths().waitingFile(sid));
+async function pruneRegistrations(maxAgeMs, now = Date.now()) {
+  const pruned = [];
+  for (const r of await listRegistrations()) {
+    if (isActive(r)) continue;
+    const at = Date.parse(r.disconnectedAt ?? "");
+    if (Number.isNaN(at) || now - at <= maxAgeMs) continue;
+    const sid = r.sessionId;
+    try {
+      assertSessionId(sid);
+    } catch {
+      continue;
+    }
+    await locked(sid, async () => {
+      const cur = await getRegistration(sid);
+      if (!cur || isActive(cur) || cur.disconnectedAt !== r.disconnectedAt) return;
+      await removeFile(regFile(sid));
+      pruned.push(sid);
+    });
+    if (!pruned.includes(sid)) continue;
+    await clearInbox(sid);
+    await fs5.rm(paths().inboxDir(sid), { recursive: true, force: true }).catch(() => {
+    });
+    await clearBusy(sid);
+    await clearWaiting(sid);
+  }
+  return pruned;
 }
 
 // src/hub/transcript/reader.ts
@@ -205,8 +394,21 @@ function unwrapMessages(text, keys) {
   return out;
 }
 
+// src/core/ccCommand.ts
+var CC_RE = /^\s*\/(?:ai-chat-center:)?cc(?:\s+(\S[\s\S]*?))?\s*$/i;
+function isCcCommand(prompt) {
+  if (typeof prompt !== "string") return null;
+  const m = CC_RE.exec(prompt);
+  if (!m) return null;
+  if (m[1] === void 0) return "on";
+  return m[1].toLowerCase() === "off" ? "off" : "unknown";
+}
+
 // src/hub/transcript/parse.ts
 var RESULT_MAX = 2e3;
+var QUEUED_DEDUP_MS = 30 * 6e4;
+var INTERRUPTED = "[Request interrupted by user";
+var tag = (content, name) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(content)?.[1];
 var SUMMARY_MAX = 120;
 var truncate = (s, max) => s.length > max ? s.slice(0, max) : s;
 function isRecord(v) {
@@ -227,6 +429,18 @@ function resultText(content) {
   }
   return "";
 }
+function promptParts(prompt) {
+  if (typeof prompt === "string") return { text: prompt, images: 0 };
+  if (!Array.isArray(prompt)) return { text: "", images: 0 };
+  const texts = [];
+  let images = 0;
+  for (const b of prompt) {
+    if (!isRecord(b)) continue;
+    if (b.type === "text" && typeof b.text === "string") texts.push(b.text);
+    else if (b.type === "image") images++;
+  }
+  return { text: texts.join("\n"), images };
+}
 function snapshot(ev) {
   return { ...ev, items: ev.items.map((i) => ({ ...i })) };
 }
@@ -242,17 +456,46 @@ var TranscriptParser = class {
   keys;
   open = null;
   byToolUse = /* @__PURE__ */ new Map();
+  /** Queued prompts already shown, to skip a later identical user entry. */
+  queued = [];
+  /** The last `!` command, for the output entry that follows it. */
+  lastShell = null;
   /** Returns new or updated events (same id = replace). */
   push(entry) {
     if (!isRecord(entry)) return [];
     const uuid = entry.uuid;
     const ts = entry.timestamp;
     if (typeof uuid !== "string" || typeof ts !== "string") return [];
+    if (entry.isSidechain === true) return [];
+    if (entry.type === "attachment") return this.attachment(uuid, ts, entry.attachment);
     const message = isRecord(entry.message) ? entry.message : void 0;
     if (!message) return [];
     if (entry.type === "assistant") return this.assistant(uuid, ts, message.content);
-    if (entry.type === "user" && entry.isMeta !== true) return this.user(uuid, ts, message.content);
+    if (entry.type === "user" && entry.isMeta !== true) {
+      if (entry.isCompactSummary === true) return [{ kind: "notice", id: uuid, ts, code: "compacted" }];
+      return this.user(uuid, ts, message.content);
+    }
     return [];
+  }
+  /** A prompt the user typed while Claude was busy is recorded only as a queued_command attachment. */
+  attachment(uuid, ts, a) {
+    if (!isRecord(a) || a.type !== "queued_command" || a.commandMode !== "prompt") return [];
+    if (a.isMeta === true || a.humanTurn !== true) return [];
+    const { text, images } = promptParts(a.prompt);
+    const pasted = Array.isArray(a.imagePasteIds) ? a.imagePasteIds.length : 0;
+    if (!text.trim() && !images && !pasted) return [];
+    this.open = null;
+    this.queued.push({ text, at: Date.parse(ts) || 0 });
+    const n = Math.max(images, pasted);
+    return [{ kind: "user", id: uuid, ts, text, origin: "terminal", ...n ? { images: n } : {} }];
+  }
+  takeQueued(text, ts) {
+    const at = Date.parse(ts) || 0;
+    this.queued = this.queued.filter((q) => at - q.at <= QUEUED_DEDUP_MS);
+    const i = this.queued.findIndex((q) => q.text === text);
+    if (i < 0) return false;
+    this.queued.splice(i, 1);
+    return true;
   }
   assistant(uuid, ts, content) {
     if (!Array.isArray(content)) return [];
@@ -286,7 +529,15 @@ var TranscriptParser = class {
     return [...updated, ...created].map((e) => e.kind === "actions" ? snapshot(e) : e);
   }
   user(uuid, ts, content) {
-    if (Array.isArray(content)) return this.toolResults(content);
+    if (Array.isArray(content)) {
+      const out = this.toolResults(content);
+      const { text, images } = promptParts(content);
+      if ((text.trim() || images) && !text.startsWith(INTERRUPTED) && !this.takeQueued(text, ts)) {
+        this.open = null;
+        out.push({ kind: "user", id: uuid, ts, text, origin: "terminal", ...images ? { images } : {} });
+      }
+      return out;
+    }
     if (typeof content !== "string") return [];
     const msgs = unwrapMessages(content, this.keys);
     if (msgs.length > 0) {
@@ -304,15 +555,35 @@ var TranscriptParser = class {
       );
     }
     const cmd = /<command-name>\s*(\/[^<\s]+)\s*<\/command-name>/.exec(content)?.[1];
-    if (cmd === "/cc" || cmd === "/ai-chat-center:cc") {
+    if (cmd) {
       const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(content)?.[1]?.trim();
-      return [{ kind: "notice", id: uuid, ts, code: args === "off" ? "disconnected" : "connected" }];
+      const cc = isCcCommand(args ? `${cmd} ${args}` : cmd);
+      if (cc === "on" || cc === "off") return [{ kind: "notice", id: uuid, ts, code: cc === "on" ? "connected" : "disconnected" }];
+      if (cc === "unknown") return [];
+    }
+    const shellIn = tag(content, "bash-input");
+    if (shellIn !== void 0) {
+      this.open = null;
+      this.lastShell = shellIn;
+      return [{ kind: "user", id: uuid, ts, text: shellIn, origin: "terminal", shell: true }];
+    }
+    const stdout = tag(content, "bash-stdout");
+    const stderr = tag(content, "bash-stderr");
+    if (stdout !== void 0 || stderr !== void 0) {
+      const err = (stderr ?? "").trim();
+      const result = [stdout ?? "", stderr ?? ""].filter((x) => x.trim()).join("\n");
+      const item = { toolUseId: uuid, name: "Shell", summary: truncate(this.lastShell ?? "", SUMMARY_MAX), result: truncate(result, RESULT_MAX) };
+      if (err) item.isError = true;
+      this.lastShell = null;
+      this.open = null;
+      return [{ kind: "actions", id: uuid, ts, items: [item] }];
     }
     const t = content.trimStart();
     if (t.startsWith("<command-") || t.startsWith("<local-command-") || t.startsWith("<task-notification>") || t.startsWith("<system-reminder>")) {
       return [];
     }
     if (!content.trim()) return [];
+    if (this.takeQueued(content, ts)) return [];
     this.open = null;
     return [{ kind: "user", id: uuid, ts, text: content, origin: "terminal" }];
   }
@@ -343,7 +614,8 @@ var TranscriptReader = class {
   path;
   keys;
   offset = 0;
-  partial = "";
+  /** Pieces of the current incomplete line (joined only once its newline arrives: linear time). */
+  partial = [];
   decoder = new StringDecoder("utf8");
   parser;
   events = /* @__PURE__ */ new Map();
@@ -363,7 +635,7 @@ var TranscriptReader = class {
   }
   reset() {
     this.offset = 0;
-    this.partial = "";
+    this.partial = [];
     this.decoder = new StringDecoder("utf8");
     this.parser = new TranscriptParser(this.keys);
     this.events.clear();
@@ -385,10 +657,16 @@ var TranscriptReader = class {
         const { bytesRead } = await handle.read(buf, 0, Math.min(CHUNK, size - this.offset), this.offset);
         if (bytesRead === 0) break;
         this.offset += bytesRead;
-        this.partial += this.decoder.write(buf.subarray(0, bytesRead));
-        const lines = this.partial.split("\n");
-        this.partial = lines.pop() ?? "";
-        for (const raw of lines) this.consume(raw, out);
+        const text = this.decoder.write(buf.subarray(0, bytesRead));
+        let start = 0;
+        for (let nl = text.indexOf("\n"); nl !== -1; nl = text.indexOf("\n", start)) {
+          this.partial.push(text.slice(start, nl));
+          const raw = this.partial.join("");
+          this.partial = [];
+          this.consume(raw, out);
+          start = nl + 1;
+        }
+        if (start < text.length) this.partial.push(text.slice(start));
       }
     } finally {
       await handle.close();
@@ -415,12 +693,13 @@ var TranscriptReader = class {
 
 // src/core/claudeAgents.ts
 import { execFile } from "node:child_process";
+import os2 from "node:os";
 function runClaudeAgentsJson() {
   return new Promise((resolve, reject) => {
     execFile(
       "claude",
       ["agents", "--json"],
-      { shell: process.platform === "win32", windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
+      { cwd: os2.homedir(), shell: process.platform === "win32", windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => err ? reject(err) : resolve(String(stdout))
     );
   });
@@ -587,7 +866,7 @@ var ClaudeCodeProvider = class {
       const cwd = l?.cwd ?? reg.cwd;
       const view = {
         sessionId: sid,
-        name: l?.name || path5.basename(cwd),
+        name: l?.name || path6.basename(cwd),
         cwd,
         state,
         pendingAppMessageIds: disconnected ? [] : (await peek(sid)).map((m) => m.id),
@@ -672,7 +951,7 @@ var ClaudeCodeProvider = class {
     if (!again || !isActive(again)) {
       const dir = paths().inboxDir(sid);
       try {
-        for (const n of await fs5.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs5.rm(path5.join(dir, n), { force: true });
+        for (const n of await fs6.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs6.rm(path6.join(dir, n), { force: true });
       } catch {
       }
       throw new SessionDisconnectedError(sid);
@@ -681,97 +960,11 @@ var ClaudeCodeProvider = class {
   }
 };
 
-// src/core/lock.ts
-import fs6 from "node:fs/promises";
-import path6 from "node:path";
-import crypto2 from "node:crypto";
-var EMPTY_GRACE_MS = 1e4;
-function isAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return e.code === "EPERM";
-  }
-}
-var code = (e) => e.code;
-async function publish(file) {
-  const tmp = `${file}.${crypto2.randomUUID()}.tmp`;
-  try {
-    await fs6.writeFile(tmp, String(process.pid), { flag: "wx" });
-    await fs6.link(tmp, file);
-    return true;
-  } catch (e) {
-    if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return false;
-    throw e;
-  } finally {
-    await fs6.rm(tmp, { force: true });
-  }
-}
-async function staleContent(file) {
-  let content;
-  try {
-    content = await fs6.readFile(file, "utf8");
-  } catch (e) {
-    if (code(e) === "ENOENT") return null;
-    content = "";
-  }
-  const pid = parseInt(content, 10);
-  if (Number.isInteger(pid) && pid > 0) return isAlive(pid) ? null : content;
-  try {
-    const st = await fs6.stat(file);
-    return Date.now() - st.mtimeMs > EMPTY_GRACE_MS ? content : null;
-  } catch {
-    return null;
-  }
-}
-var GUARD_STALE_MS = 1e4;
-var contention = (e) => ["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "");
-async function reclaimStaleLock(file, seen) {
-  const guard = `${file}.reclaim`;
-  if (!await publish(guard)) {
-    try {
-      const st = await fs6.stat(guard);
-      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs6.rm(guard, { force: true });
-    } catch {
-    }
-    return false;
-  }
-  try {
-    if (await staleContent(file) !== seen) return false;
-    try {
-      await fs6.unlink(file);
-    } catch (e) {
-      if (code(e) !== "ENOENT") {
-        if (contention(e)) return false;
-        throw e;
-      }
-    }
-    return await publish(file);
-  } finally {
-    try {
-      if (await fs6.readFile(guard, "utf8") === String(process.pid)) await fs6.rm(guard, { force: true });
-    } catch {
-    }
-  }
-}
-async function acquireLock(file) {
-  await ensureDir(path6.dirname(file));
-  if (await publish(file)) return true;
-  const seen = await staleContent(file);
-  if (seen === null) return false;
-  return reclaimStaleLock(file, seen);
-}
-async function releaseLock(file) {
-  await fs6.rm(file, { force: true });
-}
-
 // src/hub/server.ts
 import http from "node:http";
 import fs7 from "node:fs/promises";
 import path7 from "node:path";
-import crypto3 from "node:crypto";
+import crypto5 from "node:crypto";
 
 // src/core/config.ts
 var LANGS = ["en", "pt-BR"];
@@ -785,7 +978,7 @@ async function saveConfig(c) {
 }
 
 // src/core/version.ts
-var VERSION = "0.1.0";
+var VERSION = "0.2.0";
 
 // src/hub/server.ts
 var MAX_BODY = 64 * 1024;
@@ -824,7 +1017,7 @@ function tokenOk(given, expected) {
   const a = Buffer.from(given);
   const b = Buffer.from(expected);
   if (a.length !== b.length) return false;
-  return crypto3.timingSafeEqual(a, b);
+  return crypto5.timingSafeEqual(a, b);
 }
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -990,7 +1183,13 @@ data: ${JSON.stringify(c)}
   const handleApi = async (req, res, url) => {
     const p = url.pathname;
     const method = req.method ?? "GET";
-    if (p === "/api/health" && method === "GET") return sendJson(res, 200, { ok: true, pid: process.pid, version: VERSION });
+    if (p === "/api/health" && method === "GET") {
+      const challenge = url.searchParams.get("challenge");
+      if (challenge === null) return sendJson(res, 200, { ok: true, version: VERSION });
+      if (!CHALLENGE_RE.test(challenge)) throw new HttpError(400, "invalid challenge");
+      const proof = healthProof(token, challenge, process.pid, VERSION);
+      return sendJson(res, 200, { ok: true, version: VERSION, pid: process.pid, proof });
+    }
     const bearer = /^Bearer (.+)$/.exec(String(req.headers.authorization ?? ""))?.[1];
     const given = p === "/api/stream" ? bearer ?? url.searchParams.get("token") : bearer;
     if (!tokenOk(given, token)) return sendJson(res, 401, { error: "unauthorized" });
@@ -1077,6 +1276,7 @@ data: ${JSON.stringify(c)}
   port = server.address().port;
   return {
     url: `http://127.0.0.1:${port}`,
+    clients: () => clients.size,
     close: () => new Promise((resolve) => {
       closed = true;
       stopTimers();
@@ -1090,40 +1290,31 @@ data: ${JSON.stringify(c)}
 
 // src/hub/main.ts
 var TOKEN_RE = /^[0-9a-f]{64}$/;
-async function ensureToken(log = () => {
-}) {
+var PRUNE_AGE_MS = 30 * 864e5;
+var PRUNE_EVERY_MS = 10 * 6e4;
+var IDLE_EXIT_MS = 2 * 36e5;
+async function prune(log) {
+  try {
+    const gone = await pruneRegistrations(PRUNE_AGE_MS);
+    if (gone.length) log(`pruned ${gone.length} old registration(s)`);
+  } catch (e) {
+    log(`prune failed: ${e.message}`);
+  }
+}
+async function rotateToken() {
   const file = paths().token;
   await ensureDir(path8.dirname(file));
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const t = crypto4.randomBytes(32).toString("hex");
-    try {
-      await fs8.writeFile(file, t, { flag: "wx", mode: 384 });
-      return t;
-    } catch (e) {
-      if (e.code !== "EEXIST") throw e;
-    }
-    let existing = "";
-    try {
-      existing = (await fs8.readFile(file, "utf8")).trim();
-    } catch {
-      continue;
-    }
-    if (TOKEN_RE.test(existing)) {
-      await fs8.chmod(file, 384).catch(() => {
-      });
-      return existing;
-    }
-    await writeFileAtomic600(file, t);
-    log("token file was invalid; regenerated");
-    return t;
-  }
-  throw new Error("could not create token file");
+  const t = crypto6.randomBytes(32).toString("hex");
+  await writeFileAtomic600(file, t);
+  await fs8.chmod(file, 384).catch(() => {
+  });
+  return t;
 }
 async function writeFileAtomic600(file, data) {
-  const tmp = `${file}.${process.pid}.${crypto4.randomUUID()}.tmp`;
+  const tmp = `${file}.${process.pid}.${crypto6.randomUUID()}.tmp`;
   try {
     await fs8.writeFile(tmp, data, { mode: 384 });
-    await fs8.rename(tmp, file);
+    await withFsRetry(() => fs8.rename(tmp, file));
   } catch (e) {
     await fs8.rm(tmp, { force: true });
     throw e;
@@ -1132,9 +1323,19 @@ async function writeFileAtomic600(file, data) {
 async function liveHubExists() {
   const info = await readJson(paths().hubJson);
   if (!info || typeof info.port !== "number") return false;
+  let token;
   try {
-    const r = await fetch(`http://127.0.0.1:${info.port}/api/health`, { signal: AbortSignal.timeout(1e3) });
-    return r.ok && (await r.json()).ok === true;
+    token = (await fs8.readFile(paths().token, "utf8")).trim();
+  } catch {
+    return false;
+  }
+  if (!TOKEN_RE.test(token)) return false;
+  const challenge = newChallenge();
+  try {
+    const r = await fetch(`http://127.0.0.1:${info.port}/api/health?challenge=${challenge}`, { signal: AbortSignal.timeout(1e3) });
+    if (!r.ok) return false;
+    const j = await r.json();
+    return j.ok === true && typeof j.pid === "number" && typeof j.version === "string" && typeof j.proof === "string" && proofMatches(token, challenge, { pid: j.pid, version: j.version, proof: j.proof });
   } catch {
     return false;
   }
@@ -1154,7 +1355,7 @@ async function acquireHubLock(lock) {
     await new Promise((r) => setTimeout(r, 100));
   }
 }
-async function startHub() {
+async function startHub(opts = {}) {
   if (await liveHubExists()) return null;
   const logDir = paths().logDir;
   await ensureDir(logDir);
@@ -1169,11 +1370,11 @@ async function startHub() {
     }
   };
   const lock = path8.join(paths().home, "hub.lock");
-  const locked = await acquireHubLock(lock);
+  const locked2 = await acquireHubLock(lock);
   let hub;
   try {
     if (await liveHubExists()) return null;
-    const token = await ensureToken(log);
+    const token = await rotateToken();
     secret = token;
     const base = pickPort();
     const tries = base === 0 ? 1 : 11;
@@ -1196,13 +1397,36 @@ async function startHub() {
     const port = Number(new URL(hub.url).port);
     await writeJsonAtomic(paths().hubJson, { pid: process.pid, port });
     log(`hub listening on ${hub.url}`);
+    await prune(log);
+    const pruneTimer = setInterval(() => void prune(log), PRUNE_EVERY_MS);
     const started = hub;
+    const idleMs = opts.idleMs ?? IDLE_EXIT_MS;
+    let lastUsed = Date.now();
+    let idleFired = false;
+    const idleTimer = setInterval(async () => {
+      try {
+        if (started.clients() > 0 || (await listRegistrations()).some(isActive)) {
+          lastUsed = Date.now();
+          return;
+        }
+      } catch {
+        lastUsed = Date.now();
+        return;
+      }
+      if (!idleFired && Date.now() - lastUsed >= idleMs) {
+        idleFired = true;
+        log(`idle for ${Math.round(idleMs / 6e4)} min with no browser and no connected session: exiting`);
+        opts.onIdle?.();
+      }
+    }, opts.idleCheckMs ?? 6e4);
     let done = false;
     return {
       port,
       close: async () => {
         if (done) return;
         done = true;
+        clearInterval(pruneTimer);
+        clearInterval(idleTimer);
         await started.close();
         const cur = await readJson(paths().hubJson);
         if (cur?.pid === process.pid && cur?.port === port) await fs8.rm(paths().hubJson, { force: true });
@@ -1210,13 +1434,14 @@ async function startHub() {
       }
     };
   } finally {
-    if (locked) await releaseLock(lock);
+    if (locked2) await releaseLock(lock);
   }
 }
 async function main() {
-  const hub = await startHub();
+  let hub = null;
+  const stop = () => void (hub ? hub.close() : Promise.resolve()).finally(() => process.exit(0));
+  hub = await startHub({ onIdle: stop });
   if (!hub) process.exit(0);
-  const stop = () => void hub.close().finally(() => process.exit(0));
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
 }
