@@ -126,18 +126,22 @@ describe('TranscriptReader', () => {
     expect(r.skipped).toBe(0);
   });
   it('is linear in the line length (a 32 MB line stays fast)', async () => {
-    // Relative to a 4 MB line on the same machine, so a loaded CI runner does not matter. Measured on
-    // the quadratic reader: 4 MB 54 ms, 32 MB 3369 ms (62x); linear: 8 ms and 63 ms (8x).
+    // CPU time of this thread (not wall time, which other processes inflate), relative to a 4 MB line.
+    // Measured on the quadratic reader: 4 MB 54 ms, 32 MB 3369 ms (62x); linear: 8 ms and 63 ms (8x).
+    const cpuMs = () => {
+      const u = process.threadCpuUsage?.() ?? process.cpuUsage();
+      return (u.user + u.system) / 1000;
+    };
     writeFileSync(file, `${user(1)}\n${bigLine(4)}\n`);
     const small = new TranscriptReader(file);
-    const t4 = performance.now();
+    const c4 = cpuMs();
     await small.readNew();
-    const d4 = performance.now() - t4;
+    const d4 = cpuMs() - c4;
     writeFileSync(file, `${user(1)}\n${bigLine(32)}\n${user(3)}`);
     const r = new TranscriptReader(file);
-    const t = performance.now();
+    const c = cpuMs();
     expect((await r.readNew()).map((e) => e.id)).toEqual(['u1']);
-    expect(performance.now() - t).toBeLessThan(20 * d4 + 1000);
+    expect(cpuMs() - c).toBeLessThan(20 * d4 + 500);
     expect(r.skipped).toBe(0);
     appendFileSync(file, '\n');
     expect((await r.readNew()).map((e) => e.id)).toEqual(['u3']);
