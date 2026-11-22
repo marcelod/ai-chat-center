@@ -174,7 +174,7 @@ describe('main', () => {
   it('prunes disconnected registrations older than 30 days on start', async () => {
     const { register, markDisconnected, updateRegistration, listRegistrations } = await import('../../src/core/registry.js');
     await register({ sessionId: 'old', transcriptPath: '/t', cwd: '/c', pid: 1 });
-    await register({ sessionId: 'new', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    await register({ sessionId: 'new', transcriptPath: '/t', cwd: '/c', pid: process.pid });
     await markDisconnected('old', 'off');
     await updateRegistration('old', { disconnectedAt: new Date(Date.now() - 31 * 86_400_000).toISOString() });
     const h = await startHub();
@@ -188,7 +188,8 @@ describe('main', () => {
   // Audit AI-F11: the hub exits on its own after 2 h with no browser connected and no active session.
   it('calls onIdle once nothing has used it for idleMs, and not while a session is active', async () => {
     const { register, markDisconnected } = await import('../../src/core/registry.js');
-    await register({ sessionId: 'a', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    // A pid that is alive on every OS (Windows has no pid 1): this very test process.
+    await register({ sessionId: 'a', transcriptPath: '/t', cwd: '/c', pid: process.pid });
     let idle = 0;
     const h = await startHub({ idleMs: 60, idleCheckMs: 10, onIdle: () => void idle++ });
     try {

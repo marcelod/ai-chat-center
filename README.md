@@ -90,6 +90,7 @@ npm -w ui test      # web UI tests
 npm run build       # bundles the plugin into plugin/dist (committed)
 npm run test:build  # slow: builds, then smoke-tests the bundles
 node scripts/smoke-runtime.mjs .   # runtime smoke of the built plugin, plain Node 18+
+node scripts/smoke-flow.mjs .      # /cc, hub, app message, waiter delivery, /cc off, plain Node 18+
 ```
 
 `plugin/dist` is committed so the plugin works straight from the marketplace; rebuild and commit it after changing the source. CI fails if it is out of date. The build also writes `plugin/LICENSE` and `plugin/THIRD-PARTY-NOTICES.md`.

@@ -90,6 +90,7 @@ npm -w ui test      # testes da interface web
 npm run build       # empacota o plugin em plugin/dist (versionado no git)
 npm run test:build  # lento: faz o build e testa os bundles
 node scripts/smoke-runtime.mjs .   # teste de fumaça do plugin, com Node 18+ puro
+node scripts/smoke-flow.mjs .      # /cc, hub, mensagem do app, entrega pelo waiter, /cc off, com Node 18+ puro
 ```
 
 A pasta `plugin/dist` fica no repositório para que o plugin funcione direto do marketplace; refaça o build e faça commit dela depois de mudar o código-fonte. A CI falha se ela estiver desatualizada. O build também gera `plugin/LICENSE` e `plugin/THIRD-PARTY-NOTICES.md`.

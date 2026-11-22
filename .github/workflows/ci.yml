@@ -78,10 +78,20 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
-      - name: Smoke-test a git archive of HEAD
+      # Extract with a RELATIVE target: Git Bash's GNU tar reads `D:\...` as a remote host. Outside the
+      # checkout, so no node_modules or package.json is around the bundles.
+      - name: Extract a git archive of HEAD
         shell: bash
         run: |
-          dir="$RUNNER_TEMP/acc"
-          mkdir -p "$dir"
-          git archive HEAD | tar -x -C "$dir"
-          node "$dir/scripts/smoke-runtime.mjs" "$dir"
+          cd "$RUNNER_TEMP"
+          rm -rf acc && mkdir acc
+          git -C "$GITHUB_WORKSPACE" archive HEAD | tar -x -C acc
+          test -f acc/plugin/dist/hook.mjs && test -f acc/scripts/smoke-flow.mjs
+      - name: Runtime smoke (bundles, hooks.json entries, hub)
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: node acc/scripts/smoke-runtime.mjs acc
+      - name: Flow smoke (/cc, hub spawned by the hook, app message, waiter delivery, /cc off)
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: node acc/scripts/smoke-flow.mjs acc
