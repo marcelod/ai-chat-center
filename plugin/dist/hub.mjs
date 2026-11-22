@@ -81,11 +81,11 @@ async function readJson(file) {
 import crypto2 from "node:crypto";
 var CHALLENGE_RE = /^[0-9a-f]{32}$/;
 var newChallenge = () => crypto2.randomBytes(16).toString("hex");
-function healthProof(token, challenge, pid, version) {
-  return crypto2.createHmac("sha256", token).update(`${challenge}.${pid}.${version}`).digest("hex");
+function healthProof(token, challenge, port, pid, version) {
+  return crypto2.createHmac("sha256", token).update(`${challenge}|${port}|${pid}|${version}`).digest("hex");
 }
-function proofMatches(token, challenge, answer) {
-  const want = Buffer.from(healthProof(token, challenge, answer.pid, answer.version));
+function proofMatches(token, challenge, port, answer) {
+  const want = Buffer.from(healthProof(token, challenge, port, answer.pid, answer.version));
   const got = Buffer.from(String(answer.proof));
   return want.length === got.length && crypto2.timingSafeEqual(want, got);
 }
@@ -217,12 +217,13 @@ function lockPid(content) {
 }
 async function publish(file) {
   const tmp = `${file}.${crypto4.randomUUID()}.tmp`;
+  const content = JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() });
   try {
-    await fs4.writeFile(tmp, JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() }), { flag: "wx" });
+    await fs4.writeFile(tmp, content, { flag: "wx" });
     await fs4.link(tmp, file);
-    return true;
+    return content;
   } catch (e) {
-    if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return false;
+    if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return null;
     throw e;
   } finally {
     await fs4.rm(tmp, { force: true });
@@ -249,23 +250,23 @@ async function staleContent(file) {
 }
 var GUARD_STALE_MS = 1e4;
 var contention = (e) => ["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "");
-async function reclaimStaleLock(file, seen) {
+async function reclaim(file, seen) {
   const guard = `${file}.reclaim`;
-  if (!await publish(guard)) {
+  if (await publish(guard) === null) {
     try {
       const st = await fs4.stat(guard);
       if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs4.rm(guard, { force: true });
     } catch {
     }
-    return false;
+    return null;
   }
   try {
-    if (await staleContent(file) !== seen) return false;
+    if (await staleContent(file) !== seen) return null;
     try {
       await fs4.unlink(file);
     } catch (e) {
       if (code(e) !== "ENOENT") {
-        if (contention(e)) return false;
+        if (contention(e)) return null;
         throw e;
       }
     }
@@ -278,11 +279,15 @@ async function reclaimStaleLock(file, seen) {
   }
 }
 async function acquireLock(file) {
+  return await acquireLockContent(file) !== null;
+}
+async function acquireLockContent(file) {
   await ensureDir(path4.dirname(file));
-  if (await publish(file)) return true;
+  const mine = await publish(file);
+  if (mine !== null) return mine;
   const seen = await staleContent(file);
-  if (seen === null) return false;
-  return reclaimStaleLock(file, seen);
+  if (seen === null) return null;
+  return reclaim(file, seen);
 }
 async function releaseLock(file) {
   try {
@@ -411,6 +416,8 @@ var INTERRUPTED = "[Request interrupted by user";
 var tag = (content, name) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(content)?.[1];
 var SUMMARY_MAX = 120;
 var truncate = (s, max) => s.length > max ? s.slice(0, max) : s;
+var WRAPPER_TAGS = /<\/?(?:pasted_content|teammate-message)(?:\s+[\w-]+="[^"]*")*\s*>/g;
+var unwrapPrompt = (text) => text.replace(WRAPPER_TAGS, "");
 function isRecord(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -481,18 +488,21 @@ var TranscriptParser = class {
   attachment(uuid, ts, a) {
     if (!isRecord(a) || a.type !== "queued_command" || a.commandMode !== "prompt") return [];
     if (a.isMeta === true || a.humanTurn !== true) return [];
-    const { text, images } = promptParts(a.prompt);
+    const parts = promptParts(a.prompt);
+    const text = unwrapPrompt(parts.text);
+    const images = parts.images;
     const pasted = Array.isArray(a.imagePasteIds) ? a.imagePasteIds.length : 0;
     if (!text.trim() && !images && !pasted) return [];
     this.open = null;
-    this.queued.push({ text, at: Date.parse(ts) || 0 });
+    this.queued.push({ text: text.trim(), at: Date.parse(ts) || 0 });
     const n = Math.max(images, pasted);
     return [{ kind: "user", id: uuid, ts, text, origin: "terminal", ...n ? { images: n } : {} }];
   }
   takeQueued(text, ts) {
     const at = Date.parse(ts) || 0;
     this.queued = this.queued.filter((q) => at - q.at <= QUEUED_DEDUP_MS);
-    const i = this.queued.findIndex((q) => q.text === text);
+    const want = text.trim();
+    const i = this.queued.findIndex((q) => q.text === want);
     if (i < 0) return false;
     this.queued.splice(i, 1);
     return true;
@@ -531,10 +541,12 @@ var TranscriptParser = class {
   user(uuid, ts, content) {
     if (Array.isArray(content)) {
       const out = this.toolResults(content);
-      const { text, images } = promptParts(content);
-      if ((text.trim() || images) && !text.startsWith(INTERRUPTED) && !this.takeQueued(text, ts)) {
+      const parts = promptParts(content);
+      const text2 = unwrapPrompt(parts.text);
+      const images = parts.images;
+      if ((text2.trim() || images) && !text2.startsWith(INTERRUPTED) && !this.takeQueued(text2, ts)) {
         this.open = null;
-        out.push({ kind: "user", id: uuid, ts, text, origin: "terminal", ...images ? { images } : {} });
+        out.push({ kind: "user", id: uuid, ts, text: text2, origin: "terminal", ...images ? { images } : {} });
       }
       return out;
     }
@@ -582,10 +594,11 @@ var TranscriptParser = class {
     if (t.startsWith("<command-") || t.startsWith("<local-command-") || t.startsWith("<task-notification>") || t.startsWith("<system-reminder>")) {
       return [];
     }
-    if (!content.trim()) return [];
-    if (this.takeQueued(content, ts)) return [];
+    const text = unwrapPrompt(content);
+    if (!text.trim()) return [];
+    if (this.takeQueued(text, ts)) return [];
     this.open = null;
-    return [{ kind: "user", id: uuid, ts, text: content, origin: "terminal" }];
+    return [{ kind: "user", id: uuid, ts, text, origin: "terminal" }];
   }
   toolResults(blocks) {
     const out = /* @__PURE__ */ new Map();
@@ -762,9 +775,9 @@ var ClaudeCodeProvider = class {
   lastGood = null;
   lastSignature = null;
   now;
-  async live() {
+  async live(force = false) {
     const t = this.now();
-    if (this.liveCache && t >= this.liveCache.at && t - this.liveCache.at < LIVE_TTL_MS) {
+    if (!force && this.liveCache && t >= this.liveCache.at && t - this.liveCache.at < LIVE_TTL_MS) {
       return { list: this.liveCache.value, ok: true, fresh: false };
     }
     const value = await this.listLive();
@@ -823,6 +836,30 @@ var ClaudeCodeProvider = class {
   async dropStaleBusy(sid) {
     const age = await busyAge(sid, this.now());
     if (age !== null && age > STALE_BUSY_MS) await clearBusy(sid);
+  }
+  /**
+   * Exit detection on its own, for the hub's background check (no browser needed). Same rules as
+   * listSessions: a failed lookup marks nothing; a session is marked exited only after the grace period
+   * and 3 fresh lookups in a row that do not list it. Always a fresh lookup (it runs every few minutes).
+   * Returns the sessions marked exited.
+   */
+  async detectExits() {
+    const live = await this.live(true);
+    if (!live.ok) return [];
+    const listed = new Set(live.list.map((l) => l.sessionId));
+    const gone = [];
+    for (const reg of await listRegistrations()) {
+      const sid = reg.sessionId;
+      if (!isActive(reg)) continue;
+      if (listed.has(sid)) {
+        this.misses.delete(sid);
+      } else if (this.shouldMarkExited(sid, reg.connectedAt, live)) {
+        await markDisconnected(sid, "exited");
+        this.misses.delete(sid);
+        gone.push(sid);
+      }
+    }
+    return gone;
   }
   async listSessions() {
     const live = await this.live();
@@ -978,7 +1015,7 @@ async function saveConfig(c) {
 }
 
 // src/core/version.ts
-var VERSION = "0.2.0";
+var VERSION = "0.2.1";
 
 // src/hub/server.ts
 var MAX_BODY = 64 * 1024;
@@ -1187,7 +1224,7 @@ data: ${JSON.stringify(c)}
       const challenge = url.searchParams.get("challenge");
       if (challenge === null) return sendJson(res, 200, { ok: true, version: VERSION });
       if (!CHALLENGE_RE.test(challenge)) throw new HttpError(400, "invalid challenge");
-      const proof = healthProof(token, challenge, process.pid, VERSION);
+      const proof = healthProof(token, challenge, port, process.pid, VERSION);
       return sendJson(res, 200, { ok: true, version: VERSION, pid: process.pid, proof });
     }
     const bearer = /^Bearer (.+)$/.exec(String(req.headers.authorization ?? ""))?.[1];
@@ -1293,6 +1330,8 @@ var TOKEN_RE = /^[0-9a-f]{64}$/;
 var PRUNE_AGE_MS = 30 * 864e5;
 var PRUNE_EVERY_MS = 10 * 6e4;
 var IDLE_EXIT_MS = 2 * 36e5;
+var EXIT_CHECK_MS = 5 * 6e4;
+var holdsHub = (r) => isActive(r) && (r.pid === null || isAlive(r.pid));
 async function prune(log) {
   try {
     const gone = await pruneRegistrations(PRUNE_AGE_MS);
@@ -1335,7 +1374,7 @@ async function liveHubExists() {
     const r = await fetch(`http://127.0.0.1:${info.port}/api/health?challenge=${challenge}`, { signal: AbortSignal.timeout(1e3) });
     if (!r.ok) return false;
     const j = await r.json();
-    return j.ok === true && typeof j.pid === "number" && typeof j.version === "string" && typeof j.proof === "string" && proofMatches(token, challenge, { pid: j.pid, version: j.version, proof: j.proof });
+    return j.ok === true && typeof j.pid === "number" && typeof j.version === "string" && typeof j.proof === "string" && proofMatches(token, challenge, info.port, { pid: j.pid, version: j.version, proof: j.proof });
   } catch {
     return false;
   }
@@ -1379,7 +1418,7 @@ async function startHub(opts = {}) {
     const base = pickPort();
     const tries = base === 0 ? 1 : 11;
     const staticDir = path8.join(path8.dirname(fileURLToPath(import.meta.url)), "ui");
-    const provider = new ClaudeCodeProvider();
+    const provider = opts.listLive ? new ClaudeCodeProvider(opts.listLive) : new ClaudeCodeProvider();
     let lastErr;
     for (let i = 0; i < tries && !hub; i++) {
       try {
@@ -1399,13 +1438,26 @@ async function startHub(opts = {}) {
     log(`hub listening on ${hub.url}`);
     await prune(log);
     const pruneTimer = setInterval(() => void prune(log), PRUNE_EVERY_MS);
+    let exitCheckRunning = false;
+    const exitTimer = setInterval(async () => {
+      if (exitCheckRunning) return;
+      exitCheckRunning = true;
+      try {
+        const gone = await provider.detectExits();
+        if (gone.length) log(`marked ${gone.length} exited session(s)`);
+      } catch (e) {
+        log(`exit check failed: ${e.message}`);
+      } finally {
+        exitCheckRunning = false;
+      }
+    }, opts.exitCheckMs ?? EXIT_CHECK_MS);
     const started = hub;
     const idleMs = opts.idleMs ?? IDLE_EXIT_MS;
     let lastUsed = Date.now();
     let idleFired = false;
     const idleTimer = setInterval(async () => {
       try {
-        if (started.clients() > 0 || (await listRegistrations()).some(isActive)) {
+        if (started.clients() > 0 || (await listRegistrations()).some(holdsHub)) {
           lastUsed = Date.now();
           return;
         }
@@ -1426,6 +1478,7 @@ async function startHub(opts = {}) {
         if (done) return;
         done = true;
         clearInterval(pruneTimer);
+        clearInterval(exitTimer);
         clearInterval(idleTimer);
         await started.close();
         const cur = await readJson(paths().hubJson);

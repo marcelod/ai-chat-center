@@ -147,12 +147,13 @@ function lockPid(content) {
 }
 async function publish(file) {
   const tmp = `${file}.${crypto2.randomUUID()}.tmp`;
+  const content = JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() });
   try {
-    await fs3.writeFile(tmp, JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() }), { flag: "wx" });
+    await fs3.writeFile(tmp, content, { flag: "wx" });
     await fs3.link(tmp, file);
-    return true;
+    return content;
   } catch (e) {
-    if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return false;
+    if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return null;
     throw e;
   } finally {
     await fs3.rm(tmp, { force: true });
@@ -179,23 +180,23 @@ async function staleContent(file) {
 }
 var GUARD_STALE_MS = 1e4;
 var contention = (e) => ["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "");
-async function reclaimStaleLock(file, seen) {
+async function reclaim(file, seen) {
   const guard = `${file}.reclaim`;
-  if (!await publish(guard)) {
+  if (await publish(guard) === null) {
     try {
       const st = await fs3.stat(guard);
       if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs3.rm(guard, { force: true });
     } catch {
     }
-    return false;
+    return null;
   }
   try {
-    if (await staleContent(file) !== seen) return false;
+    if (await staleContent(file) !== seen) return null;
     try {
       await fs3.unlink(file);
     } catch (e) {
       if (code(e) !== "ENOENT") {
-        if (contention(e)) return false;
+        if (contention(e)) return null;
         throw e;
       }
     }
@@ -208,11 +209,15 @@ async function reclaimStaleLock(file, seen) {
   }
 }
 async function acquireLock(file) {
+  return await acquireLockContent(file) !== null;
+}
+async function acquireLockContent(file) {
   await ensureDir(path4.dirname(file));
-  if (await publish(file)) return true;
+  const mine = await publish(file);
+  if (mine !== null) return mine;
   const seen = await staleContent(file);
-  if (seen === null) return false;
-  return reclaimStaleLock(file, seen);
+  if (seen === null) return null;
+  return reclaim(file, seen);
 }
 async function releaseLock(file) {
   try {
@@ -281,16 +286,16 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 // src/core/version.ts
-var VERSION = "0.2.0";
+var VERSION = "0.2.1";
 
 // src/core/healthProof.ts
 import crypto3 from "node:crypto";
 var newChallenge = () => crypto3.randomBytes(16).toString("hex");
-function healthProof(token, challenge, pid, version) {
-  return crypto3.createHmac("sha256", token).update(`${challenge}.${pid}.${version}`).digest("hex");
+function healthProof(token, challenge, port, pid, version) {
+  return crypto3.createHmac("sha256", token).update(`${challenge}|${port}|${pid}|${version}`).digest("hex");
 }
-function proofMatches(token, challenge, answer) {
-  const want = Buffer.from(healthProof(token, challenge, answer.pid, answer.version));
+function proofMatches(token, challenge, port, answer) {
+  const want = Buffer.from(healthProof(token, challenge, port, answer.pid, answer.version));
   const got = Buffer.from(String(answer.proof));
   return want.length === got.length && crypto3.timingSafeEqual(want, got);
 }
@@ -338,6 +343,20 @@ function readHub() {
   }
 }
 var urlOf = (h) => `http://127.0.0.1:${h.port}/?token=${h.token}`;
+function compareVersions(a, b) {
+  const parse = (v) => /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(v.trim());
+  const x = parse(a);
+  const y = parse(b);
+  if (!x || !y) return NaN;
+  for (let i = 1; i <= 3; i++) {
+    const d = Number(x[i]) - Number(y[i]);
+    if (d !== 0) return Math.sign(d);
+  }
+  if (x[4] === y[4]) return 0;
+  if (x[4] === void 0) return 1;
+  if (y[4] === void 0) return -1;
+  return x[4] < y[4] ? -1 : 1;
+}
 async function ensureHub(opts = {}) {
   const health = opts.health ?? checkHealth;
   const isAlive2 = opts.isAlive ?? isAlive;
@@ -352,13 +371,13 @@ async function ensureHub(opts = {}) {
   const proven = async (h) => {
     const challenge = newChallenge();
     const r = await health(h.port, challenge);
-    return r && proofMatches(h.token, challenge, r) ? r : null;
+    return r && proofMatches(h.token, challenge, h.port, r) ? r : null;
   };
   const hub = readHub();
   if (hub) {
     const h = await proven(hub);
     if (h) {
-      if (h.version === VERSION) return urlOf(hub);
+      if (!(compareVersions(h.version, VERSION) < 0)) return urlOf(hub);
       kill(h.pid);
       const until = Date.now() + 3e3;
       while (isAlive2(h.pid) && Date.now() < until) await sleep(50);
@@ -371,7 +390,7 @@ async function ensureHub(opts = {}) {
     const cur = readHub();
     if (!cur) continue;
     const h = await proven(cur);
-    if (h && h.version === VERSION) return urlOf(cur);
+    if (h && compareVersions(h.version, VERSION) >= 0) return urlOf(cur);
   }
   throw new Error("AI Chat Center hub did not start in time");
 }

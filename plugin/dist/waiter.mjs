@@ -92,26 +92,70 @@ async function list(sid) {
     throw e;
   }
 }
+var READ_RETRIES = 3;
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+var CLAIMED_RE = /\.msg\.claimed-(?:(\d{13,})-)?/;
+async function readClaimed(file) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return JSON.parse(await fs2.readFile(file, "utf8"));
+    } catch (e) {
+      if (e instanceof SyntaxError) return "malformed";
+      if (attempt >= READ_RETRIES) return "unreadable";
+      await sleep(20 + Math.floor(Math.random() * 31));
+    }
+  }
+}
 async function drain(sid) {
   const out = [];
   for (const f of await list(sid)) {
-    const claimed = `${f}.claimed-${crypto2.randomUUID()}`;
+    const claimed = `${f}.claimed-${Date.now()}-${crypto2.randomUUID()}`;
     try {
       await fs2.rename(f, claimed);
     } catch (e) {
       if (isRace(e)) continue;
+      if (out.length > 0) break;
       throw e;
     }
-    let m = null;
-    try {
-      m = JSON.parse(await fs2.readFile(claimed, "utf8"));
-    } catch (e) {
-      if (!(e instanceof SyntaxError)) throw e;
+    const m = await readClaimed(claimed);
+    if (m === "unreadable") {
+      try {
+        await withFsRetry(() => fs2.rename(claimed, f));
+      } catch {
+      }
+      continue;
     }
-    await withFsRetry(() => fs2.rm(claimed, { force: true }));
-    if (m) out.push(m);
+    if (m !== "malformed") out.push(m);
+    try {
+      await withFsRetry(() => fs2.rm(claimed, { force: true }));
+    } catch {
+    }
   }
   return out;
+}
+async function sweepClaimed(sid, maxAgeMs) {
+  const dir = paths().inboxDir(sid);
+  let names;
+  try {
+    names = await fs2.readdir(dir);
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  const now = Date.now();
+  for (const n of names) {
+    const m = CLAIMED_RE.exec(n);
+    if (!m) continue;
+    const file = path3.join(dir, n);
+    try {
+      const at = m[1] ? Number(m[1]) : (await fs2.stat(file)).mtimeMs;
+      if (now - at <= maxAgeMs) continue;
+      await withFsRetry(() => fs2.rm(file, { force: true }));
+      removed++;
+    } catch {
+    }
+  }
+  return removed;
 }
 async function clearInbox(sid) {
   const dir = paths().inboxDir(sid);
@@ -181,12 +225,13 @@ function lockPid(content) {
 }
 async function publish(file) {
   const tmp = `${file}.${crypto3.randomUUID()}.tmp`;
+  const content = JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() });
   try {
-    await fs4.writeFile(tmp, JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() }), { flag: "wx" });
+    await fs4.writeFile(tmp, content, { flag: "wx" });
     await fs4.link(tmp, file);
-    return true;
+    return content;
   } catch (e) {
-    if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return false;
+    if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return null;
     throw e;
   } finally {
     await fs4.rm(tmp, { force: true });
@@ -213,23 +258,23 @@ async function staleContent(file) {
 }
 var GUARD_STALE_MS = 1e4;
 var contention = (e) => ["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "");
-async function reclaimStaleLock(file, seen) {
+async function reclaim(file, seen) {
   const guard = `${file}.reclaim`;
-  if (!await publish(guard)) {
+  if (await publish(guard) === null) {
     try {
       const st = await fs4.stat(guard);
       if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs4.rm(guard, { force: true });
     } catch {
     }
-    return false;
+    return null;
   }
   try {
-    if (await staleContent(file) !== seen) return false;
+    if (await staleContent(file) !== seen) return null;
     try {
       await fs4.unlink(file);
     } catch (e) {
       if (code(e) !== "ENOENT") {
-        if (contention(e)) return false;
+        if (contention(e)) return null;
         throw e;
       }
     }
@@ -242,11 +287,15 @@ async function reclaimStaleLock(file, seen) {
   }
 }
 async function acquireLock(file) {
+  return await acquireLockContent(file) !== null;
+}
+async function acquireLockContent(file) {
   await ensureDir(path4.dirname(file));
-  if (await publish(file)) return true;
+  const mine = await publish(file);
+  if (mine !== null) return mine;
   const seen = await staleContent(file);
-  if (seen === null) return false;
-  return reclaimStaleLock(file, seen);
+  if (seen === null) return null;
+  return reclaim(file, seen);
 }
 async function touchLock(file) {
   try {
@@ -374,12 +423,14 @@ ${CLOSE}`).join("\n\n");
 var HOOK_TIMEOUT_S = 86400;
 var WAITER_BUDGET_MS = (HOOK_TIMEOUT_S - 60) * 1e3;
 var MAX_MESSAGE_AGE_MS = 30 * 6e4;
+var LOOKUP_FAIL_EXIT_MS = 30 * 6e4;
+var CLAIMED_SWEEP_MS = 36e5;
 var RERESOLVE_MS = 6e4;
 var MAX_MISSES = 3;
 var HEARTBEAT_MS = 1e4;
 var SWITCH_SOURCES = /* @__PURE__ */ new Set(["startup", "resume", "clear", "fork"]);
 var NOTHING = { exitCode: 0, stderr: "" };
-var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
 async function activeReg(sid) {
   const r = await getRegistration(sid);
   return r && isActive(r) ? r : null;
@@ -418,16 +469,23 @@ async function runWaiter(event, input, opts = {}) {
   const now = opts.now ?? Date.now;
   const heartbeatMs = opts.heartbeatMs ?? HEARTBEAT_MS;
   const lookupFn = opts.lookup ?? ((id) => lookupClaudePid(id));
+  const lookupFailMs = opts.lookupFailMs ?? LOOKUP_FAIL_EXIT_MS;
+  const discardOld = event === "start" && input.source === "resume";
   let misses = 0;
   let lastLookupAt = 0;
   let lookups = 0;
+  let failingSince = null;
   const lookup = async () => {
     lookups++;
     lastLookupAt = Date.now();
     const r = await lookupFn(sid);
-    if (r.ok) misses = r.pid === null ? misses + 1 : 0;
+    if (r.ok) {
+      misses = r.pid === null ? misses + 1 : 0;
+      failingSince = null;
+    } else failingSince ??= now();
     return r;
   };
+  const failingTooLong = () => failingSince !== null && now() - failingSince >= lookupFailMs;
   if (event === "start") {
     try {
       await sessionSwitch(sid, input, lookup);
@@ -457,60 +515,87 @@ async function runWaiter(event, input, opts = {}) {
     }
   }
   const lock = paths().waiterLock(sid);
-  if (!await acquireLock(lock)) return NOTHING;
+  const mine = await acquireLockContent(lock);
+  if (mine === null) return NOTHING;
   let lastBeat = Date.now();
   let deadChecked = false;
   try {
+    try {
+      await sweepClaimed(sid, CLAIMED_SWEEP_MS);
+    } catch (e) {
+      logError(e);
+    }
     for (; ; ) {
       if (Date.now() - startedAt >= deadlineMs) return NOTHING;
-      const reg = await activeReg(sid);
-      if (!reg) return NOTHING;
-      if (Date.now() - lastBeat >= heartbeatMs) {
-        lastBeat = Date.now();
-        await touchLock(lock);
-      }
-      const regPid = reg.pid ?? pid;
-      if (regPid === null) {
-        if (misses >= MAX_MISSES) return NOTHING;
-        if (Date.now() - lastLookupAt >= reresolveMs) {
+      try {
+        const lockLost = async () => {
+          if (await readLock(lock) === mine) return false;
+          logError(`waiter lock for session ${sid} is no longer ours: exiting without draining`);
+          return true;
+        };
+        if (await lockLost()) return NOTHING;
+        const reg = await activeReg(sid);
+        if (!reg) return NOTHING;
+        if (Date.now() - lastBeat >= heartbeatMs) {
+          lastBeat = Date.now();
+          await touchLock(lock);
+        }
+        const regPid = reg.pid ?? pid;
+        if (regPid === null) {
+          if (misses >= MAX_MISSES || failingTooLong()) return NOTHING;
+          if (Date.now() - lastLookupAt >= reresolveMs) {
+            const r = await lookup();
+            if (misses >= MAX_MISSES || failingTooLong()) return NOTHING;
+            if (r.ok && r.pid !== null) {
+              pid = r.pid;
+              await adopt(pid);
+            }
+          }
+        } else if (!isAlive2(regPid)) {
+          if (deadChecked) return NOTHING;
+          deadChecked = true;
           const r = await lookup();
-          if (misses >= MAX_MISSES) return NOTHING;
-          if (r.ok && r.pid !== null) {
-            pid = r.pid;
-            await adopt(pid);
+          const fresh = r.ok ? r.pid : null;
+          if (fresh === null || fresh === regPid || !isAlive2(fresh)) return NOTHING;
+          pid = fresh;
+          await adopt(fresh);
+          continue;
+        }
+        if (!await isBusy(sid)) {
+          if (await lockLost()) return NOTHING;
+          const drained = await drain(sid);
+          let msgs = drained;
+          if (discardOld) {
+            const cutoff = now() - MAX_MESSAGE_AGE_MS;
+            msgs = drained.filter((m) => !(Date.parse(m.createdAt) < cutoff));
+            if (msgs.length < drained.length) {
+              logError(`discarded ${drained.length - msgs.length} message(s) older than 30 min on resume of session ${sid}`);
+            }
+          }
+          if (msgs.length > 0) {
+            const result = { exitCode: 2, stderr: wrapMessages(msgs, reg.key) };
+            try {
+              await clear(sid);
+            } catch (e) {
+              logError(e);
+            }
+            return result;
           }
         }
-      } else if (!isAlive2(regPid)) {
-        if (deadChecked) return NOTHING;
-        deadChecked = true;
-        const r = await lookup();
-        const fresh = r.ok ? r.pid : null;
-        if (fresh === null || fresh === regPid || !isAlive2(fresh)) return NOTHING;
-        pid = fresh;
-        await adopt(fresh);
-        continue;
+      } catch (e) {
+        logError(e);
       }
-      if (!await isBusy(sid)) {
-        const drained = await drain(sid);
-        const cutoff = now() - MAX_MESSAGE_AGE_MS;
-        const msgs = drained.filter((m) => !(Date.parse(m.createdAt) < cutoff));
-        if (msgs.length < drained.length) {
-          logError(`discarded ${drained.length - msgs.length} message(s) older than 30 min for session ${sid}`);
-        }
-        if (msgs.length > 0) {
-          const result = { exitCode: 2, stderr: wrapMessages(msgs, reg.key) };
-          try {
-            await clear(sid);
-          } catch (e) {
-            logError(e);
-          }
-          return result;
-        }
-      }
-      await sleep(pollMs);
+      await sleep2(pollMs);
     }
   } finally {
-    await releaseLock(lock);
+    if (await readLock(lock) === mine) await releaseLock(lock);
+  }
+}
+async function readLock(file) {
+  try {
+    return await fs6.promises.readFile(file, "utf8");
+  } catch {
+    return null;
   }
 }
 async function readStdin() {
