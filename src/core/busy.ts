@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { paths } from './paths.js';
-import { writeJsonAtomic } from './fsAtomic.js';
+import { removeFile, writeJsonAtomic } from './fsAtomic.js';
 
 // Busy marker: a terminal-started turn is running, so the waiter must not inject app messages
 // mid-turn. Set on prompt submit (active registrations only), cleared when a waiter starts
@@ -11,7 +11,7 @@ export async function setBusy(sid: string): Promise<void> {
 }
 
 export async function clearBusy(sid: string): Promise<void> {
-  await fs.rm(paths().busyFile(sid), { force: true });
+  await removeFile(paths().busyFile(sid));
 }
 
 export async function isBusy(sid: string): Promise<boolean> {

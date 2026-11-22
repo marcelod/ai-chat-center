@@ -69,4 +69,18 @@ describe('main', () => {
       await h!.close();
     }
   });
+  // Audit RT13: old disconnected registrations are pruned when the hub starts.
+  it('prunes disconnected registrations older than 30 days on start', async () => {
+    const { register, markDisconnected, updateRegistration, listRegistrations } = await import('../../src/core/registry.js');
+    await register({ sessionId: 'old', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    await register({ sessionId: 'new', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    await markDisconnected('old', 'off');
+    await updateRegistration('old', { disconnectedAt: new Date(Date.now() - 31 * 86_400_000).toISOString() });
+    const h = await startHub();
+    try {
+      expect((await listRegistrations()).map((r) => r.sessionId)).toEqual(['new']);
+    } finally {
+      await h!.close();
+    }
+  });
 });

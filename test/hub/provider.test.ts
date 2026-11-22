@@ -281,6 +281,38 @@ describe('provider: final fix wave', () => {
   });
 });
 
+describe('provider: audit regressions', () => {
+  // Audit RT3 (repro G): poll and GET /api/sessions overlapped exactly when a session exited.
+  it('concurrent listSessions at exit detection never reject', async () => {
+    let now = Date.parse('2026-01-01T01:00:00Z');
+    for (let k = 0; k < 10; k++) {
+      const sid = `g${k}`;
+      await register({ sessionId: sid, transcriptPath: '/nope.jsonl', cwd: '/c', pid: 999999, connectedAt: '2026-01-01T00:00:00Z' });
+      const prov = new ClaudeCodeProvider(async () => [], { now: () => now });
+      for (let i = 0; i < 2; i++) { now += 6000; await prov.listSessions(); }
+      now += 6000;
+      const r = await Promise.allSettled([prov.listSessions(), prov.listSessions()]);
+      expect(r.filter((x) => x.status === 'rejected')).toEqual([]);
+      expect((await getRegistration(sid))!.disconnectReason).toBe('exited');
+    }
+  });
+  // Audit RT13: inactive registrations cost nothing per poll beyond the cached last event.
+  it('poll and listSessions never re-read the transcript of an inactive session', async () => {
+    await reg();
+    fs.appendFileSync(transcript, line('a1', 'hi'));
+    const { markDisconnected } = await import('../../src/core/registry.js');
+    await markDisconnected('s1', 'off');
+    const { TranscriptReader } = await import('../../src/hub/transcript/reader.js');
+    const spy = vi.spyOn(TranscriptReader.prototype, 'readNew');
+    const p = new ClaudeCodeProvider(async () => []);
+    expect((await p.listSessions()).connected[0].lastEvent?.id).toBe('a1');
+    const reads = spy.mock.calls.length;
+    for (let i = 0; i < 5; i++) await p.poll();
+    expect(spy.mock.calls.length).toBe(reads);
+    spy.mockRestore();
+  });
+});
+
 describe('listLiveSessions', () => {
   it('maps fields, drops malformed items', async () => {
     const raw = JSON.stringify([

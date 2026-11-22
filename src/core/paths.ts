@@ -9,6 +9,8 @@ export interface Paths {
   sessionsDir: string;
   inboxDir: (sid: string) => string;
   waiterLock: (sid: string) => string;
+  /** Short lock around read-modify-write of a registration. */
+  sessionLock: (sid: string) => string;
   waitingFile: (sid: string) => string;
   /** Present while a terminal-started turn is running (set on prompt submit, cleared when the waiter starts). */
   busyFile: (sid: string) => string;
@@ -33,6 +35,7 @@ export function paths(): Paths {
     config: path.join(home, 'config.json'),
     sessionsDir: path.join(home, 'sessions'),
     inboxDir: (sid) => (assertSessionId(sid), path.join(home, 'inbox', sid)),
+    sessionLock: (sid) => (assertSessionId(sid), path.join(home, 'sessions', `${sid}.lock`)),
     waiterLock: (sid) => (assertSessionId(sid), path.join(home, 'waiters', `${sid}.lock`)),
     waitingFile: (sid) => (assertSessionId(sid), path.join(home, 'waiting', `${sid}.json`)),
     busyFile: (sid) => (assertSessionId(sid), path.join(home, 'busy', sid)),

@@ -31,29 +31,30 @@ describe('plugin bundle', () => {
   }, 180_000);
 
   it('produces the bundles and the UI', () => {
-    for (const f of ['hook.js', 'waiter.js', 'hub.js', path.join('ui', 'index.html')]) {
+    for (const f of ['hook.mjs', 'waiter.mjs', 'hub.mjs', path.join('ui', 'index.html')]) {
       expect(fs.existsSync(path.join(dist, f)), f).toBe(true);
     }
+    for (const f of ['hook.js', 'waiter.js', 'hub.js']) expect(fs.existsSync(path.join(dist, f)), f).toBe(false);
   });
 
-  it('hook.js prompt-submit is silent for an unconnected session', () => {
-    const r = run('hook.js', ['prompt-submit'], tmpHome());
+  it('hook.mjs prompt-submit is silent for an unconnected session', () => {
+    const r = run('hook.mjs', ['prompt-submit'], tmpHome());
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('');
     expect(r.stderr).toBe('');
   });
 
-  it('waiter.js exits quickly and silently for an unconnected session', () => {
+  it('waiter.mjs exits quickly and silently for an unconnected session', () => {
     const t = Date.now();
-    const r = run('waiter.js', [], tmpHome());
+    const r = run('waiter.mjs', ['stop'], tmpHome());
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('');
     expect(Date.now() - t).toBeLessThan(10_000);
   });
 
-  it('hub.js serves health and the UI', async () => {
+  it('hub.mjs serves health and the UI', async () => {
     const home = tmpHome();
-    const child = spawn(process.execPath, [path.join(dist, 'hub.js')], {
+    const child = spawn(process.execPath, [path.join(dist, 'hub.mjs')], {
       env: { ...process.env, AI_CHAT_CENTER_HOME: home, AI_CHAT_CENTER_PORT: '0' },
       stdio: 'ignore',
     });

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { register, getRegistration, listRegistrations, markDisconnected, isActive, updateRegistration } from '../../src/core/registry.js';
+import { register, getRegistration, listRegistrations, markDisconnected, isActive, updateRegistration, pruneRegistrations } from '../../src/core/registry.js';
 import { enqueue } from '../../src/core/inbox.js';
 import { setBusy, clearBusy, isBusy } from '../../src/core/busy.js';
 import { paths } from '../../src/core/paths.js';
@@ -86,5 +86,65 @@ describe('registry: inbox and busy lifecycle', () => {
       expect((fs.statSync(d).mode & 0o777).toString(8), d).toBe('700');
     }
     expect((fs.statSync(path.join(paths().sessionsDir, 's1.json')).mode & 0o777).toString(8)).toBe('600');
+  });
+
+  // Audit RT3 (repro A2): poll and GET /api/sessions both marked an exited session at once.
+  it('concurrent markDisconnected calls never fail and keep the first reason', async () => {
+    for (let i = 0; i < 30; i++) {
+      const sid = `s${i}`;
+      await register({ sessionId: sid, transcriptPath: '/t', cwd: '/c', pid: 1 });
+      const r = await Promise.allSettled([markDisconnected(sid, 'exited'), markDisconnected(sid, 'off')]);
+      expect(r.filter((x) => x.status === 'rejected')).toEqual([]);
+      expect(isActive((await getRegistration(sid))!)).toBe(false);
+    }
+    await register({ sessionId: 'k', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    await markDisconnected('k', 'off');
+    const first = (await getRegistration('k'))!;
+    await markDisconnected('k', 'exited');
+    expect(await getRegistration('k')).toEqual(first);
+  });
+  // Audit RT12: a stale read-modify-write must not resurrect a session after /cc off.
+  it('updateRegistration with ifConnectedAt never writes over a disconnected or newer registration', async () => {
+    for (let i = 0; i < 50; i++) {
+      const sid = `r${i}`;
+      const reg = await register({ sessionId: sid, transcriptPath: '/t', cwd: '/c', pid: null });
+      await Promise.all([updateRegistration(sid, { pid: 42 }, { ifConnectedAt: reg.connectedAt }), markDisconnected(sid, 'off')]);
+      expect(isActive((await getRegistration(sid))!)).toBe(false);
+    }
+    const reg = await register({ sessionId: 'z', transcriptPath: '/t', cwd: '/c', pid: null });
+    expect(await updateRegistration('z', { pid: 1 }, { ifConnectedAt: 'other' })).toBeNull();
+    expect(await updateRegistration('z', { pid: 1 }, { ifConnectedAt: reg.connectedAt })).toMatchObject({ pid: 1 });
+  });
+  it('registration writes take a short per-session lock that is released afterwards', async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    await updateRegistration('s1', { pid: 2 });
+    await markDisconnected('s1', 'off');
+    expect(fs.readdirSync(paths().sessionsDir)).toEqual(['s1.json']);
+  });
+});
+
+describe('registry: pruning (audit RT13)', () => {
+  it('deletes disconnected registrations older than the limit with their inbox, busy and waiting files', async () => {
+    const day = 86_400_000;
+    const now = Date.parse('2026-06-01T00:00:00Z');
+    await register({ sessionId: 'old', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    await register({ sessionId: 'recent', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    await register({ sessionId: 'active', transcriptPath: '/t', cwd: '/c', pid: 1, connectedAt: new Date(now - 90 * day).toISOString() });
+    await markDisconnected('old', 'off');
+    await markDisconnected('recent', 'off');
+    await updateRegistration('old', { disconnectedAt: new Date(now - 31 * day).toISOString() });
+    await updateRegistration('recent', { disconnectedAt: new Date(now - 29 * day).toISOString() });
+    for (const sid of ['old', 'recent']) {
+      fs.mkdirSync(paths().inboxDir(sid), { recursive: true });
+      fs.writeFileSync(path.join(paths().inboxDir(sid), '.x.tmp'), '');
+      await setBusy(sid);
+      await setWaiting(sid, 'permission');
+    }
+    expect(await pruneRegistrations(30 * day, now)).toEqual(['old']);
+    expect((await listRegistrations()).map((r) => r.sessionId).sort()).toEqual(['active', 'recent']);
+    expect(fs.existsSync(paths().inboxDir('old'))).toBe(false);
+    expect(await isBusy('old')).toBe(false);
+    expect(await getWaiting('old')).toBeNull();
+    expect(await isBusy('recent')).toBe(true);
   });
 });

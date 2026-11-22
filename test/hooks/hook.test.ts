@@ -34,12 +34,22 @@ const out = (r: { stdout?: string }) => JSON.parse(r.stdout!) as {
 const keyOf = async () => (await getRegistration('s1'))!.key!;
 
 describe('hook', () => {
-  it('ignores unregistered session', async () => {
+  // Audit RT7 / AI-F9: the sync session-start hook is gone; its work moved to the async start waiter.
+  it('session-start is no longer handled synchronously: no lookup, no writes', async () => {
+    await register({ sessionId: 'A', transcriptPath: '/a', cwd: '/x', pid: 42 });
     let lookups = 0;
     const c = { ...ctx(), resolvePid: async () => (lookups++, 42) };
     for (const source of ['startup', 'resume', 'clear', 'compact']) {
-      expect(await handleHook('session-start', inp({ source }), c)).toEqual({ exitCode: 0 });
+      // @ts-expect-error removed event
+      expect(await handleHook('session-start', inp({ session_id: 'B', source }), c)).toEqual({ exitCode: 0 });
     }
+    expect(lookups).toBe(0);
+    expect((await getRegistration('A'))?.disconnectedAt).toBeUndefined();
+  });
+
+  it('ignores unregistered session', async () => {
+    let lookups = 0;
+    const c = { ...ctx(), resolvePid: async () => (lookups++, 42) };
     for (const ev of ['prompt-submit', 'notification'] as const) {
       const r = await handleHook(ev, inp({ prompt: 'hello', notification_type: 'permission_prompt' }), c);
       expect(r).toEqual({ exitCode: 0 });
@@ -121,39 +131,6 @@ describe('hook', () => {
     expect(isCcCommand(undefined)).toBe(null);
   });
 
-  it('clear disconnects previous session of same terminal', async () => {
-    await register({ sessionId: 'A', transcriptPath: '/a', cwd: '/x', pid: 42 });
-    await register({ sessionId: 'C', transcriptPath: '/c', cwd: '/x', pid: 43 });
-    const r = await handleHook('session-start', inp({ session_id: 'B', source: 'clear' }), ctx(42));
-    expect(r).toEqual({ exitCode: 0 });
-    expect((await getRegistration('A'))?.disconnectReason).toBe('clear');
-    expect((await getRegistration('C'))?.disconnectedAt).toBeUndefined();
-    expect(await getRegistration('B')).toBeNull();
-  });
-
-  it('clear with an unresolvable pid disconnects nothing (null never matches)', async () => {
-    await register({ sessionId: 'A', transcriptPath: '/a', cwd: '/x', pid: null });
-    await handleHook('session-start', inp({ session_id: 'B', source: 'clear' }), { ...ctx(), resolvePid: async () => null });
-    expect((await getRegistration('A'))?.disconnectedAt).toBeUndefined();
-  });
-
-  it('resume of an active registration refreshes pid and transcriptPath', async () => {
-    await register({ sessionId: 's1', transcriptPath: '/old.jsonl', cwd: '/x', pid: 7, key: 'k' });
-    for (const source of ['resume', 'startup']) {
-      await handleHook('session-start', inp({ source, transcript_path: `/${source}.jsonl` }), { ...ctx(), resolvePid: async () => 99 });
-      expect(await getRegistration('s1')).toMatchObject({ pid: 99, transcriptPath: `/${source}.jsonl`, key: 'k' });
-    }
-  });
-
-  it('resume of an inactive registration does nothing and skips the lookup', async () => {
-    await register({ sessionId: 's1', transcriptPath: '/old.jsonl', cwd: '/x', pid: 7 });
-    await markDisconnected('s1', 'off');
-    let lookups = 0;
-    await handleHook('session-start', inp({ source: 'resume' }), { ...ctx(), resolvePid: async () => (lookups++, 99) });
-    expect(lookups).toBe(0);
-    expect(await getRegistration('s1')).toMatchObject({ pid: 7, transcriptPath: '/old.jsonl' });
-  });
-
   it('prompt-submit writes the busy marker only for active registrations', async () => {
     await handleHook('prompt-submit', inp({ prompt: 'hello' }), ctx());
     expect(fs.readdirSync(paths().home)).toEqual([]);
@@ -210,17 +187,6 @@ describe('hook', () => {
   it('stores the resolved claude pid, not the parent pid', async () => {
     await handleHook('prompt-submit', inp({ prompt: '/cc' }), { ...ctx(42), resolvePid: async () => 999 });
     expect((await getRegistration('s1'))?.pid).toBe(999);
-  });
-
-  it('clear matches by resolved pid and skips the lookup when nothing is registered', async () => {
-    let calls = 0;
-    const c = { ...ctx(7), resolvePid: async () => (calls++, 42) };
-    await handleHook('session-start', inp({ session_id: 'B', source: 'clear' }), c);
-    expect(calls).toBe(0);
-    await register({ sessionId: 'A', transcriptPath: '/a', cwd: '/x', pid: 42 });
-    await handleHook('session-start', inp({ session_id: 'B', source: 'clear' }), c);
-    expect(calls).toBe(1);
-    expect((await getRegistration('A'))?.disconnectReason).toBe('clear');
   });
 
   it('hub failure: keeps registration and tells the user where to look, without leaking a url', async () => {

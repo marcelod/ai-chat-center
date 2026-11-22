@@ -7,9 +7,22 @@ import { paths } from '../core/paths.js';
 import { ensureDir, readJson, writeJsonAtomic } from '../core/fsAtomic.js';
 import { ClaudeCodeProvider } from './provider.js';
 import { acquireLock, releaseLock } from '../core/lock.js';
+import { pruneRegistrations } from '../core/registry.js';
 import { createHub } from './server.js';
 
 const TOKEN_RE = /^[0-9a-f]{64}$/;
+/** Disconnected registrations older than this are deleted (with their inbox, busy and waiting files). */
+export const PRUNE_AGE_MS = 30 * 86_400_000;
+const PRUNE_EVERY_MS = 10 * 60_000;
+
+async function prune(log: (m: string) => void): Promise<void> {
+  try {
+    const gone = await pruneRegistrations(PRUNE_AGE_MS);
+    if (gone.length) log(`pruned ${gone.length} old registration(s)`);
+  } catch (e) {
+    log(`prune failed: ${(e as Error).message}`);
+  }
+}
 
 async function ensureToken(log: (m: string) => void = () => {}): Promise<string> {
   const file = paths().token;
@@ -123,6 +136,8 @@ export async function startHub(): Promise<{ port: number; close(): Promise<void>
     const port = Number(new URL(hub.url).port);
     await writeJsonAtomic(paths().hubJson, { pid: process.pid, port });
     log(`hub listening on ${hub.url}`);
+    await prune(log);
+    const pruneTimer = setInterval(() => void prune(log), PRUNE_EVERY_MS);
 
     const started = hub;
     let done = false;
@@ -131,6 +146,7 @@ export async function startHub(): Promise<{ port: number; close(): Promise<void>
       close: async () => {
         if (done) return;
         done = true;
+        clearInterval(pruneTimer);
         await started.close();
         const cur = await readJson<{ pid?: number; port?: number }>(paths().hubJson);
         if (cur?.pid === process.pid && cur?.port === port) await fs.rm(paths().hubJson, { force: true });

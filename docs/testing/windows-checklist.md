@@ -29,7 +29,7 @@ Get-Content "$h\hub.json"                         # port and hub pid
 Get-ChildItem "$h\sessions" | ForEach-Object { Get-Content $_.FullName }   # registrations
 Get-ChildItem "$h\waiters", "$h\waiting", "$h\inbox" -ErrorAction SilentlyContinue
 Get-Content "$h\logs\*.log" -Tail 20
-# Node processes with their command lines (hub.js / waiter.js / hook.js):
+# Node processes with their command lines (hub.mjs / waiter.mjs / hook.mjs):
 Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | Select-Object ProcessId, ParentProcessId, CommandLine | Format-List
 ```
 To call the hub API the same way the app does:
@@ -50,23 +50,23 @@ Invoke-RestMethod "http://127.0.0.1:$port/api/sessions" -Headers $hdr | ConvertT
 - [ ] **(f) Permission prompt.** Press Shift+Tab until the footer shows manual mode (not auto, not accept edits). From the app, ask `Run this shell command: echo hi > perm.txt`. While the terminal asks for permission, the app shows "Waiting for you in the terminal". Then approve in the terminal.
   The session stays connected during the prompt, and the "waiting" badge goes away once you approve and the turn ends.
 - [ ] **(g) `/clear`.** Type `/clear`. The conversation shows as disconnected in the app, and the new session id appears under "Other sessions". The waiter for the old session ends (see section W).
-- [ ] **(h) Closing the terminal.** Run `/cc` again, then close the terminal window with the X button (not `/exit`). Within about 30 s the app shows the session as disconnected. In Task Manager → Details (or with the `Get-CimInstance` command above), **no `node.exe` running `waiter.js` is left** for that session, and `waiters\` holds no lock for it.
+- [ ] **(h) Closing the terminal.** Run `/cc` again, then close the terminal window with the X button (not `/exit`). Within about 30 s the app shows the session as disconnected. In Task Manager → Details (or with the `Get-CimInstance` command above), **no `node.exe` running `waiter.mjs` is left** for that session, and `waiters\` holds no lock for it.
 - [ ] **(i) Session without `/cc`.** Open a second terminal in another folder and start `claude` without `/cc`. It appears under "Other sessions" and behaves normally. No lock is created for it in `waiters\`, and sending to it from the app is refused ("session disconnected").
 - [ ] **(j) After `/compact`.** In a connected session, run `/compact`, then ask for an action from the app (`Create a file after.txt containing: ok`). It is executed. If the model refuses, run `/cc` once more and retry. Note which one happened.
 
 ## Windows-specific checks
 
-- [ ] **W1. Quoting and `${CLAUDE_PLUGIN_ROOT}` in the hooks.** Install the plugin into a path with spaces, for example with `--plugin-dir "C:\Temp\cc test\plugin"` from a copy. All hooks run: (a) works, a waiter starts and `logs\hook.log` has no "Cannot find module" error. `plugin/hooks/hooks.json` quotes the path as `node "${CLAUDE_PLUGIN_ROOT}/dist/hook.js"`. Check that this works from cmd.exe and from Git Bash if Claude Code uses it.
+- [ ] **W1. Quoting and `${CLAUDE_PLUGIN_ROOT}` in the hooks.** Install the plugin into a path with spaces, for example with `--plugin-dir "C:\Temp\cc test\plugin"` from a copy. All hooks run: (a) works, a waiter starts and `logs\hook.log` has no "Cannot find module" error. `plugin/hooks/hooks.json` quotes the path as `node "${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs"`. Check that this works from cmd.exe and from Git Bash if Claude Code uses it.
 - [ ] **W2. `claude agents --json` via `shell: true`.** The hub runs `claude agents --json` with `shell: true` on Windows, because `claude` is a `.cmd` shim. Check that the "Other sessions" list is filled in (scenario i). Also check that a closed session becomes disconnected (scenario h), which depends on the same call. If the list stays empty, run `claude agents --json` by hand in PowerShell and note the output.
-- [ ] **W3. The hub has no console window.** When `/cc` starts the hub, no black console window flashes or stays open (the hub is spawned with `windowsHide`). The waiter runs on each Stop, so it must not flash a window either. Task Manager shows the hub as a `node.exe` with `hub.js` in its command line.
+- [ ] **W3. The hub has no console window.** When `/cc` starts the hub, no black console window flashes or stays open (the hub is spawned with `windowsHide`). The waiter runs on each Stop, so it must not flash a window either. Task Manager shows the hub as a `node.exe` with `hub.mjs` in its command line.
 - [ ] **W4. Paths with spaces.** Use a project folder with a space (`C:\Temp\cc test`). If you can, also use a Windows user name with a space or an accent; otherwise set `$env:AI_CHAT_CENTER_HOME = "C:\Temp\cc home"` before starting `claude`. Scenarios (a) to (c) still work, and the files appear under that folder.
-- [ ] **W5. Lock left by a dead process.** While a session is connected, kill its waiter in Task Manager (End task on the `node.exe` running `waiter.js`), or with:
+- [ ] **W5. Lock left by a dead process.** While a session is connected, kill its waiter in Task Manager (End task on the `node.exe` running `waiter.mjs`), or with:
   ```powershell
   Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
-    Where-Object CommandLine -like '*waiter.js*' | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    Where-Object CommandLine -like '*waiter.mjs*' | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
   ```
-  The lock file in `waiters\` stays behind. Type any prompt in the terminal so a new waiter starts on Stop. It must take over the stale lock (the pid in the lock is dead). Then a message from the app is delivered again. Do the same for the hub: kill the `hub.js` process, leave `hub.json` in place, and run `/cc`. A new hub starts and the link works.
-- [ ] **W6. No orphan processes at the end.** Close all test terminals. Within a minute, Task Manager → Details shows no `node.exe` running `waiter.js`. The hub (`hub.js`) is expected to keep running; stop it with:
+  The lock file in `waiters\` stays behind. Type any prompt in the terminal so a new waiter starts on Stop. It must take over the stale lock (the pid in the lock is dead). Then a message from the app is delivered again. Do the same for the hub: kill the `hub.mjs` process, leave `hub.json` in place, and run `/cc`. A new hub starts and the link works.
+- [ ] **W6. No orphan processes at the end.** Close all test terminals. Within a minute, Task Manager → Details shows no `node.exe` running `waiter.mjs`. The hub (`hub.mjs`) is expected to keep running; stop it with:
   ```powershell
   Stop-Process -Id (Get-Content "$env:USERPROFILE\.ai-chat-center\hub.json" | ConvertFrom-Json).pid
   ```

@@ -57,9 +57,9 @@ export function hubSpawnOptions(): SpawnOptions {
   return { detached: true, stdio: 'ignore', windowsHide: true, cwd: os.homedir() };
 }
 
-/** The hub bundle sits beside the hook bundle (Task 11 puts hub.js there). */
+/** The hub bundle sits beside the hook bundle in plugin/dist. */
 export function defaultSpawnHub(): void {
-  const hubPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'hub.js');
+  const hubPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'hub.mjs');
   spawn(process.execPath, [hubPath], hubSpawnOptions()).unref();
 }
 

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { paths } from './paths.js';
-import { ensureDir, FILE_MODE } from './fsAtomic.js';
+import { ensureDir, FILE_MODE, withFsRetry } from './fsAtomic.js';
 
 export type InboxMessage = { id: string; text: string; createdAt: string };
 
@@ -61,19 +61,30 @@ export async function peek(sid: string): Promise<InboxMessage[]> {
   return out;
 }
 
-/** Read in name order, delete, return. Files that vanish mid-way (racing drain) are skipped. */
+/**
+ * Takes every queued message, in name order. Each file is first CLAIMED with an atomic rename to a
+ * unique name; only the drain whose rename succeeds reads, deletes and returns it. A failed rename
+ * (ENOENT, or EPERM/EBUSY on Windows) means another drain claimed it. Plain read-then-unlink let two
+ * drains both read a file before either deleted it (double delivery on macOS and Windows).
+ */
 export async function drain(sid: string): Promise<InboxMessage[]> {
   const out: InboxMessage[] = [];
   for (const f of await list(sid)) {
-    const m = await readMsg(f);
-    if (!m) continue;
+    const claimed = `${f}.claimed-${crypto.randomUUID()}`;
     try {
-      await fs.unlink(f);
+      await fs.rename(f, claimed);
     } catch (e) {
       if (isRace(e)) continue; // someone else took it
       throw e;
     }
-    out.push(m);
+    let m: InboxMessage | null = null;
+    try {
+      m = JSON.parse(await fs.readFile(claimed, 'utf8')) as InboxMessage;
+    } catch (e) {
+      if (!(e instanceof SyntaxError)) throw e; // a malformed message is dropped, not re-read forever
+    }
+    await withFsRetry(() => fs.rm(claimed, { force: true }));
+    if (m) out.push(m);
   }
   return out;
 }
@@ -89,9 +100,9 @@ export async function clearInbox(sid: string): Promise<void> {
     throw e;
   }
   for (const n of names) {
-    if (!n.endsWith('.msg') && !n.endsWith('.tmp')) continue;
+    if (!n.endsWith('.msg') && !n.endsWith('.tmp') && !n.includes('.msg.claimed-')) continue;
     try {
-      await fs.rm(path.join(dir, n), { force: true });
+      await withFsRetry(() => fs.rm(path.join(dir, n), { force: true }));
     } catch (e) {
       if (!isRace(e)) throw e;
     }

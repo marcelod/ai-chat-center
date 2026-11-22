@@ -21,8 +21,9 @@ await build({
   bundle: true,
   platform: 'node',
   format: 'esm',
-  target: 'node20',
-  outExtension: { '.js': '.js' },
+  // The plugin runs on whatever Node is on PATH (18+), with no package.json: .mjs makes the ESM explicit.
+  target: 'node18',
+  outExtension: { '.js': '.mjs' },
   banner: { js: "import { createRequire as __acc_createRequire } from 'node:module';\nconst require = __acc_createRequire(import.meta.url);" },
   define: { 'process.env.NODE_ENV': '"production"' },
   legalComments: 'none',

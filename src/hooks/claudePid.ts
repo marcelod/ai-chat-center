@@ -5,21 +5,29 @@ export interface ResolvePidOptions {
   run?: () => Promise<string>;
 }
 
+/** Result of one `claude agents --json` lookup: `ok: false` when the lookup itself failed. */
+export type PidLookup = { ok: true; pid: number | null } | { ok: false };
+
 /**
  * Hooks run through `sh -c` (probe: process.ppid is a short-lived /bin/sh, the claude process is
  * its parent), so ppid cannot identify the session. Ask `claude agents --json` instead.
- * Returns null when the session is not listed or the lookup fails: a wrong pid is worse than none.
+ * `pid: null` means the lookup worked but does not list the session.
  */
-export async function resolveClaudePid(sessionId: string, opts: ResolvePidOptions = {}): Promise<number | null> {
+export async function lookupClaudePid(sessionId: string, opts: ResolvePidOptions = {}): Promise<PidLookup> {
   try {
     const list = JSON.parse(await (opts.run ?? runClaudeAgentsJson)()) as unknown;
-    if (Array.isArray(list)) {
-      for (const a of list as Array<{ pid?: unknown; sessionId?: unknown }>) {
-        if (a?.sessionId === sessionId && typeof a.pid === 'number') return a.pid;
-      }
+    if (!Array.isArray(list)) return { ok: false };
+    for (const a of list as Array<{ pid?: unknown; sessionId?: unknown }>) {
+      if (a?.sessionId === sessionId && typeof a.pid === 'number') return { ok: true, pid: a.pid };
     }
+    return { ok: true, pid: null };
   } catch {
-    /* fall through */
+    return { ok: false };
   }
-  return null;
+}
+
+/** The claude pid of a session, or null when it is not listed or the lookup fails: a wrong pid is worse than none. */
+export async function resolveClaudePid(sessionId: string, opts: ResolvePidOptions = {}): Promise<number | null> {
+  const r = await lookupClaudePid(sessionId, opts);
+  return r.ok ? r.pid : null;
 }

@@ -10,7 +10,8 @@
 //      parent (2 prompts in one session: ppid differed each time, grandparent was always the
 //      same `claude --plugin-dir ...` pid). Hence the claude pid comes from `claude agents --json`
 //      (resolveClaudePid) and is stored as Registration.pid (null when it cannot be resolved).
-// Stop is not hooked synchronously: the asyncRewake waiter clears waiting/busy when it starts.
+// Stop and SessionStart are not hooked synchronously: the asyncRewake waiter (`waiter.mjs stop`)
+// clears waiting/busy when a turn ends, and `waiter.mjs start` handles /clear, /resume and fork.
 // notification_type values (code.claude.com/docs/en/hooks.md): permission_prompt, idle_prompt,
 //  auth_success, auth_storage_failure, elicitation_dialog, elicitation_url_dialog,
 //  elicitation_complete, elicitation_response, agent_needs_input, agent_completed, ...
@@ -19,20 +20,13 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { assertSessionId, paths } from '../core/paths.js';
 import { DIR_MODE, ensureDir } from '../core/fsAtomic.js';
-import {
-  getRegistration,
-  isActive,
-  listRegistrations,
-  markDisconnected,
-  register,
-  updateRegistration,
-} from '../core/registry.js';
+import { getRegistration, isActive, markDisconnected, register } from '../core/registry.js';
 import { clearWaiting, setWaiting } from '../core/waiting.js';
 import { clearBusy, setBusy } from '../core/busy.js';
 import { ensureHub } from './ensureHub.js';
 import { resolveClaudePid } from './claudePid.js';
 
-export type HookEvent = 'session-start' | 'prompt-submit' | 'notification';
+export type HookEvent = 'prompt-submit' | 'notification';
 export type HookInput = {
   session_id: string;
   transcript_path: string;
@@ -127,32 +121,6 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
     return nothing;
   }
 
-  if (event === 'session-start') {
-    if (input.source === 'clear') {
-      // Best effort: the hub also marks sessions that vanish from `claude agents` as 'exited'.
-      // Only pay for the pid lookup when someone actually uses the plugin.
-      const active = (await listRegistrations()).filter(isActive);
-      if (active.length === 0) return nothing;
-      const pid = await resolve(sid);
-      if (pid === null) return nothing;
-      for (const r of active) {
-        if (r.pid === pid && r.sessionId !== sid) await markDisconnected(r.sessionId, 'clear');
-      }
-      return nothing;
-    }
-    if (input.source === 'resume' || input.source === 'startup') {
-      // A resumed session runs in a new claude process and may write a new transcript.
-      const reg = await getRegistration(sid);
-      if (!reg || !isActive(reg)) return nothing;
-      const pid = await resolve(sid);
-      await updateRegistration(sid, {
-        pid,
-        ...(typeof input.transcript_path === 'string' && input.transcript_path ? { transcriptPath: input.transcript_path } : {}),
-      });
-    }
-    return nothing;
-  }
-
   if (event === 'prompt-submit') {
     const cmd = isCcCommand(input.prompt);
     if (cmd === 'unknown') return output(UNKNOWN_ARG);
@@ -203,7 +171,7 @@ export async function main(): Promise<void> {
   let result: HookResult = { exitCode: 0 };
   try {
     const event = process.argv[2] as HookEvent;
-    if (event !== 'session-start' && event !== 'prompt-submit' && event !== 'notification') return;
+    if (event !== 'prompt-submit' && event !== 'notification') return;
     const input = JSON.parse(await readStdin()) as HookInput;
     result = await handleHook(event, input, { ensureHub: () => ensureHub() });
   } catch (e) {
