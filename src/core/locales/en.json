@@ -29,7 +29,8 @@
     },
     "notice": {
       "connected": "Connected",
-      "disconnected": "Disconnected"
+      "disconnected": "Disconnected",
+      "compacted": "Conversation compacted"
     },
     "status": {
       "busy": "working…",
@@ -60,7 +61,10 @@
       "waitingBanner": "Claude is waiting for you to approve an action in the terminal",
       "waitingInputBanner": "Claude is waiting for your answer in the terminal",
       "waitingBannerHint": "Approving from the app comes in a later version.",
-      "messages": "Messages"
+      "messages": "Messages",
+      "image": "[image]",
+      "images": "[{n} images]",
+      "compacted": "Conversation compacted · {time}"
     },
     "composer": {
       "placeholder": "Message {name}…",

@@ -7,7 +7,8 @@ const CHUNK = 64 * 1024;
 
 export class TranscriptReader {
   private offset = 0;
-  private partial = '';
+  /** Pieces of the current incomplete line (joined only once its newline arrives: linear time). */
+  private partial: string[] = [];
   private decoder = new StringDecoder('utf8');
   private parser: TranscriptParser;
   private events = new Map<string, ChatEvent>(); // insertion order = first appearance
@@ -36,7 +37,7 @@ export class TranscriptReader {
 
   private reset(): void {
     this.offset = 0;
-    this.partial = '';
+    this.partial = [];
     this.decoder = new StringDecoder('utf8');
     this.parser = new TranscriptParser(this.keys);
     this.events.clear();
@@ -59,10 +60,17 @@ export class TranscriptReader {
         const { bytesRead } = await handle.read(buf, 0, Math.min(CHUNK, size - this.offset), this.offset);
         if (bytesRead === 0) break;
         this.offset += bytesRead;
-        this.partial += this.decoder.write(buf.subarray(0, bytesRead));
-        const lines = this.partial.split('\n');
-        this.partial = lines.pop() ?? '';
-        for (const raw of lines) this.consume(raw, out);
+        // Scan only the newly decoded text for newlines.
+        const text = this.decoder.write(buf.subarray(0, bytesRead));
+        let start = 0;
+        for (let nl = text.indexOf('\n'); nl !== -1; nl = text.indexOf('\n', start)) {
+          this.partial.push(text.slice(start, nl));
+          const raw = this.partial.join('');
+          this.partial = [];
+          this.consume(raw, out);
+          start = nl + 1;
+        }
+        if (start < text.length) this.partial.push(text.slice(start));
       }
     } finally {
       await handle.close();

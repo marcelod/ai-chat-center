@@ -23,8 +23,10 @@ export function formatTime(iso: string, lang: Language, t: T, now = new Date()):
 function eventPreview(e: ChatEvent | undefined, t: T): string {
   if (!e) return t('ui.noMessages');
   switch (e.kind) {
-    case 'user':
-      return `${t('ui.you')}: ${e.text}`;
+    case 'user': {
+      const text = e.shell ? `! ${e.text}` : e.text || (e.images ? t('ui.chat.image') : '');
+      return `${t('ui.you')}: ${text}`;
+    }
     case 'assistant':
       return e.text;
     case 'actions':

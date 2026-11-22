@@ -64,6 +64,9 @@ export function useLiveSessions() {
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const fetched = useRef(new Set<string>());
   const notified = useRef(new Set<string>());
+  /** Notifications only for replies newer than both the moment this page connected and the moment a session was first seen. */
+  const mountedAt = useRef(Date.now());
+  const firstSeen = useRef(new Map<string, number>());
   const seq = useRef(0);
   const inFlight = useRef(false);
   const trailing = useRef(false);
@@ -173,6 +176,7 @@ export function useLiveSessions() {
       const res = await api.getSessions();
       if (mine === seq.current) {
         dataRef.current = res;
+        for (const s of res.connected) if (!firstSeen.current.has(s.sessionId)) firstSeen.current.set(s.sessionId, Date.now());
         setData(res);
         setError(false);
         reconcilePending(res, startedAt);
@@ -208,9 +212,14 @@ export function useLiveSessions() {
   const maybeNotify = useCallback((sid: string, events: ChatEvent[]) => {
     if (typeof document === 'undefined' || !notificationsEnabled()) return;
     if (sid === selectedRef.current && !document.hidden) return;
+    const seen = firstSeen.current.get(sid);
+    if (seen === undefined) return; // not in a sessions list yet: whatever arrives is its backlog
+    const since = Math.max(mountedAt.current, seen);
     const name = dataRef.current.connected.find((s) => s.sessionId === sid)?.name ?? sid;
     for (const e of events) {
       if (e.kind !== 'assistant' || notified.current.has(e.id)) continue;
+      // History replayed by the hub (page load, hub restart, /cc again) is older than `since`.
+      if (!(Date.parse(e.ts) > since)) continue;
       notified.current.add(e.id);
       showNotification(name, e.text);
     }

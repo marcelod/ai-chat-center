@@ -10,10 +10,21 @@ export type ToolAction = {
 };
 
 export type ChatEvent =
-  | { kind: 'user'; id: string; ts: string; text: string; origin: 'terminal' | 'app'; appMessageId?: string }
+  | {
+      kind: 'user';
+      id: string;
+      ts: string;
+      text: string;
+      origin: 'terminal' | 'app';
+      appMessageId?: string;
+      /** Number of images attached to the prompt (shown as a chip). */
+      images?: number;
+      /** A `!` shell-mode command typed in the terminal (its output follows as an actions item). */
+      shell?: true;
+    }
   | { kind: 'assistant'; id: string; ts: string; text: string }
   | { kind: 'actions'; id: string; ts: string; items: ToolAction[] }
-  | { kind: 'notice'; id: string; ts: string; code: 'connected' | 'disconnected' };
+  | { kind: 'notice'; id: string; ts: string; code: 'connected' | 'disconnected' | 'compacted' };
 
 export type LiveSession = {
   pid: number;

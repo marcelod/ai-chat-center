@@ -112,4 +112,27 @@ describe('TranscriptReader', () => {
     expect(r.all()).toHaveLength(1);
     expect(JSON.stringify(r.all()[0])).toContain('"result":"ok"');
   });
+
+  // Audit RT11: the partial line was re-split for every 64 KB chunk (quadratic on one long line).
+  const bigLine = (mb: number) =>
+    JSON.stringify({ type: 'user', uuid: 'big', timestamp: '2026-11-19T10:00:00.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'x', content: 'x'.repeat(mb * 1024 * 1024) }] } });
+  it('reads a 5 MB single line in well under a second', async () => {
+    writeFileSync(file, `${bigLine(5)}\n${user(2)}\n`);
+    const r = new TranscriptReader(file);
+    const t = performance.now();
+    const evs = await r.readNew();
+    expect(performance.now() - t).toBeLessThan(1000);
+    expect(evs.map((e) => e.id)).toEqual(['u2']);
+    expect(r.skipped).toBe(0);
+  });
+  it('is linear in the line length (a 32 MB line stays fast)', async () => {
+    writeFileSync(file, `${user(1)}\n${bigLine(32)}\n${user(3)}`);
+    const r = new TranscriptReader(file);
+    const t = performance.now();
+    expect((await r.readNew()).map((e) => e.id)).toEqual(['u1']);
+    expect(performance.now() - t).toBeLessThan(2000);
+    expect(r.skipped).toBe(0);
+    appendFileSync(file, '\n');
+    expect((await r.readNew()).map((e) => e.id)).toEqual(['u3']);
+  }, 20_000);
 });

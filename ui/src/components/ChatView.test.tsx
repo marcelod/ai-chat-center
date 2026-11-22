@@ -192,4 +192,33 @@ describe('ChatView', () => {
     expect(container.querySelector('[data-bubble="queued"]')).toBeNull();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
+
+  // Audit RT4: new transcript shapes.
+  it('an image prompt shows its text and an image chip; the compaction notice is not a bubble', () => {
+    setup({
+      events: [
+        { kind: 'user', id: 'i1', ts: ts(1), text: 'look at this', origin: 'terminal', images: 1 },
+        { kind: 'user', id: 'i2', ts: ts(2), text: 'and these', origin: 'terminal', images: 2 },
+        { kind: 'notice', id: 'k1', ts: ts(3), code: 'compacted' },
+      ],
+    });
+    expect(screen.getByText('look at this')).toBeInTheDocument();
+    expect(screen.getByText('[image]')).toBeInTheDocument();
+    expect(screen.getByText('[2 images]')).toBeInTheDocument();
+    expect(screen.getByText(/^Conversation compacted · /)).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-bubble="user"]')).toHaveLength(2);
+  });
+
+  it('a ! shell command is a terminal message and its output sits in a collapsible actions item', async () => {
+    setup({
+      events: [
+        { kind: 'user', id: 'b1', ts: ts(1), text: 'ls -a', origin: 'terminal', shell: true },
+        { kind: 'actions', id: 'b2', ts: ts(2), items: [{ toolUseId: 'b2', name: 'Shell', summary: 'ls -a', result: 'a.txt\nb.txt' }] },
+      ],
+    });
+    expect(screen.getByText('! ls -a')).toBeInTheDocument();
+    expect(screen.queryByText(/a\.txt/)).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: /1 action/ }));
+    expect(screen.getByText(/a\.txt/)).toBeInTheDocument();
+  });
 });

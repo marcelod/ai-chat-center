@@ -160,3 +160,77 @@ describe('TranscriptParser with a session key', () => {
     expect(evs.some((e) => e.kind === 'user' && e.origin === 'app')).toBe(false);
   });
 });
+
+// Audit RT4: shapes of current Claude Code transcripts (synthetic fixture with neutral text,
+// modelled on the structure of real transcripts; no real content).
+describe('TranscriptParser: current transcript shapes', () => {
+  const shapes = readFileSync(new URL('../fixtures/transcript-shapes.jsonl', import.meta.url), 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as Record<string, unknown>);
+  const run = () => {
+    const parser = new TranscriptParser();
+    const byId = new Map<string, ChatEvent>();
+    for (const e of shapes) for (const ev of parser.push(e)) byId.set(ev.id, ev);
+    return [...byId.values()];
+  };
+
+  it('yields the expected conversation', () => {
+    const events = run();
+    expect(events.map(label)).toEqual([
+      'user(terminal)', // typed prompt
+      'assistant',
+      'user(terminal)', // queued_command typed while busy
+      'user(terminal)', // prompt with an image
+      'notice', // compaction summary
+      'user(terminal)', // ! shell command
+      'actions', // its output
+      'notice', // /cc OFF
+      'user(terminal)', // ! false
+      'actions',
+      'assistant',
+    ]);
+  });
+
+  it('a prompt typed while busy (queued_command attachment) is a terminal message; meta and task notifications are not', () => {
+    const q = run().filter((e) => e.kind === 'user' && e.text === 'also check the readme');
+    expect(q).toHaveLength(1); // the later identical user entry (older Claude Code) is not shown twice
+    expect(q[0]).toMatchObject({ id: 'u3', origin: 'terminal', ts: '2026-03-01T10:03:00.000Z' });
+    expect(run().some((e) => e.kind === 'user' && /peer-message|task-notification/.test(e.text))).toBe(false);
+  });
+
+  it('a prompt with an image keeps its text and counts the images', () => {
+    const img = run().find((e) => e.id === 'u6');
+    expect(img).toMatchObject({ kind: 'user', origin: 'terminal', text: 'what is in this picture [Image #1]', images: 1 });
+  });
+
+  it('the compaction summary is a notice, never a user bubble', () => {
+    expect(run().find((e) => e.id === 'u7')).toEqual({ kind: 'notice', id: 'u7', ts: '2026-03-01T10:07:00.000Z', code: 'compacted' });
+  });
+
+  it('! shell mode: the command is a terminal message, the output an actions item', () => {
+    const events = run();
+    expect(events.find((e) => e.id === 'u8')).toMatchObject({ kind: 'user', origin: 'terminal', text: 'ls -a', shell: true });
+    expect(events.find((e) => e.id === 'u9')).toMatchObject({
+      kind: 'actions',
+      items: [{ toolUseId: 'u9', name: 'Shell', summary: 'ls -a', result: 'a.txt\nb.txt' }],
+    });
+    const err = events.find((e) => e.id === 'u17');
+    expect(err).toMatchObject({ kind: 'actions', items: [{ summary: 'false', result: 'boom', isError: true }] });
+    expect(events.some((e) => e.kind === 'user' && e.text.includes('<bash-'))).toBe(false);
+  });
+
+  it('sidechain (subagent) entries are skipped', () => {
+    expect(run().some((e) => (e.kind === 'user' || e.kind === 'assistant') && e.text.startsWith('subagent'))).toBe(false);
+  });
+
+  it('the /cc notice uses the hook rule: OFF disconnects, unknown arguments give no notice', () => {
+    const events = run();
+    expect(events.find((e) => e.id === 'u12')).toMatchObject({ kind: 'notice', code: 'disconnected' });
+    expect(events.find((e) => e.id === 'u13')).toBeUndefined();
+  });
+
+  it('an interrupt marker is not a message', () => {
+    expect(run().find((e) => e.id === 'u14')).toBeUndefined();
+  });
+});

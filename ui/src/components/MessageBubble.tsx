@@ -17,7 +17,16 @@ export function UserBubble({ event }: { event: User }) {
       data-bubble="user"
       className="max-w-[560px] self-end rounded-[14px_14px_4px_14px] bg-bubble-user px-3.5 py-2.5 text-[15px]"
     >
-      <p className="whitespace-pre-wrap break-words">{event.text}</p>
+      {event.shell ? (
+        <p className="whitespace-pre-wrap break-words font-mono text-[14px]">{`! ${event.text}`}</p>
+      ) : (
+        event.text && <p className="whitespace-pre-wrap break-words">{event.text}</p>
+      )}
+      {event.images ? (
+        <span className="mt-1 inline-block rounded-md bg-field px-2 py-0.5 text-[12px] text-muted">
+          {event.images === 1 ? t('ui.chat.image') : t('ui.chat.images', { n: event.images })}
+        </span>
+      ) : null}
       <p className="mt-1 flex items-center justify-end gap-1 text-[11px] text-bubble-meta">
         <span role="img" aria-label={label} title={label} className="flex">
           <Icon width={13} height={13} />

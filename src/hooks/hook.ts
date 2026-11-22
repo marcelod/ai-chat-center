@@ -26,6 +26,9 @@ import { clearBusy, setBusy } from '../core/busy.js';
 import { ensureHub } from './ensureHub.js';
 import { loadConfig } from '../core/config.js';
 import { t } from '../core/i18n.js';
+import { isCcCommand } from '../core/ccCommand.js';
+
+export { isCcCommand };
 import { resolveClaudePid } from './claudePid.js';
 
 export type HookEvent = 'prompt-submit' | 'notification';
@@ -48,21 +51,12 @@ export interface HookResult {
   exitCode: 0;
 }
 
-const CC_RE = /^\s*\/(?:ai-chat-center:)?cc(?:\s+(\S[\s\S]*?))?\s*$/i;
 const MAX_PREVIOUS_KEYS = 20;
 
 export const UNKNOWN_ARG = 'AI Chat Center: unknown argument. Use /cc or /cc off.';
 export const CONNECTED = 'AI Chat Center: connected';
 export const PID_UNKNOWN =
   'AI Chat Center: could not identify the Claude process; closing the terminal will be detected by the hub.';
-
-export function isCcCommand(prompt: unknown): 'on' | 'off' | 'unknown' | null {
-  if (typeof prompt !== 'string') return null;
-  const m = CC_RE.exec(prompt);
-  if (!m) return null;
-  if (m[1] === undefined) return 'on';
-  return m[1].toLowerCase() === 'off' ? 'off' : 'unknown';
-}
 
 const output = (context: string, systemMessage?: string): HookResult => ({
   exitCode: 0,

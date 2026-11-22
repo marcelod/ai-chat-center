@@ -20,6 +20,12 @@ type Props = {
 
 const NEAR_BOTTOM = 80;
 
+const NOTICE_KEY = {
+  connected: 'ui.chat.connectedAt',
+  disconnected: 'ui.chat.disconnectedAt',
+  compacted: 'ui.chat.compacted',
+} as const;
+
 function StatusPill({ state }: { state: SessionView['state'] }) {
   const t = useT();
   const label = t(`ui.status.${state}`);
@@ -88,7 +94,7 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
       case 'notice':
         return (
           <p key={e.id} className="self-center rounded-full bg-field px-3 py-1 text-xs text-muted">
-            {t(e.code === 'connected' ? 'ui.chat.connectedAt' : 'ui.chat.disconnectedAt', {
+            {t(NOTICE_KEY[e.code], {
               time: formatTime(e.ts, lang, t),
             })}
           </p>

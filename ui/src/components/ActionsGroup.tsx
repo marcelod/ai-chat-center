@@ -36,12 +36,20 @@ export function ActionsGroup({ items }: { items: ToolAction[] }) {
       {open && (
         <ul className="mt-2 w-[600px] max-w-full divide-y divide-line rounded-xl border border-line bg-surface">
           {items.map((i) => (
-            <li key={i.toolUseId} className="flex items-center gap-3 px-3 py-2.5">
-              <span className="text-[13px] font-semibold">{i.name}</span>
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted" title={i.summary}>
-                {i.summary}
-              </span>
-              <Status item={i} />
+            <li key={i.toolUseId} className="px-3 py-2.5">
+              <div className="flex items-center gap-3">
+                <span className="text-[13px] font-semibold">{i.name}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted" title={i.summary}>
+                  {i.summary}
+                </span>
+                <Status item={i} />
+              </div>
+              {/* `!` shell mode: the output is the point, so show it (other tools keep only their status). */}
+              {i.name === 'Shell' && i.result ? (
+                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-field p-2 font-mono text-xs">
+                  {i.result}
+                </pre>
+              ) : null}
             </li>
           ))}
         </ul>

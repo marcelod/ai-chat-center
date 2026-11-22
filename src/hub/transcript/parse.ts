@@ -1,9 +1,16 @@
 import { unwrapMessages } from '../../core/protocol.js';
+import { isCcCommand } from '../../core/ccCommand.js';
 import type { ChatEvent, ToolAction } from '../../shared/types.js';
 
 type ActionsEvent = Extract<ChatEvent, { kind: 'actions' }>;
 
 const RESULT_MAX = 2000;
+/** An older Claude Code also wrote a queued prompt as a user entry when it ran: shown once. */
+const QUEUED_DEDUP_MS = 30 * 60_000;
+const INTERRUPTED = '[Request interrupted by user';
+
+const tag = (content: string, name: string): string | undefined =>
+  new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(content)?.[1];
 const SUMMARY_MAX = 120;
 
 const truncate = (s: string, max: number) => (s.length > max ? s.slice(0, max) : s);
@@ -32,6 +39,20 @@ function resultText(content: unknown): string {
   return '';
 }
 
+/** Text blocks joined, and the number of image blocks, of a prompt (string or content blocks). */
+function promptParts(prompt: unknown): { text: string; images: number } {
+  if (typeof prompt === 'string') return { text: prompt, images: 0 };
+  if (!Array.isArray(prompt)) return { text: '', images: 0 };
+  const texts: string[] = [];
+  let images = 0;
+  for (const b of prompt) {
+    if (!isRecord(b)) continue;
+    if (b.type === 'text' && typeof b.text === 'string') texts.push(b.text);
+    else if (b.type === 'image') images++;
+  }
+  return { text: texts.join('\n'), images };
+}
+
 function snapshot(ev: ActionsEvent): ActionsEvent {
   return { ...ev, items: ev.items.map((i) => ({ ...i })) };
 }
@@ -41,9 +62,20 @@ function withIndex<T extends { id: string }>(events: T[], uuid: string): T[] {
   return events;
 }
 
+/**
+ * Turns transcript entries into chat events. Shapes handled besides plain messages and tools:
+ * prompts typed while Claude was busy (`queued_command` attachments), prompts with images, the
+ * compaction summary (a notice), `!` shell mode (`<bash-input>` / `<bash-stdout>` / `<bash-stderr>`),
+ * and `/cc` notices. Sidechain entries (subagents) are skipped: a subagent's work already shows as
+ * the parent's Task/Agent action.
+ */
 export class TranscriptParser {
   private open: ActionsEvent | null = null;
   private byToolUse = new Map<string, ActionsEvent>();
+  /** Queued prompts already shown, to skip a later identical user entry. */
+  private queued: { text: string; at: number }[] = [];
+  /** The last `!` command, for the output entry that follows it. */
+  private lastShell: string | null = null;
 
   /** @param keys trusted marker keys of the session; when given, other app-message blocks are ignored. */
   constructor(private readonly keys?: string[]) {}
@@ -54,11 +86,38 @@ export class TranscriptParser {
     const uuid = entry.uuid;
     const ts = entry.timestamp;
     if (typeof uuid !== 'string' || typeof ts !== 'string') return [];
+    if (entry.isSidechain === true) return [];
+    if (entry.type === 'attachment') return this.attachment(uuid, ts, entry.attachment);
     const message = isRecord(entry.message) ? entry.message : undefined;
     if (!message) return [];
     if (entry.type === 'assistant') return this.assistant(uuid, ts, message.content);
-    if (entry.type === 'user' && entry.isMeta !== true) return this.user(uuid, ts, message.content);
+    if (entry.type === 'user' && entry.isMeta !== true) {
+      if (entry.isCompactSummary === true) return [{ kind: 'notice', id: uuid, ts, code: 'compacted' }];
+      return this.user(uuid, ts, message.content);
+    }
     return [];
+  }
+
+  /** A prompt the user typed while Claude was busy is recorded only as a queued_command attachment. */
+  private attachment(uuid: string, ts: string, a: unknown): ChatEvent[] {
+    if (!isRecord(a) || a.type !== 'queued_command' || a.commandMode !== 'prompt') return [];
+    if (a.isMeta === true || a.humanTurn !== true) return [];
+    const { text, images } = promptParts(a.prompt);
+    const pasted = Array.isArray(a.imagePasteIds) ? a.imagePasteIds.length : 0;
+    if (!text.trim() && !images && !pasted) return [];
+    this.open = null;
+    this.queued.push({ text, at: Date.parse(ts) || 0 });
+    const n = Math.max(images, pasted);
+    return [{ kind: 'user', id: uuid, ts, text, origin: 'terminal', ...(n ? { images: n } : {}) }];
+  }
+
+  private takeQueued(text: string, ts: string): boolean {
+    const at = Date.parse(ts) || 0;
+    this.queued = this.queued.filter((q) => at - q.at <= QUEUED_DEDUP_MS);
+    const i = this.queued.findIndex((q) => q.text === text);
+    if (i < 0) return false;
+    this.queued.splice(i, 1);
+    return true;
   }
 
   private assistant(uuid: string, ts: string, content: unknown): ChatEvent[] {
@@ -94,7 +153,15 @@ export class TranscriptParser {
   }
 
   private user(uuid: string, ts: string, content: unknown): ChatEvent[] {
-    if (Array.isArray(content)) return this.toolResults(content);
+    if (Array.isArray(content)) {
+      const out: ChatEvent[] = this.toolResults(content);
+      const { text, images } = promptParts(content);
+      if ((text.trim() || images) && !text.startsWith(INTERRUPTED) && !this.takeQueued(text, ts)) {
+        this.open = null;
+        out.push({ kind: 'user', id: uuid, ts, text, origin: 'terminal', ...(images ? { images } : {}) });
+      }
+      return out;
+    }
     if (typeof content !== 'string') return [];
 
     const msgs = unwrapMessages(content, this.keys);
@@ -109,9 +176,29 @@ export class TranscriptParser {
     }
 
     const cmd = /<command-name>\s*(\/[^<\s]+)\s*<\/command-name>/.exec(content)?.[1];
-    if (cmd === '/cc' || cmd === '/ai-chat-center:cc') {
+    if (cmd) {
       const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(content)?.[1]?.trim();
-      return [{ kind: 'notice', id: uuid, ts, code: args === 'off' ? 'disconnected' : 'connected' }];
+      const cc = isCcCommand(args ? `${cmd} ${args}` : cmd); // the same rule as the hook
+      if (cc === 'on' || cc === 'off') return [{ kind: 'notice', id: uuid, ts, code: cc === 'on' ? 'connected' : 'disconnected' }];
+      if (cc === 'unknown') return [];
+    }
+
+    const shellIn = tag(content, 'bash-input');
+    if (shellIn !== undefined) {
+      this.open = null;
+      this.lastShell = shellIn;
+      return [{ kind: 'user', id: uuid, ts, text: shellIn, origin: 'terminal', shell: true }];
+    }
+    const stdout = tag(content, 'bash-stdout');
+    const stderr = tag(content, 'bash-stderr');
+    if (stdout !== undefined || stderr !== undefined) {
+      const err = (stderr ?? '').trim();
+      const result = [stdout ?? '', stderr ?? ''].filter((x) => x.trim()).join('\n');
+      const item: ToolAction = { toolUseId: uuid, name: 'Shell', summary: truncate(this.lastShell ?? '', SUMMARY_MAX), result: truncate(result, RESULT_MAX) };
+      if (err) item.isError = true;
+      this.lastShell = null;
+      this.open = null;
+      return [{ kind: 'actions', id: uuid, ts, items: [item] }];
     }
 
     const t = content.trimStart();
@@ -124,6 +211,7 @@ export class TranscriptParser {
       return [];
     }
     if (!content.trim()) return [];
+    if (this.takeQueued(content, ts)) return [];
     this.open = null;
     return [{ kind: 'user', id: uuid, ts, text: content, origin: 'terminal' }];
   }
