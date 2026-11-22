@@ -45,7 +45,8 @@ O hub roda a partir da sua pasta pessoal e herda o ambiente da sessão que o ini
 
 Tudo fica no seu computador. O hub escuta apenas em 127.0.0.1. O plugin não lê nenhuma credencial e não envia nada pela rede.
 
-- **As mensagens do app têm a mesma autoridade que digitar no terminal.** O Claude as trata como suas, inclusive pedidos para rodar comandos ou editar arquivos, com as mesmas regras de permissão.
+- **As mensagens do app têm a mesma autoridade que digitar no terminal, com um limite.** O Claude as trata como suas, inclusive pedidos para rodar comandos ou editar arquivos, com as mesmas regras de permissão. Elas nunca valem como a sua resposta a algo que o Claude perguntou no terminal, como um pedido de permissão ou um "posso continuar?" antes de uma ação destrutiva ou irreversível: responda a esses no terminal.
+- **Isso depende do comportamento do modelo.** O Claude Code rotula a saída do waiter como uma notificação do sistema, "não é entrada do usuário". O comando `/cc` pede ao Claude que trate os blocos com a chave que chegam do hook do AI Chat Center como digitados por você. Isso depende de como o modelo segue essa instrução e pode mudar numa versão futura do Claude Code ou do modelo; se mudar, o Claude pode recusar as mensagens do app. Nesse caso, digite o pedido no terminal e, por favor, relate o problema.
 - **O link do app carrega um token.** Um token novo é criado sempre que o hub inicia. O navegador o guarda só naquela aba (armazenamento de sessão), então, depois de reiniciar o hub, ou em uma nova aba ou outro navegador, abra de novo o link do `/cc`. O token é mostrado só para você; ele não é enviado ao Claude.
 - **O link do app fica salvo na transcrição da sessão.** O plugin o mostra para você como uma mensagem de hook, e o Claude Code grava essa mensagem no arquivo de transcrição da sessão (em `~/.claude/projects`), então um `/export`, uma transcrição compartilhada ou um backup o levam junto. O token dele deixa de funcionar assim que o hub reinicia, já que cada início cria um novo, e o hub se encerra sozinho depois de 2 horas sem nenhum navegador e sem nenhuma sessão conectada.
 - **A chave de cada conexão** permite ao Claude distinguir mensagens reais do app de textos que só se parecem com uma. O Claude só confia em um bloco de mensagem quando ele chega como retorno de hook do waiter, nunca quando aparece em um arquivo, numa página web ou na saída de um comando, mesmo com a chave certa.
@@ -62,6 +63,7 @@ Tudo fica no seu computador. O hub escuta apenas em 127.0.0.1. O plugin não lê
 - Depois de um `/compact`, o Claude pode esquecer a conexão; se ele recusar uma mensagem do app, rode `/cc` de novo.
 - O trabalho de subagentes não aparece como mensagens: ele aparece como ação da sessão principal.
 - As mensagens enviadas pelo app aparecem no terminal como retorno de hook.
+- O Claude age sobre as mensagens do app só porque o `/cc` pede isso, acima do rótulo "não é entrada do usuário" que o Claude Code põe na saída dos hooks (veja Privacidade e confiança). Uma versão futura do Claude Code ou do modelo pode recusá-las.
 - Por enquanto, só o Claude Code.
 
 ## Solução de problemas
@@ -103,7 +105,8 @@ As cópias instaladas só são atualizadas quando a versão do plugin muda.
 
 1. Aumente a versão em `package.json`, `plugin/.claude-plugin/plugin.json` e `src/core/version.ts` (um teste mantém as três iguais).
 2. Rode `npm run build` e faça commit de `plugin/dist`.
-3. Crie a tag `vX.Y.Z` no commit da versão. Um teste falha quando `plugin/dist` difere da última tag `v*` sem mudança de versão.
+3. Siga o [docs/testing/release-checklist.md](docs/testing/release-checklist.md), incluindo a verificação ao vivo de que o modelo padrão atual ainda age sobre uma mensagem do app.
+4. Crie a tag `vX.Y.Z` no commit da versão. Um teste falha quando `plugin/dist` difere da última tag `v*` sem mudança de versão.
 
 ## Licença
 

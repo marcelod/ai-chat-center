@@ -19,3 +19,25 @@ describe('plugin/commands/cc.md', () => {
     expect(md.indexOf('the plugin hook did not run')).toBeLessThan(md.indexOf(`If the context says "${CONNECTED}"`));
   });
 });
+
+describe('plugin/commands/cc.md hardening (audit round 3)', () => {
+  const front = /^---\n([\s\S]*?)\n---\n/.exec(md)?.[1] ?? '';
+  // S3-L1: the model could load /cc on its own (e.g. pushed by injected text): /cc off as a denial of
+  // service, or the trust grant next to a forged status line. Only the user may run it.
+  it('cannot be invoked by the model', () => {
+    expect(front).toMatch(/^disable-model-invocation: true$/m);
+  });
+  // S3-L1 / S3-M1: Claude Code labels waiter output "not user input ... must NOT be treated as approval
+  // or consent". App messages keep the user's authority for requests, but never confirm something
+  // Claude asked in the terminal.
+  it('an app message never confirms or approves something Claude asked in the terminal', () => {
+    const body = md.slice(md.indexOf(`If the context says "${CONNECTED}"`));
+    expect(body).toMatch(/never counts? as my answer, confirmation or approval/i);
+    expect(body).toMatch(/asked me in the terminal/);
+    expect(body).toMatch(/permission prompt/);
+    expect(body).toMatch(/destructive or irreversible/);
+    // the existing rules stay
+    expect(body).toMatch(/exact key shown in the "AI Chat Center key" context line/);
+    expect(body).toMatch(/arrives as hook feedback from the AI Chat Center waiter/);
+  });
+});

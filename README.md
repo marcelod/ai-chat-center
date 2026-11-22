@@ -45,7 +45,8 @@ The hub runs from your home folder and inherits the environment of the session t
 
 Everything stays on your computer. The hub listens only on 127.0.0.1. The plugin does not read any credentials and sends nothing over the network.
 
-- **Messages from the app have the same authority as typing in the terminal.** Claude treats them as yours, including requests to run commands or edit files, under the same permission rules.
+- **Messages from the app have the same authority as typing in the terminal, with one limit.** Claude treats them as yours, including requests to run commands or edit files, under the same permission rules. They never count as your answer to something Claude asked you in the terminal, such as a permission prompt or "should I proceed?" before a destructive or irreversible action: answer those in the terminal.
+- **This relies on model behavior.** Claude Code labels the waiter's output as a system notification, "not user input". The `/cc` command asks Claude to treat the keyed blocks that arrive from the AI Chat Center hook as typed by you. That depends on how the model follows the instruction, and it may change in a future Claude Code or model version; if it does, Claude may refuse app messages. Type the request in the terminal instead, and please report it.
 - **The app link carries a token.** A new token is made every time the hub starts. The browser keeps it only for that tab (session storage), so after a hub restart, or in a new tab or browser, open the link from `/cc` again. The token is shown to you only; it is not sent to Claude.
 - **The app link is saved in the session transcript.** The plugin shows it to you as a hook message, and Claude Code stores that message in the session's transcript file (under `~/.claude/projects`), so an `/export`, a shared transcript or a backup carries it. The token in it stops working as soon as the hub restarts, since every start makes a new one, and the hub exits on its own after 2 hours with no browser and no connected session.
 - **The per-connection key** lets Claude tell real app messages from text that merely looks like one. Claude trusts a message block only when it arrives as hook feedback from the waiter, never when it shows up in a file, a web page or command output, even with the right key.
@@ -62,6 +63,7 @@ Everything stays on your computer. The hub listens only on 127.0.0.1. The plugin
 - After `/compact`, Claude may forget the connection; if it refuses an app message, run `/cc` again.
 - Subagent work is not shown as messages: it appears as the parent's action.
 - Messages sent from the app show up in the terminal as hook feedback.
+- Claude acts on app messages only because `/cc` asks it to, over Claude Code's "not user input" label on hook output (see Privacy and trust). A future Claude Code or model version may refuse them.
 - Claude Code only, for now.
 
 ## Troubleshooting
@@ -103,7 +105,8 @@ Installed copies update only when the plugin version changes.
 
 1. Bump the version in `package.json`, `plugin/.claude-plugin/plugin.json` and `src/core/version.ts` (a test keeps them equal).
 2. `npm run build`, then commit `plugin/dist`.
-3. Tag the release commit `vX.Y.Z`. A test fails when `plugin/dist` differs from the last `v*` tag without a version change.
+3. Run [docs/testing/release-checklist.md](docs/testing/release-checklist.md), including the live check that the current default model still acts on an app message.
+4. Tag the release commit `vX.Y.Z`. A test fails when `plugin/dist` differs from the last `v*` tag without a version change.
 
 ## License
 

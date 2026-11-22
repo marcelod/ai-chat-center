@@ -11,6 +11,17 @@
 //   node scripts/e2e/drive-session.mjs send --state <dir> <chunk> [<chunk>...]
 //   node scripts/e2e/drive-session.mjs screen --state <dir>
 //   node scripts/e2e/drive-session.mjs wait --state <dir> --text <substring> [--secs 60]
+//   node scripts/e2e/drive-session.mjs app  --state <dir> --home <AI_CHAT_CENTER_HOME> --port <port>
+//        [--session <id>] [--expect <word>] [--secs 90]
+//
+// `app` is the release check that the current model still acts on a keyed app message (Claude Code
+// labels the waiter's output "not user input"; /cc asks Claude to treat keyed blocks as typed by the
+// user). It POSTs "Reply with exactly: <word>" as the app does (the session defaults to the most
+// recently connected one) and watches the screen:
+//   ACTED      exit 0  the reply with <word> appeared;
+//   REFUSED    exit 2  the message was delivered ("Stop hook feedback" appeared) but no reply with <word>
+//                      came within --secs: the model declined it. Treat as a release blocker;
+//   UNDELIVERED exit 1 nothing reached the session within --secs (check waiter.log).
 //
 // <state> holds: raw.log (all pty output), screen.txt (rendered screen, refreshed every 500 ms),
 // keys (pending chunks, one JSON string per line), pid (the claude pid), exit (exit code).
@@ -160,12 +171,61 @@ async function wait(opts) {
   process.exitCode = 1;
 }
 
+async function app(opts) {
+  const f = files(path.resolve(opts.state));
+  const home = path.resolve(opts.home);
+  const token = fs.readFileSync(path.join(home, 'token'), 'utf8').trim();
+  let sid = opts.session;
+  if (!sid) {
+    const dir = path.join(home, 'sessions');
+    sid = fs
+      .readdirSync(dir)
+      .filter((n) => n.endsWith('.json'))
+      .map((n) => JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')))
+      .filter((r) => !r.disconnectedAt)
+      .sort((a, b) => Date.parse(b.connectedAt) - Date.parse(a.connectedAt))[0]?.sessionId;
+  }
+  if (!sid) throw new Error('no connected session in ' + home);
+  const word = opts.expect ?? `APP-CHECK-${Date.now().toString(36).toUpperCase()}`;
+  // Delivery is detected in the raw pty output written after the POST (the screen may scroll).
+  const rawFrom = fs.existsSync(f.raw) ? fs.statSync(f.raw).size : 0;
+  const rawSince = () => {
+    try {
+      return fs.readFileSync(f.raw).subarray(rawFrom).toString('utf8');
+    } catch {
+      return '';
+    }
+  };
+  const res = await fetch(`http://127.0.0.1:${opts.port}/api/sessions/${encodeURIComponent(sid)}/messages`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ text: `Reply with exactly: ${word}` }),
+  });
+  if (res.status !== 202) throw new Error(`POST -> ${res.status}`);
+  const end = Date.now() + Number(opts.secs ?? 90) * 1000;
+  let delivered = false;
+  while (Date.now() < end) {
+    const s = fs.existsSync(f.screen) ? fs.readFileSync(f.screen, 'utf8') : '';
+    // The word also appears in the delivered block only when the transcript is expanded; a reply line
+    // starts with the assistant bullet.
+    if (s.split('\n').some((l) => /^\s*[●⏺]\s/.test(l) && l.includes(word))) {
+      console.log(`ACTED ${word}`);
+      return;
+    }
+    if (rawSince().includes('hook feedback')) delivered = true;
+    await sleep(500);
+  }
+  console.log(delivered ? `REFUSED ${word}: delivered, but the model did not act on it` : `UNDELIVERED ${word}`);
+  process.exitCode = delivered ? 2 : 1;
+}
+
 const { opts, pos } = parseArgs(rest);
 if (cmd === 'run') await run(opts);
 else if (cmd === 'send') send(opts, pos);
 else if (cmd === 'screen') screen(opts);
 else if (cmd === 'wait') await wait(opts);
+else if (cmd === 'app') await app(opts);
 else {
-  console.error('usage: drive-session.mjs run|send|screen|wait (see header)');
+  console.error('usage: drive-session.mjs run|send|screen|wait|app (see header)');
   process.exitCode = 1;
 }
