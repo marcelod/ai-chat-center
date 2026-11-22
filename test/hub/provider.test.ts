@@ -51,6 +51,27 @@ describe('provider', () => {
     expect(v.state).toBe('disconnected');
     expect((await getRegistration('s1'))!.disconnectReason).toBe('exited');
   });
+  // Audit S2-N3 / R2-N1: exit detection that runs without any browser (the hub's background check).
+  it('detectExits marks exits with the same rules: grace, 3 fresh misses, never on a failed lookup', async () => {
+    await reg();
+    await reg('s2');
+    let t = Date.now();
+    let list: LiveSession[] | null = [live({ sessionId: 's2' })];
+    const p = new ClaudeCodeProvider(async () => list, { now: () => t });
+    for (let i = 0; i < 2; i++) { t += 6000; expect(await p.detectExits()).toEqual([]); } // 2 misses, in grace
+    t += 20000;
+    list = null;
+    for (let i = 0; i < 4; i++) { t += 6000; expect(await p.detectExits()).toEqual([]); } // failed lookups: no marking
+    list = [live({ sessionId: 's2' })];
+    const gone: string[] = [];
+    t += 6000;
+    gone.push(...(await p.detectExits())); // 3rd miss, past the grace period
+    expect(gone).toEqual(['s1']);
+    t += 6000;
+    expect(await p.detectExits()).toEqual([]); // already marked
+    expect((await getRegistration('s1'))!.disconnectReason).toBe('exited');
+    expect((await getRegistration('s2'))!.disconnectedAt).toBeUndefined();
+  });
   it('failed lookup never marks sessions exited', async () => {
     await reg();
     let t = Date.now() + 60000;

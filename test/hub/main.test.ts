@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import http from 'node:http';
@@ -200,6 +200,61 @@ describe('main', () => {
     } finally {
       await h!.close();
     }
+  });
+  // Audit S2-N3 / R2-N1: claude quit without /cc off and no browser is open. The registration must not
+  // keep the hub up forever: a dead stored pid does not count as active.
+  it('a registration whose stored pid is dead does not keep the hub up', async () => {
+    const { register } = await import('../../src/core/registry.js');
+    const { spawnSync } = await import('node:child_process');
+    const dead = spawnSync(process.execPath, ['-e', '']).pid!; // exited: its pid is dead
+    await register({ sessionId: 'gone', transcriptPath: path.join(home, 'none.jsonl'), cwd: home, pid: dead, key: 'k' });
+    let idle = 0;
+    const h = await startHub({ idleMs: 60, idleCheckMs: 10, onIdle: () => void idle++ });
+    try {
+      await vi.waitFor(() => expect(idle).toBe(1), { timeout: 5000, interval: 20 });
+    } finally {
+      await h!.close();
+    }
+  });
+  // Audit S2-N3: exits are detected in the background (every 5 min by default) even with no browser,
+  // so a session whose pid is unknown or alive-but-reused is still marked exited and the hub can idle out.
+  it('background exit detection runs without a browser and lets the idle exit fire', async () => {
+    const { register, getRegistration } = await import('../../src/core/registry.js');
+    const old = new Date(Date.now() - 3600_000).toISOString(); // past the grace period
+    await register({ sessionId: 'nopid', transcriptPath: path.join(home, 'none.jsonl'), cwd: home, pid: null, key: 'k', connectedAt: old });
+    let idle = 0;
+    let lookups = 0;
+    const h = await startHub({
+      idleMs: 60,
+      idleCheckMs: 10,
+      exitCheckMs: 10,
+      listLive: async () => (lookups++, []),
+      onIdle: () => void idle++,
+    });
+    try {
+      await vi.waitFor(() => expect(idle).toBe(1), { timeout: 5000, interval: 20 });
+      expect(lookups).toBeGreaterThanOrEqual(3);
+      expect((await getRegistration('nopid'))!.disconnectReason).toBe('exited');
+    } finally {
+      await h!.close();
+    }
+  });
+  it('background exit detection never marks a session when the lookup fails', async () => {
+    const { register, getRegistration } = await import('../../src/core/registry.js');
+    const old = new Date(Date.now() - 3600_000).toISOString();
+    await register({ sessionId: 'nopid', transcriptPath: path.join(home, 'none.jsonl'), cwd: home, pid: null, key: 'k', connectedAt: old });
+    let lookups = 0;
+    const h = await startHub({ exitCheckMs: 10, listLive: async () => (lookups++, null) });
+    try {
+      await vi.waitFor(() => expect(lookups).toBeGreaterThanOrEqual(5), { timeout: 5000, interval: 20 });
+      expect((await getRegistration('nopid'))!.disconnectedAt).toBeUndefined();
+    } finally {
+      await h!.close();
+    }
+  });
+  it('the background exit check runs every 5 minutes by default', async () => {
+    const { EXIT_CHECK_MS } = await import('../../src/hub/main.js');
+    expect(EXIT_CHECK_MS).toBe(5 * 60_000);
   });
   it('an open browser stream keeps the hub alive', async () => {
     let idle = 0;

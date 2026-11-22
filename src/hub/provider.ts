@@ -53,9 +53,9 @@ export class ClaudeCodeProvider implements Provider {
     this.now = opts.now ?? Date.now;
   }
 
-  private async live(): Promise<Live> {
+  private async live(force = false): Promise<Live> {
     const t = this.now();
-    if (this.liveCache && t >= this.liveCache.at && t - this.liveCache.at < LIVE_TTL_MS) {
+    if (!force && this.liveCache && t >= this.liveCache.at && t - this.liveCache.at < LIVE_TTL_MS) {
       return { list: this.liveCache.value, ok: true, fresh: false };
     }
     const value = await this.listLive();
@@ -119,6 +119,31 @@ export class ClaudeCodeProvider implements Provider {
   private async dropStaleBusy(sid: string): Promise<void> {
     const age = await busyAge(sid, this.now());
     if (age !== null && age > STALE_BUSY_MS) await clearBusy(sid);
+  }
+
+  /**
+   * Exit detection on its own, for the hub's background check (no browser needed). Same rules as
+   * listSessions: a failed lookup marks nothing; a session is marked exited only after the grace period
+   * and 3 fresh lookups in a row that do not list it. Always a fresh lookup (it runs every few minutes).
+   * Returns the sessions marked exited.
+   */
+  async detectExits(): Promise<string[]> {
+    const live = await this.live(true);
+    if (!live.ok) return [];
+    const listed = new Set(live.list.map((l) => l.sessionId));
+    const gone: string[] = [];
+    for (const reg of await listRegistrations()) {
+      const sid = reg.sessionId;
+      if (!isActive(reg)) continue;
+      if (listed.has(sid)) {
+        this.misses.delete(sid);
+      } else if (this.shouldMarkExited(sid, reg.connectedAt, live)) {
+        await markDisconnected(sid, 'exited');
+        this.misses.delete(sid);
+        gone.push(sid);
+      }
+    }
+    return gone;
   }
 
   async listSessions(): Promise<{ connected: SessionView[]; others: LiveSession[] }> {

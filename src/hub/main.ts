@@ -7,8 +7,9 @@ import { paths } from '../core/paths.js';
 import { ensureDir, readJson, withFsRetry, writeJsonAtomic } from '../core/fsAtomic.js';
 import { newChallenge, proofMatches } from '../core/healthProof.js';
 import { ClaudeCodeProvider } from './provider.js';
-import { acquireLock, releaseLock } from '../core/lock.js';
-import { isActive, listRegistrations, pruneRegistrations } from '../core/registry.js';
+import { acquireLock, releaseLock, isAlive } from '../core/lock.js';
+import { isActive, listRegistrations, pruneRegistrations, type Registration } from '../core/registry.js';
+import type { LiveSession } from '../shared/types.js';
 import { createHub } from './server.js';
 
 const TOKEN_RE = /^[0-9a-f]{64}$/;
@@ -17,10 +18,19 @@ export const PRUNE_AGE_MS = 30 * 86_400_000;
 const PRUNE_EVERY_MS = 10 * 60_000;
 /** The hub exits after this long with no browser connected and no active session. */
 export const IDLE_EXIT_MS = 2 * 3600_000;
+/** Background exit detection (one `claude agents` lookup), with or without a browser connected. */
+export const EXIT_CHECK_MS = 5 * 60_000;
+
+/** Counts toward keeping the hub up: active, and its claude process is not known to be dead. */
+const holdsHub = (r: Registration): boolean => isActive(r) && (r.pid === null || isAlive(r.pid));
 
 export interface StartHubOptions {
   idleMs?: number;
   idleCheckMs?: number;
+  /** How often exits are detected in the background. Default EXIT_CHECK_MS. */
+  exitCheckMs?: number;
+  /** Live session lookup (tests). Default: `claude agents`. */
+  listLive?: () => Promise<LiveSession[] | null>;
   /** Called once when the hub has been idle for idleMs. Default (main): close and exit. */
   onIdle?: () => void;
 }
@@ -131,7 +141,7 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
     const base = pickPort();
     const tries = base === 0 ? 1 : 11;
     const staticDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'ui');
-    const provider = new ClaudeCodeProvider();
+    const provider = opts.listLive ? new ClaudeCodeProvider(opts.listLive) : new ClaudeCodeProvider();
     let lastErr: unknown;
     for (let i = 0; i < tries && !hub; i++) {
       try {
@@ -151,6 +161,21 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
     log(`hub listening on ${hub.url}`);
     await prune(log);
     const pruneTimer = setInterval(() => void prune(log), PRUNE_EVERY_MS);
+    // Exits used to be detected only while a browser polled, so a session closed without /cc off kept
+    // its registration active (and the hub up) forever. Never overlapping; errors only logged.
+    let exitCheckRunning = false;
+    const exitTimer = setInterval(async () => {
+      if (exitCheckRunning) return;
+      exitCheckRunning = true;
+      try {
+        const gone = await provider.detectExits();
+        if (gone.length) log(`marked ${gone.length} exited session(s)`);
+      } catch (e) {
+        log(`exit check failed: ${(e as Error).message}`);
+      } finally {
+        exitCheckRunning = false;
+      }
+    }, opts.exitCheckMs ?? EXIT_CHECK_MS);
 
     const started = hub;
     const idleMs = opts.idleMs ?? IDLE_EXIT_MS;
@@ -158,7 +183,7 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
     let idleFired = false;
     const idleTimer = setInterval(async () => {
       try {
-        if (started.clients() > 0 || (await listRegistrations()).some(isActive)) {
+        if (started.clients() > 0 || (await listRegistrations()).some(holdsHub)) {
           lastUsed = Date.now();
           return;
         }
@@ -179,6 +204,7 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
         if (done) return;
         done = true;
         clearInterval(pruneTimer);
+        clearInterval(exitTimer);
         clearInterval(idleTimer);
         await started.close();
         const cur = await readJson<{ pid?: number; port?: number }>(paths().hubJson);
