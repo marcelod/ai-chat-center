@@ -1,7 +1,7 @@
 {
   "name": "ai-chat-center",
   "version": "0.2.1",
-  "description": "Follow and reply to your terminal AI coding sessions from a WhatsApp-style local web app.",
+  "description": "Follow and reply to your terminal AI coding sessions from a WhatsApp-style local web app. Requires Node.js 18+ on PATH and Claude Code ≥ 2.1.139.",
   "author": {
     "name": "Marcelo Diniz"
   },

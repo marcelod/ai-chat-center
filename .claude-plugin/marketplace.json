@@ -1,12 +1,12 @@
 {
   "name": "ai-chat-center",
-  "description": "AI Chat Center: a WhatsApp-style local web app for your terminal AI coding sessions.",
+  "description": "AI Chat Center: a WhatsApp-style local web app for your terminal AI coding sessions. Requires Node.js 18+ on PATH and Claude Code ≥ 2.1.139.",
   "owner": { "name": "Marcelo Diniz" },
   "plugins": [
     {
       "name": "ai-chat-center",
       "source": "./plugin",
-      "description": "Follow and reply to your terminal AI coding sessions from a WhatsApp-style local web app."
+      "description": "Follow and reply to your terminal AI coding sessions from a WhatsApp-style local web app. Requires Node.js 18+ on PATH and Claude Code ≥ 2.1.139."
     }
   ]
 }

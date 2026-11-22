@@ -20,6 +20,7 @@ O AI Chat Center é um plugin para o Claude Code mais um pequeno app local. Ele 
 
 - **Para usar:** Claude Code 2.1.139 ou mais recente (os hooks usam a forma exec, `command` mais `args`, adicionada nessa versão) e Node.js 18 ou mais recente. O plugin não precisa de `npm install`, e os hooks não precisam de shell (nem do Git Bash no Windows).
 - **O Node.js 18+ precisa estar no PATH que o Claude Code enxerga; sem ele, todo prompt mostra um erro de hook. Desinstale o plugin ou instale o Node.**
+- **Windows:** o instalador nativo do Claude Code não instala o Node. Instale o Node.js 18 ou mais recente (por exemplo pelo nodejs.org, ou com `winget install OpenJS.NodeJS.LTS`) e abra um terminal novo para que o Claude Code o encontre no PATH (`node -v` deve funcionar ali). Sem ele, todo prompt de toda sessão mostra um erro de hook.
 - **Para desenvolver:** Node.js 22.22.2 ou um 22.x mais recente, ou Node.js 24.15 ou mais recente (`^22.22.2 || >=24.15`, exigido pelo jsdom nos testes da interface).
 
 ## Instalação

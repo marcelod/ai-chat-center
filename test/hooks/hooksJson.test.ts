@@ -74,6 +74,12 @@ describe('hooks.json', () => {
     expect(ups[1]).toMatchObject({ asyncRewake: true, timeout: 86400 });
   });
 
+  // Audit S3-M2: with Node missing every hook invocation is an error on screen. Notification only acts
+  // on these types (hook.ts); idle_prompt alone fired after every minute of idling.
+  it('Notification runs only for the types the hook uses', () => {
+    expect(cfg.hooks.Notification.map((g) => g.matcher)).toEqual(['permission_prompt|elicitation_dialog|elicitation_url_dialog|agent_needs_input']);
+  });
+
   it('Notification runs the hook bundle', () => {
     expect(cfg.hooks.Notification.flatMap((g) => g.hooks).map((h) => h.args)).toEqual([['${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs', 'notification']]);
   });
