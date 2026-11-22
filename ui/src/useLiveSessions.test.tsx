@@ -320,3 +320,49 @@ describe('queued messages from the hub', () => {
     expect(result.current.pending.s1 ?? []).toHaveLength(0);
   });
 });
+
+// Audit S3-L3 / R3-F8: browsers keep EventSource open in background tabs, so the hub ran `claude agents`
+// every 5 s as long as any tab existed. The stream now closes while the page is hidden (unless browser
+// notifications are on: they are what a hidden tab is for) and reopens, resynced, when it is visible.
+describe('page visibility', () => {
+  const setHidden = (hidden: boolean) => {
+    Object.defineProperty(document, 'hidden', { value: hidden, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  };
+  afterEach(() => setHidden(false));
+  it('closes the stream while hidden and reopens it, with a resync, when visible', async () => {
+    const closes: number[] = [];
+    vi.mocked(api.openStream).mockImplementation((cb, h) => {
+      push = cb;
+      handlers = h ?? {};
+      const n = vi.mocked(api.openStream).mock.calls.length;
+      return () => void closes.push(n);
+    });
+    vi.mocked(api.openStream).mockClear();
+    const { result } = renderHook(() => useLiveSessions());
+    await waitFor(() => expect(result.current.data.connected).toHaveLength(2));
+    expect(api.openStream).toHaveBeenCalledTimes(1);
+    const fetches = vi.mocked(api.getSessions).mock.calls.length;
+    act(() => setHidden(true));
+    expect(closes).toEqual([1]);
+    act(() => setHidden(false));
+    expect(api.openStream).toHaveBeenCalledTimes(2);
+    act(() => handlers.onOpen?.());
+    await waitFor(() => expect(vi.mocked(api.getSessions).mock.calls.length).toBeGreaterThan(fetches));
+  });
+  it('keeps the stream open while hidden when browser notifications are on', async () => {
+    const notify = await import('./notify');
+    const spy = vi.spyOn(notify, 'notificationsEnabled').mockReturnValue(true);
+    let closed = 0;
+    vi.mocked(api.openStream).mockImplementation((cb, h) => {
+      push = cb;
+      handlers = h ?? {};
+      return () => void closed++;
+    });
+    const { result } = renderHook(() => useLiveSessions());
+    await waitFor(() => expect(result.current.data.connected).toHaveLength(2));
+    act(() => setHidden(true));
+    expect(closed).toBe(0);
+    spy.mockRestore();
+  });
+});

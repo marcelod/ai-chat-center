@@ -271,6 +271,8 @@ export function useLiveSessions() {
     let closed = false;
     let failures = 0;
     let failed = false;
+    /** Stream closed on purpose while the page is hidden. */
+    let paused = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let close: (() => void) | undefined;
 
@@ -288,7 +290,7 @@ export function useLiveSessions() {
           if (keep) void loadEvents(sid);
         },
         onError: () => {
-          if (closed || timer !== undefined) return;
+          if (closed || paused || timer !== undefined) return;
           failed = true;
           close?.();
           // EventSource hides the status: ask once over plain HTTP. A 401 (the hub restarted with a new
@@ -296,14 +298,34 @@ export function useLiveSessions() {
           void refresh();
           timer = setTimeout(() => {
             timer = undefined;
-            if (!closed) connect();
+            if (!closed && !paused) connect();
           }, nextDelay(failures++));
         },
       });
     };
     connect();
+    // A hidden tab keeps no stream open (the hub only polls, and runs `claude agents`, while a stream is
+    // open), unless browser notifications are on: they are what a hidden tab is for. When the page is
+    // visible again the stream reopens and, as after any reconnect, resyncs.
+    const onVisibility = () => {
+      if (closed) return;
+      if (document.hidden && !paused && !notificationsEnabled()) {
+        paused = true;
+        if (timer !== undefined) clearTimeout(timer);
+        timer = undefined;
+        close?.();
+        close = undefined;
+      } else if (!document.hidden && paused) {
+        paused = false;
+        failed = true; // resync on open
+        failures = 0;
+        connect();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       closed = true;
+      document.removeEventListener('visibilitychange', onVisibility);
       if (timer !== undefined) clearTimeout(timer);
       close?.();
     };
