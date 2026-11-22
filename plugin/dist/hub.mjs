@@ -707,12 +707,13 @@ var TranscriptReader = class {
 // src/core/claudeAgents.ts
 import { execFile } from "node:child_process";
 import os2 from "node:os";
-function runClaudeAgentsJson() {
+function runClaudeAgentsJson(platform = process.platform) {
+  const win = platform === "win32";
   return new Promise((resolve, reject) => {
     execFile(
-      "claude",
-      ["agents", "--json"],
-      { cwd: os2.homedir(), shell: process.platform === "win32", windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
+      win ? "claude agents --json" : "claude",
+      win ? [] : ["agents", "--json"],
+      { cwd: os2.homedir(), shell: win, windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => err ? reject(err) : resolve(String(stdout))
     );
   });
@@ -757,6 +758,8 @@ var SessionDisconnectedError = class extends Error {
 var LIVE_TTL_MS = 5e3;
 var STALE_BUSY_MS = 1e4;
 var GRACE_MS = 15e3;
+var WAITER_HEARTBEAT_STALE_MS = 3e4;
+var STALLED_AFTER_MS = 15e3;
 var MISSES_TO_EXIT = 3;
 var ClaudeCodeProvider = class {
   constructor(listLive = queryLiveSessions, opts = {}) {
@@ -833,6 +836,20 @@ var ClaudeCodeProvider = class {
     const age = this.now() - (Date.parse(connectedAt) || 0);
     return m.count >= MISSES_TO_EXIT && age > GRACE_MS;
   }
+  /**
+   * Messages have waited a while for an idle session and no waiter holds a fresh lock: nothing will
+   * deliver them until the next turn (a waiter that hit its 24 h budget, or one that died). The app then
+   * tells the user to send any prompt in the terminal.
+   */
+  async deliveryStalled(sid, queued) {
+    const oldest = Math.min(...queued.map((m) => Date.parse(m.createdAt)).filter((n) => !Number.isNaN(n)));
+    if (!Number.isFinite(oldest) || this.now() - oldest < STALLED_AFTER_MS) return false;
+    try {
+      return this.now() - (await fs6.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
+    } catch {
+      return true;
+    }
+  }
   async dropStaleBusy(sid) {
     const age = await busyAge(sid, this.now());
     if (age !== null && age > STALE_BUSY_MS) await clearBusy(sid);
@@ -901,15 +918,17 @@ var ClaudeCodeProvider = class {
       } else state = l?.status ?? "idle";
       if (!disconnected && live.ok && l?.status === "idle") await this.dropStaleBusy(sid);
       const cwd = l?.cwd ?? reg.cwd;
+      const queued = disconnected ? [] : await peek(sid);
       const view = {
         sessionId: sid,
         name: l?.name || path6.basename(cwd),
         cwd,
         state,
-        pendingAppMessageIds: disconnected ? [] : (await peek(sid)).map((m) => m.id),
+        pendingAppMessageIds: queued.map((m) => m.id),
         _sort: Date.parse(reg.connectedAt) || 0
       };
       if (waitingKind) view.waitingKind = waitingKind;
+      if (state === "idle" && await this.deliveryStalled(sid, queued)) view.deliveryStalled = true;
       if (lastEvent) view.lastEvent = lastEvent;
       connected.push(view);
     }
@@ -971,7 +990,8 @@ var ClaudeCodeProvider = class {
         s.waitingKind ?? null,
         s.name,
         s.lastEvent?.id ?? null,
-        s.pendingAppMessageIds
+        s.pendingAppMessageIds,
+        s.deliveryStalled ?? false
       ])
     });
     if (signature !== this.lastSignature) {

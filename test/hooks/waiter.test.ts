@@ -389,3 +389,105 @@ describe('waiter start: same-process session switches', () => {
     expect(await getRegistration('s1')).toMatchObject({ pid: 7, transcriptPath: '/old.jsonl' });
   });
 });
+
+// Audit R3-F1: a turn started by an app message and interrupted (Esc) never fires Stop, so no waiter
+// was left and every later app message stayed queued. A `prompt` waiter (UserPromptSubmit) is armed
+// during every turn; a busy marker left by an interrupted turn is dropped once the session is idle.
+describe('waiter prompt: a waiter during every turn', () => {
+  const ageBusy = async (sid: string, ms: number) => {
+    const t = new Date(Date.now() - ms);
+    await fsp.utimes(paths().busyFile(sid), t, t);
+  };
+  const promptOpts = (extra: WaiterOptions = {}): WaiterOptions => ({ promptSettleMs: 0, status: async () => 'busy', ...extra });
+
+  it('a /cc prompt arms nothing (its own Stop does)', async () => {
+    await reg('s1');
+    await enqueue('s1', 'x');
+    for (const prompt of ['/cc', '/cc off', '/ai-chat-center:cc', '/cc bogus']) {
+      expect(await wait('prompt', { prompt }, promptOpts())).toEqual({ exitCode: 0, stderr: '' });
+    }
+    expect(await peek('s1')).toHaveLength(1);
+  });
+  it('an unconnected session arms nothing', async () => {
+    expect(await wait('prompt', { prompt: 'hi' }, promptOpts())).toEqual({ exitCode: 0, stderr: '' });
+  });
+  it('never clears busy, holds the lock during the turn, and delivers once the turn ends (Stop clears busy)', async () => {
+    await reg('s1');
+    await setBusy('s1');
+    await setWaiting('s1', 'permission');
+    await enqueue('s1', 'during the turn');
+    let done = false;
+    const p = wait('prompt', { prompt: 'hi' }, promptOpts()).then((r) => ((done = true), r));
+    await sleep(80);
+    expect(done).toBe(false);
+    expect(await isBusy('s1')).toBe(true);
+    expect(await getWaiting('s1')).not.toBeNull();
+    // Stop fires: its waiter clears busy, loses the lock race and exits; the prompt waiter delivers.
+    expect(await wait('stop')).toEqual({ exitCode: 0, stderr: '' });
+    const r = await p;
+    expect(r.exitCode).toBe(2);
+    expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['during the turn']);
+  });
+  it('does not drain before the prompt hook had time to set busy (settle delay)', async () => {
+    await reg('s1');
+    await enqueue('s1', 'x');
+    let done = false;
+    const p = wait('prompt', { prompt: 'hi' }, promptOpts({ promptSettleMs: 300 })).then((r) => ((done = true), r));
+    await sleep(100);
+    expect(done).toBe(false);
+    expect(await peek('s1')).toHaveLength(1);
+    expect((await p).exitCode).toBe(2);
+  });
+  it('interrupted turn: a stale busy marker is dropped once the session is idle, and the message delivered', async () => {
+    await reg('s1');
+    await setBusy('s1');
+    let statusCalls = 0;
+    const p = wait('prompt', { prompt: 'hi' }, promptOpts({ staleBusyMs: 1000, busyCheckMs: 0, status: async () => (statusCalls++, 'idle') }));
+    await sleep(60);
+    expect(statusCalls).toBe(0); // nothing queued: no lookup
+    await enqueue('s1', 'after Esc');
+    await sleep(60);
+    expect(statusCalls).toBe(0); // busy is fresh: a turn may be running
+    await ageBusy('s1', 5000);
+    const r = await p;
+    expect(statusCalls).toBeGreaterThan(0);
+    expect(r.exitCode).toBe(2);
+    expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['after Esc']);
+    expect(await isBusy('s1')).toBe(false);
+  });
+  it('a stale busy marker stays while the session is still busy or waiting, or the lookup fails', async () => {
+    for (const st of ['busy', 'waiting', null] as const) {
+      await reg('s1');
+      await setBusy('s1');
+      await ageBusy('s1', 60_000);
+      await enqueue('s1', 'x');
+      let calls = 0;
+      const p = wait('prompt', { prompt: 'hi' }, promptOpts({ staleBusyMs: 1000, busyCheckMs: 0, status: async () => (calls++, st) }));
+      await vi.waitFor(() => expect(calls).toBeGreaterThan(2), { timeout: 5000, interval: 10 });
+      expect(await isBusy('s1')).toBe(true);
+      expect(await peek('s1')).toHaveLength(1);
+      await markDisconnected('s1', 'off');
+      expect((await p).exitCode).toBe(0);
+    }
+  });
+  it('other waiters drop a stale busy marker too (a terminal turn interrupted, no browser open)', async () => {
+    await reg('s1');
+    await setBusy('s1');
+    await ageBusy('s1', 60_000);
+    await enqueue('s1', 'x');
+    const r = await wait('start', { source: 'compact' }, { staleBusyMs: 1000, busyCheckMs: 0, status: async () => 'idle' });
+    expect(r.exitCode).toBe(2);
+  });
+  it('checks the live status at most every busyCheckMs', async () => {
+    await reg('s1');
+    await setBusy('s1');
+    await ageBusy('s1', 60_000);
+    await enqueue('s1', 'x');
+    let calls = 0;
+    const p = wait('prompt', { prompt: 'hi' }, promptOpts({ staleBusyMs: 1000, busyCheckMs: 10_000, status: async () => (calls++, 'busy') }));
+    await sleep(200);
+    expect(calls).toBe(1);
+    await markDisconnected('s1', 'off');
+    await p;
+  });
+});

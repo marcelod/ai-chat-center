@@ -35,7 +35,7 @@ const input = JSON.stringify({ session_id: 'smoke-unregistered', transcript_path
 console.log(`node ${process.version} on ${process.platform}, plugin at ${pluginDir}`);
 
 // 1. Bundles, called directly.
-for (const [file, arg] of [['hook.mjs', 'prompt-submit'], ['hook.mjs', 'notification'], ['waiter.mjs', 'stop'], ['waiter.mjs', 'start']]) {
+for (const [file, arg] of [['hook.mjs', 'prompt-submit'], ['hook.mjs', 'notification'], ['waiter.mjs', 'stop'], ['waiter.mjs', 'start'], ['waiter.mjs', 'prompt']]) {
   const r = spawnSync(process.execPath, [path.join(dist, file), arg], { input, encoding: 'utf8', env, cwd: home, timeout: 15_000 });
   check(r.status === 0 && r.stdout === '' && r.stderr === '', `${file} ${arg}: exit ${r.status}, stdout ${JSON.stringify(r.stdout)}, stderr ${JSON.stringify((r.stderr ?? '').slice(0, 300))}`);
 }

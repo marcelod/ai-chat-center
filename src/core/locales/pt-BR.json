@@ -61,6 +61,7 @@
       "waitingBanner": "O Claude está esperando você aprovar uma ação no terminal",
       "waitingInputBanner": "O Claude está esperando sua resposta no terminal",
       "waitingBannerHint": "Aprovar pelo app chega em uma versão futura.",
+      "deliveryStalled": "Há mensagens esperando, mas a entrega para esta sessão está pausada: envie qualquer mensagem no terminal para retomar a entrega.",
       "messages": "Mensagens",
       "image": "[imagem]",
       "images": "[{n} imagens]",

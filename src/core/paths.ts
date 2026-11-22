@@ -12,7 +12,7 @@ export interface Paths {
   /** Short lock around read-modify-write of a registration. */
   sessionLock: (sid: string) => string;
   waitingFile: (sid: string) => string;
-  /** Present while a terminal-started turn is running (set on prompt submit, cleared when the waiter starts). */
+  /** Present while a turn is running (set on every prompt submit, cleared by the Stop waiter; see busy.ts). */
   busyFile: (sid: string) => string;
   logDir: string;
 }

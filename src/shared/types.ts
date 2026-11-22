@@ -43,6 +43,8 @@ export type SessionView = {
   waitingKind?: 'permission' | 'input';
   lastEvent?: ChatEvent;
   pendingAppMessageIds: string[];
+  /** App messages are queued for this idle session and no waiter is running: a terminal prompt resumes delivery. */
+  deliveryStalled?: boolean;
 };
 
 export type ProviderChange =

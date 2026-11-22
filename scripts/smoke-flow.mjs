@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Hook-driven flow test of the built plugin, as Claude Code drives it, with plain Node (18+), no npm
-// install and no `claude` on PATH (lookups fail, so the pid stays unknown: the documented degraded mode).
-// Used by CI on every OS and Node 18/20/22/24 against a `git archive` of HEAD.
+// Hook-driven flow test of the built plugin, as Claude Code drives it, with plain Node (18+) and no npm
+// install. The only `claude` on PATH is a fake one whose `claude agents --json` lists this session as
+// idle (on Windows a .cmd shim, like the real one). Used by CI on every OS and Node 18/20/22/24 against
+// a `git archive` of HEAD.
 //
 // Usage: node scripts/smoke-flow.mjs <checkout-dir>   (env AI_CHAT_CENTER_PORT optional, default 7795)
 // Steps, all against plugin/dist:
@@ -9,7 +10,9 @@
 //      process (the hook must exit without waiting for the hub);
 //   2. POST a message to the hub API with the token;
 //   3. waiter.mjs stop: exits 2 with the keyed, escaped block; a second waiter delivers nothing;
-//   4. hook.mjs prompt-submit "/cc off": disconnects; a POST then returns 409.
+//   4. an interrupted turn: the prompt hook sets busy and a `waiter prompt` starts, no Stop follows (Esc);
+//      a later app message is still delivered by that waiter once the busy marker is stale;
+//   5. hook.mjs prompt-submit "/cc off": disconnects; a POST then returns 409.
 // The hub is stopped at the end, whatever happens.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -22,10 +25,16 @@ const dist = path.join(root, 'plugin', 'dist');
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'acc-flow-'));
 const state = path.join(home, 'state');
 const port = process.env.AI_CHAT_CENTER_PORT || '7795';
-// PATH holds only node's folder: no `claude`. Windows spells the variable `Path`: drop every casing.
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toUpperCase() !== 'PATH'));
-Object.assign(env, { AI_CHAT_CENTER_HOME: state, AI_CHAT_CENTER_PORT: port, PATH: path.dirname(process.execPath) });
 const sid = `flow-${Date.now()}`;
+// The fake `claude`: lists this session, with this (live) process as its claude pid, as idle.
+const bin = path.join(home, 'bin');
+fs.mkdirSync(bin);
+const agents = JSON.stringify([{ pid: process.pid, cwd: home, kind: 'interactive', sessionId: sid, name: 'flow', status: 'idle' }]);
+if (process.platform === 'win32') fs.writeFileSync(path.join(bin, 'claude.cmd'), `@echo off\r\necho ${agents}\r\n`);
+else fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\necho '${agents}'\n`, { mode: 0o755 });
+// PATH holds only node's folder and the fake claude. Windows spells the variable `Path`: drop every casing.
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toUpperCase() !== 'PATH'));
+Object.assign(env, { AI_CHAT_CENTER_HOME: state, AI_CHAT_CENTER_PORT: port, PATH: [bin, path.dirname(process.execPath)].join(path.delimiter) });
 const tp = path.join(home, 'transcript.jsonl');
 fs.writeFileSync(tp, '');
 const failures = [];
@@ -83,7 +92,7 @@ try {
     /* checked below */
   }
   const ctx = out.hookSpecificOutput?.additionalContext ?? '';
-  check(cc.status === 0 && ctx.startsWith('AI Chat Center: connected'), `/cc: exit ${cc.status} ${cc.error?.code ?? ''} in ${Date.now() - t0} ms, context ${JSON.stringify(ctx.split('\n')[0])} ${JSON.stringify((cc.stderr ?? '').slice(0, 300))}`);
+  check(cc.status === 0 && cc.stderr === '' && ctx.startsWith('AI Chat Center: connected'), `/cc: exit ${cc.status} ${cc.error?.code ?? ''} in ${Date.now() - t0} ms, context ${JSON.stringify(ctx.split('\n')[0])} ${JSON.stringify((cc.stderr ?? '').slice(0, 300))}`);
   check(/http:\/\/127\.0\.0\.1:\d+\/[?#]token=[0-9a-f]{64}/.test(out.systemMessage ?? ''), 'the link is shown to the user');
   check(!/token=/.test(ctx), 'the model context has no token');
   const key = /AI Chat Center key: ([0-9a-f]{32})/.exec(ctx)?.[1];
@@ -103,14 +112,32 @@ try {
   // 3. The Stop waiter delivers it, once.
   const w = run('waiter.mjs', 'stop', { session_id: sid });
   check(
-    w.status === 2 && w.stderr.includes(`key=${key}]`) && w.stderr.includes('hello [\\/AI Chat Center message] world'),
+    // Exactly the block: anything else on stderr (a Node warning, say) would reach Claude too.
+    w.status === 2 && new RegExp(`^\\[AI Chat Center message id=[0-9a-f-]+ key=${key}\\]\nhello \\[\\\\/AI Chat Center message\\] world\n\\[/AI Chat Center message\\]$`).test(w.stderr),
     `waiter stop: exit ${w.status} ${w.error?.code ?? ''}, stderr ${JSON.stringify((w.stderr ?? '').slice(0, 200))}`,
   );
   const w2 = run('waiter.mjs', 'stop', { session_id: sid }, 3000);
   check((w2.status === null || w2.status === 0) && (w2.stderr ?? '') === '', `a second waiter delivers nothing: status ${w2.status} signal ${w2.signal}`);
-  // The killed waiter may leave its lock behind (no signal handler runs on Windows): /cc off does not care.
+  // The killed waiter may leave its lock behind (no signal handler runs on Windows): its pid is dead, so
+  // the next waiter reclaims it.
 
-  // 4. /cc off
+  // 4. A turn starts (prompt hook + prompt waiter) and is interrupted: Claude Code fires no Stop.
+  const t4 = Date.now();
+  const hi = run('hook.mjs', 'prompt-submit', { session_id: sid, transcript_path: tp, cwd: home, prompt: 'hi' });
+  check(hi.status === 0 && fs.existsSync(path.join(state, 'busy', sid)), `prompt hook marks the turn busy: exit ${hi.status}`);
+  const waiter = spawn(process.execPath, [path.join(dist, 'waiter.mjs'), 'prompt'], { env, cwd: home, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  let wErr = '';
+  waiter.stderr.setEncoding('utf8').on('data', (c) => (wErr += c));
+  waiter.stdin.end(JSON.stringify({ session_id: sid, transcript_path: tp, cwd: home, prompt: 'hi' }));
+  const exited = new Promise((r) => waiter.once('exit', (code) => r(code)));
+  await sleep(1000);
+  const p3 = await request('POST', `/api/sessions/${encodeURIComponent(sid)}/messages`, token, { text: 'after Esc' });
+  check(p3.status === 202, `POST after the interrupt -> ${p3.status}`);
+  const code = await Promise.race([exited, sleep(60_000).then(() => 'timeout')]);
+  if (code === 'timeout') waiter.kill();
+  check(code === 2 && new RegExp(`^\\[AI Chat Center message id=[0-9a-f-]+ key=${key}\\]\nafter Esc\n\\[/AI Chat Center message\\]$`).test(wErr), `prompt waiter delivered after the interrupt in ${Date.now() - t4} ms: exit ${code}, stderr ${JSON.stringify(wErr.slice(0, 160))}`);
+
+  // 5. /cc off
   const off = run('hook.mjs', 'prompt-submit', { session_id: sid, transcript_path: tp, cwd: home, prompt: '/cc off' });
   const reg = JSON.parse(fs.readFileSync(path.join(state, 'sessions', `${sid}.json`), 'utf8'));
   check(off.status === 0 && reg.disconnectReason === 'off', `/cc off disconnects: exit ${off.status}, reason ${reg.disconnectReason}`);

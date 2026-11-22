@@ -167,6 +167,16 @@ describe('ChatView', () => {
     expect(screen.queryByText('Approving from the app comes in a later version.')).not.toBeInTheDocument();
   });
 
+  // Audit R3-F1 (b): queued messages with no waiter to deliver them: say what resumes delivery.
+  it('delivery stalled shows how to resume it, in the user language', () => {
+    setup({ session: session({ state: 'idle', deliveryStalled: true, pendingAppMessageIds: ['p1'] }) });
+    expect(screen.getByTestId('delivery-stalled').textContent).toContain('send any prompt in the terminal to resume delivery');
+  });
+  it('no stall hint by default', () => {
+    setup({ session: session({ state: 'idle' }) });
+    expect(screen.queryByText(/resume delivery/)).not.toBeInTheDocument();
+  });
+
   it('busy shows working pill and typing indicator', () => {
     setup({ session: session({ state: 'busy' }) });
     expect(screen.getByText('working…')).toBeInTheDocument();

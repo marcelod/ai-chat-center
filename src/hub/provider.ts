@@ -29,6 +29,10 @@ const LIVE_TTL_MS = 5000;
 /** A busy marker this old while the session is idle was left by a turn that ended without Stop (interrupt). */
 const STALE_BUSY_MS = 10_000;
 const GRACE_MS = 15_000;
+/** A waiter refreshes its lock every 10 s: a lock older than this has no live waiter behind it. */
+const WAITER_HEARTBEAT_STALE_MS = 30_000;
+/** Queued this long for an idle session with no live waiter: delivery is stalled (see deliveryStalled). */
+const STALLED_AFTER_MS = 15_000;
 const MISSES_TO_EXIT = 3;
 
 export type ProviderOptions = { now?: () => number };
@@ -116,6 +120,21 @@ export class ClaudeCodeProvider implements Provider {
     return m.count >= MISSES_TO_EXIT && age > GRACE_MS;
   }
 
+  /**
+   * Messages have waited a while for an idle session and no waiter holds a fresh lock: nothing will
+   * deliver them until the next turn (a waiter that hit its 24 h budget, or one that died). The app then
+   * tells the user to send any prompt in the terminal.
+   */
+  private async deliveryStalled(sid: string, queued: { createdAt: string }[]): Promise<boolean> {
+    const oldest = Math.min(...queued.map((m) => Date.parse(m.createdAt)).filter((n) => !Number.isNaN(n)));
+    if (!Number.isFinite(oldest) || this.now() - oldest < STALLED_AFTER_MS) return false;
+    try {
+      return this.now() - (await fs.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
+    } catch {
+      return true; // no lock: no waiter
+    }
+  }
+
   private async dropStaleBusy(sid: string): Promise<void> {
     const age = await busyAge(sid, this.now());
     if (age !== null && age > STALE_BUSY_MS) await clearBusy(sid);
@@ -191,15 +210,17 @@ export class ClaudeCodeProvider implements Provider {
       } else state = l?.status ?? 'idle';
       if (!disconnected && live.ok && l?.status === 'idle') await this.dropStaleBusy(sid);
       const cwd = l?.cwd ?? reg.cwd;
+      const queued = disconnected ? [] : await peek(sid);
       const view: SessionView & { _sort: number } = {
         sessionId: sid,
         name: l?.name || path.basename(cwd),
         cwd,
         state,
-        pendingAppMessageIds: disconnected ? [] : (await peek(sid)).map((m) => m.id),
+        pendingAppMessageIds: queued.map((m) => m.id),
         _sort: Date.parse(reg.connectedAt) || 0,
       };
       if (waitingKind) view.waitingKind = waitingKind;
+      if (state === 'idle' && (await this.deliveryStalled(sid, queued))) view.deliveryStalled = true;
       if (lastEvent) view.lastEvent = lastEvent;
       connected.push(view);
     }
@@ -268,6 +289,7 @@ export class ClaudeCodeProvider implements Provider {
         s.name,
         s.lastEvent?.id ?? null,
         s.pendingAppMessageIds,
+        s.deliveryStalled ?? false,
       ]),
     });
     if (signature !== this.lastSignature) {

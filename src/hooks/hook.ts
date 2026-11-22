@@ -12,6 +12,8 @@
 //      (resolveClaudePid) and is stored as Registration.pid (null when it cannot be resolved).
 // Stop and SessionStart are not hooked synchronously: the asyncRewake waiter (`waiter.mjs stop`)
 // clears waiting/busy when a turn ends, and `waiter.mjs start` handles /clear, /resume and fork.
+// UserPromptSubmit also starts `waiter.mjs prompt` (asyncRewake), so a waiter exists during every turn,
+// including one interrupted with Esc, which fires no Stop.
 // notification_type values (code.claude.com/docs/en/hooks.md): permission_prompt, idle_prompt,
 //  auth_success, auth_storage_failure, elicitation_dialog, elicitation_url_dialog,
 //  elicitation_complete, elicitation_response, agent_needs_input, agent_completed, ...
@@ -134,7 +136,7 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
     if (cmd === 'off') await markDisconnected(sid, 'off');
     else if (isActive(reg)) {
       await clearWaiting(sid);
-      // A terminal turn starts: the waiter must not inject app messages until it ends.
+      // A turn starts (typed, or woken by a delivery): the waiter must not inject app messages until it ends.
       await setBusy(sid);
     }
     return nothing;

@@ -140,6 +140,16 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
           ),
         )}
         {state === 'busy' && <Typing />}
+        {session.deliveryStalled && state === 'idle' && (
+          <div
+            data-testid="delivery-stalled"
+            role="status"
+            className="flex items-start gap-3 self-stretch rounded-xl border border-banner-border bg-banner-bg p-3.5 text-waiting-text"
+          >
+            <WarningIcon className="mt-0.5 shrink-0" />
+            <p className="text-sm">{t('ui.chat.deliveryStalled')}</p>
+          </div>
+        )}
         {state === 'waiting' && (
           <div className="flex items-start gap-3 self-stretch rounded-xl border border-banner-border bg-banner-bg p-3.5 text-waiting-text">
             <WarningIcon className="mt-0.5 shrink-0" />

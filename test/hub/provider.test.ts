@@ -362,3 +362,39 @@ describe('listLiveSessions', () => {
     expect(await listLiveSessions(async () => { throw new Error('x'); })).toEqual([]);
   });
 });
+
+// Audit R3-F1 (b): app messages queued for an idle session with no live waiter are stuck until the user
+// types in the terminal. The hub says so instead of an endless "queued".
+describe('provider: delivery stalled', () => {
+  const lockAt = (sid: string, ms: number) => {
+    const f = path.join(dir, 'waiters', `${sid}.lock`);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, JSON.stringify({ pid: process.pid, ts: '' }));
+    fs.utimesSync(f, new Date(ms), new Date(ms));
+  };
+  it('is flagged when messages wait, the session is idle and no waiter holds a fresh lock', async () => {
+    await reg();
+    const { enqueue } = await import('../../src/core/inbox.js');
+    await enqueue('s1', 'stuck');
+    const t = Date.now() + 60_000;
+    let status: LiveSession['status'] = 'idle';
+    const p = new ClaudeCodeProvider(async () => [live({ status })], { now: () => t });
+    expect((await p.listSessions()).connected[0].deliveryStalled).toBe(true); // no lock at all
+    lockAt('s1', t - 5_000);
+    expect((await p.listSessions()).connected[0].deliveryStalled).toBeUndefined(); // a live waiter
+    lockAt('s1', t - 45_000);
+    expect((await p.listSessions()).connected[0].deliveryStalled).toBe(true); // heartbeat stopped
+    status = 'busy';
+    await new Promise((r) => setTimeout(r, 5));
+    const p2 = new ClaudeCodeProvider(async () => [live({ status })], { now: () => t });
+    expect((await p2.listSessions()).connected[0].deliveryStalled).toBeUndefined(); // the turn will end with Stop
+  });
+  it('is not flagged for a message just sent, or with nothing queued', async () => {
+    await reg();
+    const p = new ClaudeCodeProvider(async () => [live({ status: 'idle' })]);
+    expect((await p.listSessions()).connected[0].deliveryStalled).toBeUndefined();
+    const { enqueue } = await import('../../src/core/inbox.js');
+    await enqueue('s1', 'fresh');
+    expect((await p.listSessions()).connected[0].deliveryStalled).toBeUndefined();
+  });
+});

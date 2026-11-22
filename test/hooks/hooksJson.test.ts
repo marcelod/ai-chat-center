@@ -37,7 +37,7 @@ describe('hooks.json', () => {
   // Audit RT1 / AI-F5: Claude Code enforces `timeout` on asyncRewake hooks (default 600 s).
   it('waiters carry an explicit 24 h timeout', () => {
     const waiters = all.filter((h) => h.asyncRewake);
-    expect(waiters).toHaveLength(2);
+    expect(waiters).toHaveLength(3);
     for (const h of waiters) expect(h.timeout).toBe(86400);
   });
 
@@ -61,8 +61,20 @@ describe('hooks.json', () => {
     expect(other[0].hooks[0].asyncRewake).toBeUndefined();
   });
 
-  it('UserPromptSubmit and Notification run the hook bundle', () => {
-    expect(cfg.hooks.UserPromptSubmit.flatMap((g) => g.hooks).map((h) => h.args)).toEqual([['${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs', 'prompt-submit']]);
+  // Audit R3-F1: an interrupted turn fires no Stop. A rewake waiter armed by UserPromptSubmit exists during
+  // every turn (also the turns a delivery wakes), so delivery resumes after Esc. The synchronous prompt
+  // hook stays first and separate: /cc needs its context in the same turn.
+  it('UserPromptSubmit runs the prompt hook, then a rewake `waiter prompt`', () => {
+    const ups = cfg.hooks.UserPromptSubmit.flatMap((g) => g.hooks);
+    expect(ups.map((h) => h.args)).toEqual([
+      ['${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs', 'prompt-submit'],
+      ['${CLAUDE_PLUGIN_ROOT}/dist/waiter.mjs', 'prompt'],
+    ]);
+    expect(ups[0].async ?? ups[0].asyncRewake).toBeUndefined();
+    expect(ups[1]).toMatchObject({ asyncRewake: true, timeout: 86400 });
+  });
+
+  it('Notification runs the hook bundle', () => {
     expect(cfg.hooks.Notification.flatMap((g) => g.hooks).map((h) => h.args)).toEqual([['${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs', 'notification']]);
   });
 

@@ -8,7 +8,8 @@
   "Stop": [{ "hooks": [
     { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/waiter.mjs", "stop"], "asyncRewake": true, "timeout": 86400 } ] }],
   "UserPromptSubmit": [{ "hooks": [
-    { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "prompt-submit"] } ] }],
+    { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "prompt-submit"] },
+    { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/waiter.mjs", "prompt"], "asyncRewake": true, "timeout": 86400 } ] }],
   "Notification": [{ "hooks": [
     { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "notification"] } ] }]
 }}

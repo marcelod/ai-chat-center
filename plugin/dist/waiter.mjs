@@ -189,6 +189,13 @@ async function isBusy(sid) {
     return false;
   }
 }
+async function busyAge(sid, now = Date.now()) {
+  try {
+    return now - (await fs3.stat(paths().busyFile(sid))).mtimeMs;
+  } catch {
+    return null;
+  }
+}
 
 // src/core/waiting.ts
 async function clearWaiting(sid) {
@@ -384,12 +391,13 @@ async function markDisconnected(sid, reason) {
 // src/core/claudeAgents.ts
 import { execFile } from "node:child_process";
 import os2 from "node:os";
-function runClaudeAgentsJson() {
+function runClaudeAgentsJson(platform = process.platform) {
+  const win = platform === "win32";
   return new Promise((resolve, reject) => {
     execFile(
-      "claude",
-      ["agents", "--json"],
-      { cwd: os2.homedir(), shell: process.platform === "win32", windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
+      win ? "claude agents --json" : "claude",
+      win ? [] : ["agents", "--json"],
+      { cwd: os2.homedir(), shell: win, windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => err ? reject(err) : resolve(String(stdout))
     );
   });
@@ -419,6 +427,43 @@ ${escapeBody(m.text)}
 ${CLOSE}`).join("\n\n");
 }
 
+// src/core/ccCommand.ts
+var CC_RE = /^\s*\/(?:ai-chat-center:)?cc(?:\s+(\S[\s\S]*?))?\s*$/i;
+function isCcCommand(prompt) {
+  if (typeof prompt !== "string") return null;
+  const m = CC_RE.exec(prompt);
+  if (!m) return null;
+  if (m[1] === void 0) return "on";
+  return m[1].toLowerCase() === "off" ? "off" : "unknown";
+}
+
+// src/hub/status.ts
+function toLive(x) {
+  if (!x || typeof x !== "object") return null;
+  const o = x;
+  if (typeof o.sessionId !== "string" || !o.sessionId) return null;
+  if (typeof o.pid !== "number" || typeof o.cwd !== "string") return null;
+  if (o.kind !== "interactive" && o.kind !== "background") return null;
+  return {
+    pid: o.pid,
+    cwd: o.cwd,
+    kind: o.kind,
+    sessionId: o.sessionId,
+    name: typeof o.name === "string" ? o.name : "",
+    // Presence never depends on status: unknown values degrade to idle.
+    status: o.status === "busy" || o.status === "waiting" ? o.status : "idle"
+  };
+}
+async function queryLiveSessions(run = runClaudeAgentsJson) {
+  try {
+    const parsed = JSON.parse(await run());
+    if (!Array.isArray(parsed)) return null;
+    return parsed.map(toLive).filter((s) => s !== null);
+  } catch {
+    return null;
+  }
+}
+
 // src/hooks/waiter.ts
 var HOOK_TIMEOUT_S = 86400;
 var WAITER_BUDGET_MS = (HOOK_TIMEOUT_S - 60) * 1e3;
@@ -428,12 +473,26 @@ var CLAIMED_SWEEP_MS = 36e5;
 var RERESOLVE_MS = 6e4;
 var MAX_MISSES = 3;
 var HEARTBEAT_MS = 1e4;
+var STALE_BUSY_MS = 1e4;
+var BUSY_CHECK_MS = 15e3;
+var PROMPT_SETTLE_MS = 3e3;
 var SWITCH_SOURCES = /* @__PURE__ */ new Set(["startup", "resume", "clear", "fork"]);
 var NOTHING = { exitCode: 0, stderr: "" };
 var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
 async function activeReg(sid) {
   const r = await getRegistration(sid);
   return r && isActive(r) ? r : null;
+}
+async function liveStatus(sid) {
+  const list2 = await queryLiveSessions();
+  return list2?.find((l) => l.sessionId === sid)?.status ?? null;
+}
+async function hasQueued(sid) {
+  try {
+    return (await fs6.promises.readdir(paths().inboxDir(sid))).some((n) => n.endsWith(".msg"));
+  } catch {
+    return false;
+  }
 }
 async function sessionSwitch(sid, input, lookup) {
   const source = input.source ?? "";
@@ -471,6 +530,11 @@ async function runWaiter(event, input, opts = {}) {
   const lookupFn = opts.lookup ?? ((id) => lookupClaudePid(id));
   const lookupFailMs = opts.lookupFailMs ?? LOOKUP_FAIL_EXIT_MS;
   const discardOld = event === "start" && input.source === "resume";
+  const statusFn = opts.status ?? liveStatus;
+  const staleBusyMs = opts.staleBusyMs ?? STALE_BUSY_MS;
+  const busyCheckMs = opts.busyCheckMs ?? BUSY_CHECK_MS;
+  const settleUntil = event === "prompt" ? startedAt + (opts.promptSettleMs ?? PROMPT_SETTLE_MS) : 0;
+  if (event === "prompt" && isCcCommand(input.prompt) !== null) return NOTHING;
   let misses = 0;
   let lastLookupAt = 0;
   let lookups = 0;
@@ -519,6 +583,19 @@ async function runWaiter(event, input, opts = {}) {
   if (mine === null) return NOTHING;
   let lastBeat = Date.now();
   let deadChecked = false;
+  let lastStatusAt = -Infinity;
+  const dropStaleBusy = async () => {
+    const age = await busyAge(sid);
+    if (age === null) return true;
+    if (age <= staleBusyMs || Date.now() - lastStatusAt < busyCheckMs || !await hasQueued(sid)) return false;
+    lastStatusAt = Date.now();
+    if (await statusFn(sid) !== "idle") return false;
+    const again = await busyAge(sid);
+    if (again !== null && again <= staleBusyMs) return false;
+    await clearBusy(sid);
+    logError(`dropped a busy marker left by an interrupted turn of session ${sid}`);
+    return true;
+  };
   try {
     try {
       await sweepClaimed(sid, CLAIMED_SWEEP_MS);
@@ -561,7 +638,9 @@ async function runWaiter(event, input, opts = {}) {
           await adopt(fresh);
           continue;
         }
-        if (!await isBusy(sid)) {
+        if (Date.now() < settleUntil) {
+        } else if (await isBusy(sid) && !await dropStaleBusy()) {
+        } else {
           if (await lockLost()) return NOTHING;
           const drained = await drain(sid);
           let msgs = drained;
@@ -627,7 +706,7 @@ async function main() {
   let result = NOTHING;
   try {
     const event = process.argv[2];
-    if (event !== "start" && event !== "stop") return;
+    if (event !== "start" && event !== "stop" && event !== "prompt") return;
     const input = JSON.parse(await readStdin());
     const onSignal = () => {
       releaseOwnLockSync(input?.session_id);
@@ -647,4 +726,5 @@ async function main() {
 }
 
 // src/bin/waiter.ts
+process.noDeprecation = true;
 void main();

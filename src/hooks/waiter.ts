@@ -8,11 +8,20 @@ import { drain, sweepClaimed } from '../core/inbox.js';
 import { clearWaiting } from '../core/waiting.js';
 import { acquireLockContent, releaseLock, touchLock, lockPid, isAlive as pidAlive } from '../core/lock.js';
 import { wrapMessages } from '../core/protocol.js';
+import { isCcCommand } from '../core/ccCommand.js';
+import { busyAge } from '../core/busy.js';
+import { queryLiveSessions } from '../hub/status.js';
 
 export type { PidLookup };
-/** `stop`: spawned by Stop (a turn just ended). `start`: spawned by SessionStart. */
-export type WaiterEvent = 'start' | 'stop';
-export type WaiterInput = { session_id: string; source?: string; transcript_path?: string };
+/**
+ * `stop`: spawned by Stop (a turn just ended). `start`: spawned by SessionStart. `prompt`: spawned by
+ * UserPromptSubmit (a turn starts, typed in the terminal or woken by a delivery), so a waiter exists
+ * during every turn: an interrupted turn (Esc) fires no Stop, and before this nothing re-armed delivery.
+ */
+export type WaiterEvent = 'start' | 'stop' | 'prompt';
+export type WaiterInput = { session_id: string; source?: string; transcript_path?: string; prompt?: string };
+/** Live status of a session from `claude agents`, or null when the lookup failed or does not list it. */
+export type LiveStatus = 'busy' | 'idle' | 'waiting' | null;
 
 export interface WaiterResult {
   exitCode: 0 | 2;
@@ -37,6 +46,18 @@ const RERESOLVE_MS = 60_000;
 /** Lookups in a row that do not list the session before a waiter with an unknown pid gives up. */
 const MAX_MISSES = 3;
 const HEARTBEAT_MS = 10_000;
+/**
+ * A busy marker older than this, while the session is idle according to `claude agents`, was left by a
+ * turn that ended without Stop (Esc, an API error): it is dropped so queued messages are delivered.
+ */
+export const STALE_BUSY_MS = 10_000;
+/** With messages queued behind a stale busy marker, the live status is checked at most this often. */
+export const BUSY_CHECK_MS = 15_000;
+/**
+ * A prompt waiter starts in parallel with the prompt hook that sets the busy marker: it does not drain
+ * before this delay, so it never delivers into the turn that has just started.
+ */
+export const PROMPT_SETTLE_MS = 3000;
 const SWITCH_SOURCES = new Set(['startup', 'resume', 'clear', 'fork']);
 
 const NOTHING: WaiterResult = { exitCode: 0, stderr: '' };
@@ -63,6 +84,28 @@ export interface WaiterOptions {
   heartbeatMs?: number;
   /** With an unknown pid, exit once lookups have failed for this long in a row. Default LOOKUP_FAIL_EXIT_MS. */
   lookupFailMs?: number;
+  /** Live status lookup (one `claude agents`). Default: liveStatus. */
+  status?: (sid: string) => Promise<LiveStatus>;
+  /** Default STALE_BUSY_MS. */
+  staleBusyMs?: number;
+  /** Default BUSY_CHECK_MS. */
+  busyCheckMs?: number;
+  /** Default PROMPT_SETTLE_MS. */
+  promptSettleMs?: number;
+}
+
+/** The session's status from `claude agents --json`; null when the lookup fails or does not list it. */
+export async function liveStatus(sid: string): Promise<LiveStatus> {
+  const list = await queryLiveSessions();
+  return list?.find((l) => l.sessionId === sid)?.status ?? null;
+}
+
+async function hasQueued(sid: string): Promise<boolean> {
+  try {
+    return (await fs.promises.readdir(paths().inboxDir(sid))).some((n) => n.endsWith('.msg'));
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -92,8 +135,11 @@ async function sessionSwitch(sid: string, input: WaiterInput, lookup: () => Prom
 
 /**
  * Waits for app messages. Exit 2 + messages on stderr wakes the session; 0 means "nothing to do".
- * `stop` (a turn just ended) first clears the busy marker and the waiting state; `start` never does,
- * since SessionStart can fire mid-turn. Neither drains while a busy marker exists.
+ * `stop` (a turn just ended) first clears the busy marker and the waiting state; `start` and `prompt`
+ * never do (SessionStart can fire mid-turn; a prompt starts a turn). None drains while a busy marker
+ * exists, except one left by an interrupted turn: with messages queued, a marker older than 10 s is
+ * dropped once `claude agents` reports the session idle. One waiter per session (the lock): a prompt
+ * waiter that finds the previous turn's waiter still waiting simply exits.
  */
 export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: WaiterOptions = {}): Promise<WaiterResult> {
   const sid = input?.session_id;
@@ -113,6 +159,12 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
   const lookupFn = opts.lookup ?? ((id: string) => lookupClaudePid(id));
   const lookupFailMs = opts.lookupFailMs ?? LOOKUP_FAIL_EXIT_MS;
   const discardOld = event === 'start' && input.source === 'resume';
+  const statusFn = opts.status ?? liveStatus;
+  const staleBusyMs = opts.staleBusyMs ?? STALE_BUSY_MS;
+  const busyCheckMs = opts.busyCheckMs ?? BUSY_CHECK_MS;
+  const settleUntil = event === 'prompt' ? startedAt + (opts.promptSettleMs ?? PROMPT_SETTLE_MS) : 0;
+  // /cc, /cc off: the hook connects or disconnects; the Stop of that turn arms the next waiter.
+  if (event === 'prompt' && isCcCommand(input.prompt) !== null) return NOTHING;
 
   let misses = 0;
   let lastLookupAt = 0;
@@ -171,6 +223,23 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
   if (mine === null) return NOTHING;
   let lastBeat = Date.now();
   let deadChecked = false;
+  let lastStatusAt = -Infinity;
+  /**
+   * True once a busy marker left by an interrupted turn was dropped. Only with messages queued (the
+   * lookup costs a `claude agents` run), a marker older than staleBusyMs, at most every busyCheckMs.
+   */
+  const dropStaleBusy = async (): Promise<boolean> => {
+    const age = await busyAge(sid);
+    if (age === null) return true;
+    if (age <= staleBusyMs || Date.now() - lastStatusAt < busyCheckMs || !(await hasQueued(sid))) return false;
+    lastStatusAt = Date.now();
+    if ((await statusFn(sid)) !== 'idle') return false;
+    const again = await busyAge(sid);
+    if (again !== null && again <= staleBusyMs) return false; // a new turn set it meanwhile
+    await clearBusy(sid);
+    logError(`dropped a busy marker left by an interrupted turn of session ${sid}`);
+    return true;
+  };
   try {
     try {
       await sweepClaimed(sid, CLAIMED_SWEEP_MS);
@@ -217,7 +286,11 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
           await adopt(fresh);
           continue;
         }
-        if (!(await isBusy(sid))) {
+        if (Date.now() < settleUntil) {
+          // a prompt waiter: let the prompt hook set the busy marker first
+        } else if ((await isBusy(sid)) && !(await dropStaleBusy())) {
+          // a turn is running
+        } else {
           if (await lockLost()) return NOTHING; // again, right before draining
           const drained = await drain(sid);
           let msgs = drained;
@@ -292,7 +365,7 @@ export async function main(): Promise<void> {
   let result: WaiterResult = NOTHING;
   try {
     const event = process.argv[2];
-    if (event !== 'start' && event !== 'stop') return;
+    if (event !== 'start' && event !== 'stop' && event !== 'prompt') return;
     const input = JSON.parse(await readStdin());
     const onSignal = () => {
       releaseOwnLockSync(input?.session_id);

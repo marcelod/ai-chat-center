@@ -467,6 +467,7 @@ var en_default = {
       waitingBanner: "Claude is waiting for you to approve an action in the terminal",
       waitingInputBanner: "Claude is waiting for your answer in the terminal",
       waitingBannerHint: "Approving from the app comes in a later version.",
+      deliveryStalled: "Messages are waiting, but delivery to this session is paused: send any prompt in the terminal to resume delivery.",
       messages: "Messages",
       image: "[image]",
       images: "[{n} images]",
@@ -560,6 +561,7 @@ var pt_BR_default = {
       waitingBanner: "O Claude est\xE1 esperando voc\xEA aprovar uma a\xE7\xE3o no terminal",
       waitingInputBanner: "O Claude est\xE1 esperando sua resposta no terminal",
       waitingBannerHint: "Aprovar pelo app chega em uma vers\xE3o futura.",
+      deliveryStalled: "H\xE1 mensagens esperando, mas a entrega para esta sess\xE3o est\xE1 pausada: envie qualquer mensagem no terminal para retomar a entrega.",
       messages: "Mensagens",
       image: "[imagem]",
       images: "[{n} imagens]",
@@ -617,12 +619,13 @@ function isCcCommand(prompt) {
 // src/core/claudeAgents.ts
 import { execFile } from "node:child_process";
 import os3 from "node:os";
-function runClaudeAgentsJson() {
+function runClaudeAgentsJson(platform = process.platform) {
+  const win = platform === "win32";
   return new Promise((resolve, reject) => {
     execFile(
-      "claude",
-      ["agents", "--json"],
-      { cwd: os3.homedir(), shell: process.platform === "win32", windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
+      win ? "claude agents --json" : "claude",
+      win ? [] : ["agents", "--json"],
+      { cwd: os3.homedir(), shell: win, windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => err ? reject(err) : resolve(String(stdout))
     );
   });
@@ -765,4 +768,5 @@ async function main() {
 }
 
 // src/bin/hook.ts
+process.noDeprecation = true;
 void main();

@@ -2,9 +2,11 @@ import fs from 'node:fs/promises';
 import { paths } from './paths.js';
 import { removeFile, writeJsonAtomic } from './fsAtomic.js';
 
-// Busy marker: a terminal-started turn is running, so the waiter must not inject app messages
-// mid-turn. Set on prompt submit (active registrations only), cleared when a waiter starts
-// (Stop/SessionStart: the turn ended), on /cc and on disconnect.
+// Busy marker: a turn is running, so the waiter must not inject app messages mid-turn. Set by the
+// UserPromptSubmit hook of an active registration, which fires for every turn: typed in the terminal,
+// and also the turn a delivery wakes (hook feedback). Cleared by the Stop waiter (the turn ended), on /cc
+// and on disconnect. A turn that ends without Stop (Esc, an API error) leaves it behind: the waiter and
+// the hub drop a marker older than 10 s once `claude agents` reports the session idle.
 
 export async function setBusy(sid: string): Promise<void> {
   await writeJsonAtomic(paths().busyFile(sid), { at: new Date().toISOString() });
