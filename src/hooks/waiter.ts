@@ -102,6 +102,13 @@ export interface WaiterOptions {
    * process start time.
    */
   spawnedAt?: number;
+  /**
+   * This process's parent when it started (main: process.ppid). With exec-form hooks it is the claude
+   * process the waiter serves; tests leave it unset.
+   */
+  parentPid?: number | null;
+  /** The parent now (main: () => process.ppid); POSIX re-parents an orphan, so a change means claude is gone. */
+  currentParentPid?: () => number;
 }
 
 /** The session's status from `claude agents --json`; null when the lookup fails or does not list it. */
@@ -255,6 +262,25 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
       await adopt(pid);
     }
   }
+  // Audit S4-U1: the claude process this waiter serves. Claude Code leaves async hooks running when it
+  // exits, so a waiter can outlive its claude process and must never deliver for a later one (its stderr
+  // goes nowhere). With exec-form hooks the parent IS that process: the waiter is then PINNED to it. A
+  // parent that is not the session's claude process (a node shim that waits for its child) is only
+  // watched: the waiter serves the registered pid, as before.
+  const parent = opts.parentPid ?? null;
+  const parentWatched = parent !== null && parent > 1 && isAlive(parent);
+  let pinned = parentWatched && pid === parent;
+  if (parentWatched && !pinned && pid !== null && !isAlive(pid)) {
+    // The registration names another process, and it is dead: this session was resumed here and its start
+    // waiter has not recorded this process yet. One lookup tells. (Alive: the parent is a shim; no lookup
+    // on every turn for that.)
+    const r = await lookup();
+    if (r.ok && r.pid === parent) {
+      pinned = true;
+      pid = parent;
+      await adopt(parent);
+    }
+  }
 
   const lock = paths().waiterLock(sid);
   // The exact content we published ({pid, ts}): touchLock only changes the mtime, so any other content
@@ -303,8 +329,18 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
           lastBeat = Date.now();
           await touchLock(lock);
         }
+        if (parentWatched && (!isAlive(parent) || (opts.currentParentPid && opts.currentParentPid() !== parent))) {
+          logError(`waiter for session ${sid}: its claude process ${parent} is gone: exiting without draining`);
+          return NOTHING;
+        }
+        if (pid !== null && reg.pid !== null && reg.pid !== pid) {
+          logError(`waiter for session ${sid}: the session now runs in claude process ${reg.pid}, not ${pid}: exiting without draining`);
+          return NOTHING;
+        }
         const regPid = reg.pid ?? pid;
-        if (regPid === null) {
+        if (pinned) {
+          // pinned: the parent checks above are the liveness checks; never re-resolved to another process
+        } else if (regPid === null) {
           // Unknown pid: look it up again now and then; give up once `claude agents` keeps not listing
           // it, or keeps failing.
           if (misses >= MAX_MISSES || failingTooLong()) return NOTHING;
@@ -455,7 +491,11 @@ export async function main(): Promise<void> {
     };
     process.on('SIGTERM', onSignal);
     process.on('SIGINT', onSignal);
-    result = await runWaiter(event, input, { spawnedAt: Date.now() - process.uptime() * 1000 });
+    result = await runWaiter(event, input, {
+      spawnedAt: Date.now() - process.uptime() * 1000,
+      parentPid: process.ppid,
+      currentParentPid: () => process.ppid,
+    });
   } catch (e) {
     logError(e);
   }

@@ -725,6 +725,17 @@ async function runWaiter(event, input, opts = {}) {
       await adopt(pid);
     }
   }
+  const parent = opts.parentPid ?? null;
+  const parentWatched = parent !== null && parent > 1 && isAlive2(parent);
+  let pinned = parentWatched && pid === parent;
+  if (parentWatched && !pinned && pid !== null && !isAlive2(pid)) {
+    const r = await lookup();
+    if (r.ok && r.pid === parent) {
+      pinned = true;
+      pid = parent;
+      await adopt(parent);
+    }
+  }
   const lock = paths().waiterLock(sid);
   const mine = await acquireLockContent(lock);
   if (mine === null) return NOTHING;
@@ -765,8 +776,17 @@ async function runWaiter(event, input, opts = {}) {
           lastBeat = Date.now();
           await touchLock(lock);
         }
+        if (parentWatched && (!isAlive2(parent) || opts.currentParentPid && opts.currentParentPid() !== parent)) {
+          logError(`waiter for session ${sid}: its claude process ${parent} is gone: exiting without draining`);
+          return NOTHING;
+        }
+        if (pid !== null && reg.pid !== null && reg.pid !== pid) {
+          logError(`waiter for session ${sid}: the session now runs in claude process ${reg.pid}, not ${pid}: exiting without draining`);
+          return NOTHING;
+        }
         const regPid = reg.pid ?? pid;
-        if (regPid === null) {
+        if (pinned) {
+        } else if (regPid === null) {
           if (misses >= MAX_MISSES || failingTooLong()) return NOTHING;
           if (Date.now() - lastLookupAt >= reresolveMs) {
             const r = await lookup();
@@ -896,7 +916,11 @@ async function main() {
     };
     process.on("SIGTERM", onSignal);
     process.on("SIGINT", onSignal);
-    result = await runWaiter(event, input, { spawnedAt: Date.now() - process.uptime() * 1e3 });
+    result = await runWaiter(event, input, {
+      spawnedAt: Date.now() - process.uptime() * 1e3,
+      parentPid: process.ppid,
+      currentParentPid: () => process.ppid
+    });
   } catch (e) {
     logError(e);
   }

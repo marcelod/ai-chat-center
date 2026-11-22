@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { runWaiter, type WaiterOptions, type WaiterEvent, type PidLookup } from '../../src/hooks/waiter.js';
-import { register, markDisconnected, getRegistration } from '../../src/core/registry.js';
+import { register, markDisconnected, getRegistration, updateRegistration } from '../../src/core/registry.js';
 import { setBusy, isBusy } from '../../src/core/busy.js';
 import { setWaiting, getWaiting } from '../../src/core/waiting.js';
 import { enqueue, peek } from '../../src/core/inbox.js';
@@ -701,5 +701,85 @@ describe('waiter: signature scope, replay and the secret', () => {
     expect(await wait('stop', {}, { deadlineMs: 200 })).toEqual({ exitCode: 0, stderr: '' });
     expect(inbox('s1').filter((n) => n.endsWith('.msg'))).toHaveLength(1);
     expect(waiterLog()).toMatch(/install secret is missing/);
+  });
+});
+
+// Audit S4-U1: Claude Code leaves async hooks running when it exits. A waiter of a closed claude process
+// kept the lock after the session was resumed elsewhere and drained messages into a pipe nobody reads.
+// Each waiter is pinned to the claude process it serves (its parent with exec-form hooks).
+describe('waiter: pinned to the claude process it serves', () => {
+  const PARENT = 9001;
+  const OTHER = 9002;
+  const live = new Set<number>();
+  const aliveFn = (pid: number) => live.has(pid);
+  beforeEach(() => {
+    live.clear();
+    live.add(PARENT);
+    live.add(OTHER);
+  });
+  const regWith = (pid: number | null) => register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid });
+
+  it('exits without draining once the registration names another claude process (resumed elsewhere)', async () => {
+    await regWith(PARENT);
+    await setBusy('s1');
+    let done = false;
+    const p = wait('stop', {}, { parentPid: PARENT, isAlive: aliveFn, spawnedAt: 0 }).then((r) => ((done = true), r));
+    await sleep(40);
+    expect(done).toBe(false);
+    await updateRegistration('s1', { pid: OTHER });
+    fs.rmSync(paths().busyFile('s1'));
+    await enqueue('s1', 'for the resumed session');
+    expect(await p).toEqual({ exitCode: 0, stderr: '' });
+    expect((await peek('s1')).map((m) => m.text)).toEqual(['for the resumed session']);
+    expect(fs.existsSync(paths().waiterLock('s1'))).toBe(false); // the new process's waiter can take over
+  });
+  it('exits without draining when its claude process dies, even if a lookup would find a new one', async () => {
+    await regWith(PARENT);
+    await setBusy('s1');
+    let lookups = 0;
+    const p = wait('stop', {}, { parentPid: PARENT, isAlive: aliveFn, spawnedAt: 0, lookup: async () => (lookups++, { ok: true, pid: OTHER }) });
+    await sleep(40);
+    live.delete(PARENT);
+    fs.rmSync(paths().busyFile('s1'));
+    await enqueue('s1', 'x');
+    expect(await p).toEqual({ exitCode: 0, stderr: '' });
+    expect(lookups).toBe(0);
+    expect(await peek('s1')).toHaveLength(1);
+  });
+  it('exits when it is re-parented (POSIX: its claude process is gone)', async () => {
+    await regWith(PARENT);
+    await setBusy('s1');
+    let parentNow = PARENT;
+    const p = wait('stop', {}, { parentPid: PARENT, currentParentPid: () => parentNow, isAlive: aliveFn, spawnedAt: 0 });
+    await sleep(40);
+    parentNow = 1;
+    expect(await p).toEqual({ exitCode: 0, stderr: '' });
+  });
+  it('a registration not yet updated to this (resumed) process: one lookup confirms the parent and records it', async () => {
+    await regWith(OTHER); // claude #1 (exited), still listed in the registration
+    live.delete(OTHER);
+    await enqueue('s1', 'for claude #2');
+    const r = await wait('stop', {}, { parentPid: PARENT, isAlive: aliveFn, lookup: async () => ({ ok: true, pid: PARENT }) });
+    expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['for claude #2']);
+    expect((await getRegistration('s1'))!.pid).toBe(PARENT);
+  });
+  it('a parent that is not the claude process (a node shim): falls back to the registered pid and still delivers', async () => {
+    await regWith(OTHER);
+    await enqueue('s1', 'through a shim');
+    const r = await wait('stop', {}, { parentPid: PARENT, isAlive: aliveFn, lookup: async () => ({ ok: true, pid: OTHER }) });
+    expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['through a shim']);
+    expect((await getRegistration('s1'))!.pid).toBe(OTHER);
+  });
+  it('with a shim parent, it still exits once the registration names another process', async () => {
+    await regWith(OTHER);
+    await setBusy('s1');
+    const p = wait('stop', {}, { parentPid: PARENT, isAlive: aliveFn, spawnedAt: 0, lookup: async () => ({ ok: true, pid: OTHER }) });
+    await sleep(40);
+    live.add(9003);
+    await updateRegistration('s1', { pid: 9003 });
+    fs.rmSync(paths().busyFile('s1'));
+    await enqueue('s1', 'x');
+    expect(await p).toEqual({ exitCode: 0, stderr: '' });
+    expect(await peek('s1')).toHaveLength(1);
   });
 });
