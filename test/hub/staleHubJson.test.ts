@@ -98,7 +98,9 @@ describe('a hub killed without cleanup (R4-C1)', () => {
 
     const second = cc();
     expect(second.ctx.split('\n')[0]).toBe('AI Chat Center: connected');
-    expect(second.ms).toBeLessThan(4000); // the old failure took the whole 5 s spawn timeout
+    // The bug's own signature (no wall-clock bound: this runs under load in the stress gate): the new hub
+    // never took itself for another live hub.
+    expect(fs.readFileSync(path.join(home, 'logs', 'hub.log'), 'utf8')).not.toMatch(/another live hub answers/);
     expect(second.hub.pid).not.toBe(first.hub.pid);
     expect(isAlive(second.hub.pid)).toBe(true);
     const health = await fetch(`http://127.0.0.1:${second.hub.port}/api/health`);

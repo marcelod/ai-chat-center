@@ -320,3 +320,41 @@ In the terminal: `I want to delete junk.txt ... first ask me in this terminal "S
 ### Cleanup
 
 The driver was stopped (exit 129) and the hub with the pid from `hub.json` (`hub stopped`, `hub.json` removed). No `hub.mjs`, `waiter.mjs`, `hook.mjs`, `drive-session` or `claude --plugin-dir` process was left, and port 7790 was free.
+
+## Audit round 4 (branch `fix/audit-round-1`, version 0.2.3)
+
+Run date: 2026-11-22. Claude Code 2.1.330, Node 22, Linux, `claude --plugin-dir <repo>/plugin --model haiku`, isolated `AI_CHAT_CENTER_HOME=<scratch>/home`, `AI_CHAT_CENTER_PORT=7790`, `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1`, a fresh project folder, auto mode. App messages were posted to the hub API with the Bearer token and without calling `GET /api/sessions`. Tokens are shown as `<token>`, the session id as `<sid>`.
+
+| Scenario | Result |
+|----------|--------|
+| `/cc` connects; the registration records the claude pid and the Claude config dir; home `700`, token `600` | PASS |
+| An app message is delivered and answered (the waiters are direct children of `claude`, so they are pinned to it) | PASS |
+| Esc during an app-started turn: a later app message is still delivered, nothing typed in the terminal | PASS |
+| **`kill -9` the hub, then `/cc`: a new hub starts on the same port at once, and messages flow again** | PASS |
+| `drive-session.mjs app` (release check) reports `ACTED` | PASS |
+| Closing the terminal leaves no waiter running | PASS |
+
+### `/cc` and an app message
+
+```
+❯ /ai-chat-center:cc
+  ⎿  UserPromptSubmit says: AI Chat Center is ready: http://127.0.0.1:7790/#token=<token>
+● Sessão conectada ao AI Chat Center. O link já foi exibido acima.
+```
+The registration held `"pid": <claude pid>` and `"configDir": "<home>/.claude"`. `ps --ppid <claude pid>` showed `node <repo>/plugin/dist/waiter.mjs stop` as a direct child of `claude`. `Reply with exactly: APP-R4` from the app gave `● Stop hook feedback` then `● APP-R4`.
+
+### Esc during an app-started turn
+
+The app asked Claude to run `python3 -c "print(sum(range(3_000_000_000)))"`. Esc at 20:55:04 while it ran: `⎿ Interrupted · What should Claude do instead?`, and the busy marker stayed. At 20:55:09 the app posted `Reply with exactly: APP-AFTER-ESC-R4`; `waiter.log` logged `dropped a busy marker left by an interrupted turn of session <sid>` the same second, and the screen showed `● Stop hook feedback`, `● APP-AFTER-ESC-R4` by 20:55:11.
+
+### `kill -9` the hub, then `/cc` (audit R4-C1)
+
+`kill -9 <hub pid>` left `hub.json` as `{"pid":<old pid>,"port":7790}`. `/ai-chat-center:cc` typed at 20:55:18 answered `AI Chat Center is ready: http://127.0.0.1:7790/#token=<token>`; `hub.log` shows the new hub listening on 7790 at 20:55:19, `hub.json` named the new pid, and that process was `node <repo>/plugin/dist/hub.mjs`. Before the fix, this `/cc` waited 5 s and said "the hub failed to start", and every later `/cc` did the same. `Reply with exactly: APP-AFTER-KILL-R4`, posted to the new hub, was delivered and answered.
+
+### Release check
+
+`node scripts/e2e/drive-session.mjs app --state <state> --home <scratch>/home --port 7790` printed `ACTED APP-CHECK-…` and exited 0.
+
+### Cleanup
+
+The driver was stopped, which closed the terminal: `claude` exited and, 3 s later, no `waiter.mjs` process was left. The hub was stopped with the pid from `hub.json` (`hub stopped`, `hub.json` removed). No `hub.mjs`, `waiter.mjs`, `hook.mjs`, `drive-session` or `claude --plugin-dir` process was left, and port 7790 was free.
