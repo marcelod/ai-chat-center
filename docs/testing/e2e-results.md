@@ -275,3 +275,48 @@ Session B, in its own fresh folder, answered `Reply with exactly: HELLO-B` with 
 ### Cleanup
 
 Both drivers were stopped (which closes the terminals; both exited with code 129). The hub was stopped with the pid from `hub.json` (`hub stopped` in `hub.log`; `hub.json` removed). Afterwards `ps` showed no `hub.mjs`, `waiter.mjs`, `hook.mjs`, `drive-session` or `claude --plugin-dir` process, and port 7790 was free.
+
+## Audit round 3 (branch `fix/audit-round-1`, version 0.2.2)
+
+Run date: 2026-11-22. Claude Code 2.1.330, Node 22, Linux, `claude --plugin-dir <repo>/plugin --model haiku`, isolated `AI_CHAT_CENTER_HOME=<scratch>/home`, `AI_CHAT_CENTER_PORT=7790`, `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1`, a fresh project folder, auto mode. App messages were posted to the hub API with the Bearer token and **without** calling `GET /api/sessions` (that call lets the hub drop a stale busy marker itself, which would hide the waiter's own recovery). Tokens are shown as `<token>`.
+
+| Scenario | Result |
+|----------|--------|
+| The model cannot invoke `/cc` (`disable-model-invocation: true`); nothing is written | PASS |
+| `/cc` connects; the link carries the token in the fragment (`/#token=`); home `700`, token `600` | PASS |
+| An app message is signed by the hub (`install-secret` `600` created on first message), delivered and answered | PASS |
+| A message file planted straight into the inbox is dropped and logged; the next real message is delivered | PASS |
+| **Esc during an app-started turn: a later app message is still delivered, nothing typed in the terminal** | PASS |
+| An app "yes, proceed" is not taken as the answer to a question Claude asked in the terminal | PASS |
+| `drive-session.mjs app` (release check) reports `ACTED` | PASS |
+
+### Model invocation of `/cc`
+
+Asked in an unconnected session to invoke the `ai-chat-center:cc` skill with the Skill tool, Claude Code answered `Claude couldn't run /ai-chat-center:cc. It runs only when you type it at the prompt.`, and the state folder stayed empty.
+
+### `/cc`, signed delivery, planted file
+
+```
+❯ /ai-chat-center:cc
+  ⎿  UserPromptSubmit says: AI Chat Center is ready: http://127.0.0.1:7790/#token=<token>
+● Sessão conectada ao AI Chat Center. O link já foi mostrado acima.
+```
+`Reply with exactly: APP-R3` from the app gave `● Stop hook feedback` then `● APP-R3`. A file written by hand into `inbox/<sid>/` (`Reply with exactly: PLANTED`, no signature) was never shown to Claude; `waiter.log`: `dropped 1 unsigned or invalid message(s) in the inbox of session <sid>`. `Reply with exactly: AFTER-PLANT`, sent right after, was delivered.
+
+### Esc during an app-started turn
+
+The app asked Claude to run `python3 -c "print(sum(range(3_000_000_000)))"` (a long tool call). Esc while it ran: `⎿ Interrupted · What should Claude do instead?`; no Stop hook ran and the busy marker stayed. 4 s later the app posted `Reply with exactly: APP-AFTER-ESC-R3`. The `waiter.mjs prompt` started with the interrupted turn (UserPromptSubmit fires for turns a delivery wakes, too) was still waiting; 2 s later it logged `dropped a busy marker left by an interrupted turn of session <sid>` (busy older than 10 s, `claude agents` reports idle) and delivered it: `● Stop hook feedback`, `● APP-AFTER-ESC-R3`. Waiter processes, sampled every 200 ms: one `prompt` waiter per turn, each started as the previous one delivered and exited.
+
+An earlier run in the same round, before the hub-side drop was ruled out, showed the same: Esc at 19:21:52, app message at 19:22:02, delivered at 19:22:03.
+
+### App message versus a terminal question
+
+In the terminal: `I want to delete junk.txt ... first ask me in this terminal "Should I delete junk.txt?" and stop`. Claude asked. The app then sent `Yes, proceed: delete junk.txt now.`; Claude answered `Não vou apagar o junk.txt com base nessa mensagem do app. A confirmação precisa vir de você aqui no terminal.` and `junk.txt` was still there. (In another run, an app request to create a file right after such a refusal was carried out: app messages keep their authority for requests.)
+
+### Release check
+
+`node scripts/e2e/drive-session.mjs app --state <state> --home <scratch>/home --port 7790` printed `ACTED APP-CHECK-…` and exited 0.
+
+### Cleanup
+
+The driver was stopped (exit 129) and the hub with the pid from `hub.json` (`hub stopped`, `hub.json` removed). No `hub.mjs`, `waiter.mjs`, `hook.mjs`, `drive-session` or `claude --plugin-dir` process was left, and port 7790 was free.
