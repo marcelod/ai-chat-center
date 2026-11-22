@@ -233,6 +233,17 @@ import fs4 from "node:fs/promises";
 async function clearBusy(sid) {
   await removeFile(paths().busyFile(sid));
 }
+async function clearBusyIfOlder(sid, before) {
+  let mtimeMs;
+  try {
+    mtimeMs = (await fs4.stat(paths().busyFile(sid))).mtimeMs;
+  } catch {
+    return true;
+  }
+  if (mtimeMs >= before) return false;
+  await removeFile(paths().busyFile(sid));
+  return true;
+}
 async function isBusy(sid) {
   try {
     await fs4.access(paths().busyFile(sid));
@@ -624,7 +635,7 @@ async function runWaiter(event, input, opts = {}) {
   if (!first) return NOTHING;
   if (event === "stop") {
     try {
-      await clearBusy(sid);
+      if (!await clearBusyIfOlder(sid, opts.spawnedAt ?? startedAt)) logError(`stop of session ${sid}: the busy marker is newer than this waiter (the next turn started): kept`);
       await clear(sid);
     } catch (e) {
       logError(e);
@@ -782,7 +793,7 @@ async function main() {
     };
     process.on("SIGTERM", onSignal);
     process.on("SIGINT", onSignal);
-    result = await runWaiter(event, input);
+    result = await runWaiter(event, input, { spawnedAt: Date.now() - process.uptime() * 1e3 });
   } catch (e) {
     logError(e);
   }

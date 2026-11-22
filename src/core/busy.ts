@@ -4,7 +4,8 @@ import { removeFile, writeJsonAtomic } from './fsAtomic.js';
 
 // Busy marker: a turn is running, so the waiter must not inject app messages mid-turn. Set by the
 // UserPromptSubmit hook of an active registration, which fires for every turn: typed in the terminal,
-// and also the turn a delivery wakes (hook feedback). Cleared by the Stop waiter (the turn ended), on /cc
+// and also the turn a delivery wakes (hook feedback). Cleared by the Stop waiter (the turn ended; only a
+// marker older than that waiter, see clearBusyIfOlder), on /cc
 // and on disconnect. A turn that ends without Stop (Esc, an API error) leaves it behind: the waiter and
 // the hub drop a marker older than 10 s once `claude agents` reports the session idle.
 
@@ -14,6 +15,23 @@ export async function setBusy(sid: string): Promise<void> {
 
 export async function clearBusy(sid: string): Promise<void> {
   await removeFile(paths().busyFile(sid));
+}
+
+/**
+ * Clears the marker only when it was written before `before` (epoch ms): the Stop waiter of turn N may
+ * run after the prompt hook of turn N+1 has set a fresh marker (audit R4-M1), which must stay. True when
+ * there is no marker left that predates `before`.
+ */
+export async function clearBusyIfOlder(sid: string, before: number): Promise<boolean> {
+  let mtimeMs: number;
+  try {
+    mtimeMs = (await fs.stat(paths().busyFile(sid))).mtimeMs;
+  } catch {
+    return true;
+  }
+  if (mtimeMs >= before) return false;
+  await removeFile(paths().busyFile(sid));
+  return true;
 }
 
 export async function isBusy(sid: string): Promise<boolean> {

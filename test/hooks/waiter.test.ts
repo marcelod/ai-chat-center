@@ -573,3 +573,36 @@ describe('waiter: only messages signed by the hub', () => {
     expect(unwrapMessages((await p).stderr).map((x) => x.text)).toEqual(['ok']);
   });
 });
+
+// Audit R4-M1: the next turn may start (its prompt hook sets busy) before the Stop waiter of the previous
+// turn runs. That waiter must clear only a marker older than itself, never the running turn's.
+describe('waiter stop: clears only the busy marker of the turn that ended', () => {
+  it('a marker set after the Stop waiter started is kept, and nothing is delivered into that turn', async () => {
+    await reg('s1');
+    await setBusy('s1'); // turn N
+    let done = false;
+    const prompt = wait('prompt', { prompt: 'hi' }, { promptSettleMs: 0, status: async () => 'busy' }).then((r) => ((done = true), r));
+    await sleep(30);
+    const spawnedAt = Date.now(); // Stop of turn N fires: its waiter process starts here
+    await sleep(20);
+    await setBusy('s1'); // turn N+1 starts before that waiter runs
+    await enqueue('s1', 'queued');
+    expect(await wait('stop', {}, { spawnedAt })).toEqual({ exitCode: 0, stderr: '' }); // lost the lock
+    expect(await isBusy('s1')).toBe(true);
+    await sleep(100);
+    expect(done).toBe(false); // nothing delivered into turn N+1
+    expect((await peek('s1')).map((m) => m.text)).toEqual(['queued']);
+    fs.rmSync(paths().busyFile('s1')); // turn N+1 ends
+    expect(unwrapMessages((await prompt).stderr).map((m) => m.text)).toEqual(['queued']);
+  });
+  it('a marker older than the Stop waiter is cleared', async () => {
+    await reg('s1');
+    await setBusy('s1');
+    const old = new Date(Date.now() - 5000);
+    await fsp.utimes(paths().busyFile('s1'), old, old);
+    await enqueue('s1', 'x');
+    const r = await wait('stop', {}, { spawnedAt: Date.now() - 1000 });
+    expect(r.exitCode).toBe(2);
+    expect(await isBusy('s1')).toBe(false);
+  });
+});

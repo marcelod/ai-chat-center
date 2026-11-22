@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { assertSessionId, paths } from '../core/paths.js';
 import { getRegistration, isActive, listRegistrations, markDisconnected, updateRegistration } from '../core/registry.js';
-import { clearBusy, isBusy } from '../core/busy.js';
+import { clearBusy, clearBusyIfOlder, isBusy } from '../core/busy.js';
 import { lookupClaudePid, type PidLookup } from './claudePid.js';
 import { drain, sweepClaimed } from '../core/inbox.js';
 import { clearWaiting } from '../core/waiting.js';
@@ -93,6 +93,12 @@ export interface WaiterOptions {
   busyCheckMs?: number;
   /** Default PROMPT_SETTLE_MS. */
   promptSettleMs?: number;
+  /**
+   * When this waiter's process started (epoch ms). A Stop waiter clears only a busy marker written before
+   * it: a newer one belongs to the next turn. Default: when runWaiter was called; main passes the
+   * process start time.
+   */
+  spawnedAt?: number;
 }
 
 /** The session's status from `claude agents --json`; null when the lookup fails or does not list it. */
@@ -214,9 +220,10 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
   const first = await activeReg(sid);
   if (!first) return NOTHING;
   if (event === 'stop') {
-    // The turn has ended: before the lock, so a waiter that loses the lock still unblocks the holder.
+    // The turn has ended: before the lock, so a waiter that loses the lock still unblocks the holder. Only
+    // a marker older than this process: the next turn may already have started and set its own.
     try {
-      await clearBusy(sid);
+      if (!(await clearBusyIfOlder(sid, opts.spawnedAt ?? startedAt))) logError(`stop of session ${sid}: the busy marker is newer than this waiter (the next turn started): kept`);
       await clear(sid);
     } catch (e) {
       logError(e);
@@ -399,7 +406,7 @@ export async function main(): Promise<void> {
     };
     process.on('SIGTERM', onSignal);
     process.on('SIGINT', onSignal);
-    result = await runWaiter(event, input);
+    result = await runWaiter(event, input, { spawnedAt: Date.now() - process.uptime() * 1000 });
   } catch (e) {
     logError(e);
   }
