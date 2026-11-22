@@ -4,7 +4,7 @@ import { assertSessionId, paths } from '../core/paths.js';
 import { getRegistration, isActive, listRegistrations, markDisconnected, updateRegistration } from '../core/registry.js';
 import { clearBusy, isBusy } from '../core/busy.js';
 import { lookupClaudePid, type PidLookup } from './claudePid.js';
-import { drain } from '../core/inbox.js';
+import { drain, sweepClaimed } from '../core/inbox.js';
 import { clearWaiting } from '../core/waiting.js';
 import { acquireLock, releaseLock, touchLock, lockPid, isAlive as pidAlive } from '../core/lock.js';
 import { wrapMessages } from '../core/protocol.js';
@@ -23,8 +23,16 @@ export interface WaiterResult {
 export const HOOK_TIMEOUT_S = 86_400;
 /** The waiter exits 0 on its own a minute before Claude Code would kill it. */
 export const WAITER_BUDGET_MS = (HOOK_TIMEOUT_S - 60) * 1000;
-/** App messages older than this are discarded (and logged), never delivered: the user moved on. */
+/**
+ * When an old session is resumed (start waiter, source "resume"), app messages older than this are
+ * discarded (and logged), never delivered: the user moved on. At the end of a turn (stop) messages are
+ * delivered whatever their age: a long turn must not eat the messages sent while it ran.
+ */
 export const MAX_MESSAGE_AGE_MS = 30 * 60_000;
+/** A waiter with an unknown pid exits after `claude agents` has failed this long in a row. */
+export const LOOKUP_FAIL_EXIT_MS = 30 * 60_000;
+/** Claimed inbox files older than this (delivered, but their delete failed) are swept when a waiter starts. */
+const CLAIMED_SWEEP_MS = 3600_000;
 const RERESOLVE_MS = 60_000;
 /** Lookups in a row that do not list the session before a waiter with an unknown pid gives up. */
 const MAX_MISSES = 3;
@@ -53,6 +61,8 @@ export interface WaiterOptions {
   now?: () => number;
   /** How often the waiter lock heartbeat is refreshed. Default 10 s. */
   heartbeatMs?: number;
+  /** With an unknown pid, exit once lookups have failed for this long in a row. Default LOOKUP_FAIL_EXIT_MS. */
+  lookupFailMs?: number;
 }
 
 /**
@@ -101,17 +111,25 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
   const now = opts.now ?? Date.now;
   const heartbeatMs = opts.heartbeatMs ?? HEARTBEAT_MS;
   const lookupFn = opts.lookup ?? ((id: string) => lookupClaudePid(id));
+  const lookupFailMs = opts.lookupFailMs ?? LOOKUP_FAIL_EXIT_MS;
+  const discardOld = event === 'start' && input.source === 'resume';
 
   let misses = 0;
   let lastLookupAt = 0;
   let lookups = 0;
+  /** Start of the current run of failed lookups, or null. */
+  let failingSince: number | null = null;
   const lookup = async (): Promise<PidLookup> => {
     lookups++;
     lastLookupAt = Date.now();
     const r = await lookupFn(sid);
-    if (r.ok) misses = r.pid === null ? misses + 1 : 0;
+    if (r.ok) {
+      misses = r.pid === null ? misses + 1 : 0;
+      failingSince = null;
+    } else failingSince ??= lastLookupAt;
     return r;
   };
+  const failingTooLong = () => failingSince !== null && Date.now() - failingSince >= lookupFailMs;
 
   if (event === 'start') {
     try {
@@ -148,62 +166,92 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
 
   const lock = paths().waiterLock(sid);
   if (!(await acquireLock(lock))) return NOTHING;
+  // The exact content we published ({pid, ts}): touchLock only changes the mtime, so any other content
+  // means the lock was reclaimed (our heartbeat lapsed, e.g. a suspended machine) by another waiter.
+  const mine = await readLock(lock);
   let lastBeat = Date.now();
   let deadChecked = false;
   try {
+    try {
+      await sweepClaimed(sid, CLAIMED_SWEEP_MS);
+    } catch (e) {
+      logError(e);
+    }
     for (;;) {
       if (Date.now() - startedAt >= deadlineMs) return NOTHING;
-      const reg = await activeReg(sid);
-      if (!reg) return NOTHING;
-      if (Date.now() - lastBeat >= heartbeatMs) {
-        lastBeat = Date.now();
-        await touchLock(lock);
-      }
-      const regPid = reg.pid ?? pid;
-      if (regPid === null) {
-        // Unknown pid: look it up again now and then; give up once `claude agents` keeps not listing it.
-        if (misses >= MAX_MISSES) return NOTHING;
-        if (Date.now() - lastLookupAt >= reresolveMs) {
+      // Never exit on a transient fs error: log it, wait, try again.
+      try {
+        if (mine === null || (await readLock(lock)) !== mine) {
+          logError(`waiter lock for session ${sid} is no longer ours: exiting without draining`);
+          return NOTHING;
+        }
+        const reg = await activeReg(sid);
+        if (!reg) return NOTHING;
+        if (Date.now() - lastBeat >= heartbeatMs) {
+          lastBeat = Date.now();
+          await touchLock(lock);
+        }
+        const regPid = reg.pid ?? pid;
+        if (regPid === null) {
+          // Unknown pid: look it up again now and then; give up once `claude agents` keeps not listing
+          // it, or keeps failing.
+          if (misses >= MAX_MISSES || failingTooLong()) return NOTHING;
+          if (Date.now() - lastLookupAt >= reresolveMs) {
+            const r = await lookup();
+            if (misses >= MAX_MISSES || failingTooLong()) return NOTHING;
+            if (r.ok && r.pid !== null) {
+              pid = r.pid;
+              await adopt(pid);
+            }
+          }
+        } else if (!isAlive(regPid)) {
+          // A resumed session runs in a new process; its start waiter may not have updated the pid yet.
+          if (deadChecked) return NOTHING;
+          deadChecked = true;
           const r = await lookup();
-          if (misses >= MAX_MISSES) return NOTHING;
-          if (r.ok && r.pid !== null) {
-            pid = r.pid;
-            await adopt(pid);
+          const fresh = r.ok ? r.pid : null;
+          if (fresh === null || fresh === regPid || !isAlive(fresh)) return NOTHING;
+          pid = fresh;
+          await adopt(fresh);
+          continue;
+        }
+        if (!(await isBusy(sid))) {
+          const drained = await drain(sid);
+          let msgs = drained;
+          if (discardOld) {
+            const cutoff = now() - MAX_MESSAGE_AGE_MS;
+            msgs = drained.filter((m) => !(Date.parse(m.createdAt) < cutoff));
+            if (msgs.length < drained.length) {
+              logError(`discarded ${drained.length - msgs.length} message(s) older than 30 min on resume of session ${sid}`);
+            }
+          }
+          if (msgs.length > 0) {
+            // Drained messages are gone from disk: delivery must not depend on anything else.
+            const result: WaiterResult = { exitCode: 2, stderr: wrapMessages(msgs, reg.key) };
+            try {
+              await clear(sid);
+            } catch (e) {
+              logError(e);
+            }
+            return result;
           }
         }
-      } else if (!isAlive(regPid)) {
-        // A resumed session runs in a new process; its start waiter may not have updated the pid yet.
-        if (deadChecked) return NOTHING;
-        deadChecked = true;
-        const r = await lookup();
-        const fresh = r.ok ? r.pid : null;
-        if (fresh === null || fresh === regPid || !isAlive(fresh)) return NOTHING;
-        pid = fresh;
-        await adopt(fresh);
-        continue;
-      }
-      if (!(await isBusy(sid))) {
-        const drained = await drain(sid);
-        const cutoff = now() - MAX_MESSAGE_AGE_MS;
-        const msgs = drained.filter((m) => !(Date.parse(m.createdAt) < cutoff));
-        if (msgs.length < drained.length) {
-          logError(`discarded ${drained.length - msgs.length} message(s) older than 30 min for session ${sid}`);
-        }
-        if (msgs.length > 0) {
-          // Drained messages are gone from disk: delivery must not depend on anything else.
-          const result: WaiterResult = { exitCode: 2, stderr: wrapMessages(msgs, reg.key) };
-          try {
-            await clear(sid);
-          } catch (e) {
-            logError(e);
-          }
-          return result;
-        }
+      } catch (e) {
+        logError(e);
       }
       await sleep(pollMs);
     }
   } finally {
-    await releaseLock(lock);
+    // Only our own lock: after a reclaim, the file belongs to the new holder.
+    if (mine !== null && (await readLock(lock)) === mine) await releaseLock(lock);
+  }
+}
+
+async function readLock(file: string): Promise<string | null> {
+  try {
+    return await fs.promises.readFile(file, 'utf8');
+  } catch {
+    return null;
   }
 }
 

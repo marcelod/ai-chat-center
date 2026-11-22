@@ -1,13 +1,21 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { enqueue, drain, peek, clearInbox } from '../../src/core/inbox.js';
+import { enqueue, drain, peek, clearInbox, sweepClaimed } from '../../src/core/inbox.js';
 import { paths } from '../../src/core/paths.js';
 
 beforeEach(() => {
   process.env.AI_CHAT_CENTER_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'acc-'));
 });
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+const errno = (code: string) => Object.assign(new Error(code), { code });
+const names = () => fs.readdirSync(paths().inboxDir('s1')).sort();
 
 describe('inbox', () => {
   it('enqueue/drain keeps order', async () => {
@@ -48,5 +56,73 @@ describe('inbox', () => {
     const files = fs.readdirSync(paths().inboxDir('s1'));
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/^\d{15}-\d{6}-.+\.msg$/);
+  });
+
+  // Audit R2-N2 (R2 drainloss repro): a persistent EPERM deleting the 2nd claimed file made drain throw,
+  // losing the 1st message (already read and deleted) and stranding the 2nd as .claimed-*.
+  it('a claimed message is delivered even when deleting the claimed file fails', async () => {
+    await enqueue('s1', 'one');
+    await enqueue('s1', 'two');
+    const real = fsp.rm.bind(fsp);
+    let n = 0;
+    vi.spyOn(fsp, 'rm').mockImplementation(async (p, o) => {
+      if (String(p).includes('.claimed-') && ++n >= 2) throw errno('EPERM');
+      return real(p, o);
+    });
+    expect((await drain('s1')).map((m) => m.text)).toEqual(['one', 'two']);
+    vi.restoreAllMocks();
+    expect(names()).toHaveLength(1);
+    expect(names()[0]).toContain('.msg.claimed-'); // left for the sweep
+    expect(await drain('s1')).toEqual([]); // never delivered twice
+    expect(await peek('s1')).toEqual([]);
+  });
+  it('a transient read error on a claimed file is retried and the message delivered in the same pass', async () => {
+    await enqueue('s1', 'a');
+    const real = fsp.readFile.bind(fsp);
+    let fails = 2;
+    vi.spyOn(fsp, 'readFile').mockImplementation((async (p: string, o: unknown) => {
+      if (String(p).includes('.claimed-') && fails-- > 0) throw errno('EBUSY');
+      return real(p, o as never);
+    }) as never);
+    expect((await drain('s1')).map((m) => m.text)).toEqual(['a']);
+    expect(names()).toEqual([]);
+  });
+  it('a claimed file that still cannot be read is put back as .msg for the next pass, never dropped', async () => {
+    await enqueue('s1', 'stuck');
+    await enqueue('s1', 'fine');
+    const real = fsp.readFile.bind(fsp);
+    let reads = 0;
+    vi.spyOn(fsp, 'readFile').mockImplementation((async (p: string, o: unknown) => {
+      if (String(p).includes('.claimed-')) {
+        const raw = String(await real(p, 'utf8'));
+        if (raw.includes('stuck')) {
+          reads++;
+          throw errno('EIO');
+        }
+      }
+      return real(p, o as never);
+    }) as never);
+    expect((await drain('s1')).map((m) => m.text)).toEqual(['fine']);
+    expect(reads).toBe(4); // first read + 3 retries
+    vi.restoreAllMocks();
+    expect(names()).toHaveLength(1);
+    expect(names()[0]).toMatch(/\.msg$/);
+    expect((await drain('s1')).map((m) => m.text)).toEqual(['stuck']);
+  });
+  it('sweepClaimed deletes claimed files older than the limit and keeps fresh ones and queued messages', async () => {
+    await enqueue('s1', 'queued');
+    const dir = paths().inboxDir('s1');
+    const old = Date.now() - 2 * 3600_000;
+    fs.writeFileSync(path.join(dir, `x.msg.claimed-${old}-u1`), '{}');
+    fs.writeFileSync(path.join(dir, `y.msg.claimed-${Date.now()}-u2`), '{}');
+    // older naming (no claim time): falls back to the file mtime
+    fs.writeFileSync(path.join(dir, 'z.msg.claimed-0d6e2c9a-uuid'), '{}');
+    fs.utimesSync(path.join(dir, 'z.msg.claimed-0d6e2c9a-uuid'), new Date(old), new Date(old));
+    expect(await sweepClaimed('s1', 3600_000)).toBe(2);
+    const left = names();
+    expect(left.some((n) => n.startsWith('y.msg.claimed-'))).toBe(true);
+    expect(left.filter((n) => n.endsWith('.msg'))).toHaveLength(1);
+    expect(left).toHaveLength(2);
+    expect(await sweepClaimed('nobody', 3600_000)).toBe(0);
   });
 });

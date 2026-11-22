@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { runWaiter, type WaiterOptions, type WaiterEvent, type PidLookup } from '../../src/hooks/waiter.js';
@@ -11,6 +12,7 @@ import { unwrapMessages } from '../../src/core/protocol.js';
 import { paths } from '../../src/core/paths.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const errno = (code: string) => Object.assign(new Error(code), { code });
 const reg = (sid: string) => register({ sessionId: sid, transcriptPath: '/t.jsonl', cwd: '/x', pid: process.pid });
 const notListed = async (): Promise<PidLookup> => ({ ok: true, pid: null });
 const opts: WaiterOptions = { pollMs: 10, lookup: notListed };
@@ -20,6 +22,9 @@ const wait = (event: WaiterEvent, o: Record<string, unknown> = {}, extra: Waiter
 
 beforeEach(() => {
   process.env.AI_CHAT_CENTER_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'acc-'));
+});
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe('waiter', () => {
@@ -209,7 +214,8 @@ describe('waiter', () => {
     expect(fs.existsSync(paths().waiterLock('s1'))).toBe(false);
   });
   // Audit AI-F10: messages queued long ago (a session asleep for hours) are dropped, not delivered.
-  it('discards and logs messages older than 30 minutes, delivers the fresh ones', async () => {
+  // Audit S2-N6: only when an old session is resumed (start + resume), never at the end of a turn.
+  it('start on resume: discards and logs messages older than 30 minutes, delivers the fresh ones', async () => {
     await reg('s1');
     const old = await enqueue('s1', 'stale');
     await enqueue('s1', 'fresh');
@@ -221,16 +227,95 @@ describe('waiter', () => {
       const m = JSON.parse(fs.readFileSync(f, 'utf8'));
       if (m.text === 'fresh') fs.writeFileSync(f, JSON.stringify({ ...m, createdAt: new Date(now - 1000).toISOString() }));
     }
-    const r = await wait('stop', {}, { now: () => now });
+    const r = await wait('start', { source: 'resume' }, { now: () => now, lookup: async () => ({ ok: true, pid: process.pid }) });
     expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['fresh']);
     expect(fs.readFileSync(path.join(paths().logDir, 'waiter.log'), 'utf8')).toMatch(/discarded 1 message/);
   });
-  it('only stale messages: nothing is delivered and the waiter keeps waiting', async () => {
+  it('start on resume, only stale messages: nothing is delivered and the waiter keeps waiting', async () => {
     await reg('s1');
     const old = await enqueue('s1', 'stale');
     const now = Date.parse(old.createdAt) + 31 * 60_000;
-    expect(await wait('stop', {}, { now: () => now, deadlineMs: 80 })).toEqual({ exitCode: 0, stderr: '' });
-    expect(await peek('s1')).toEqual([]);
+    let done = false;
+    const p = wait('start', { source: 'resume' }, { now: () => now, lookup: async () => ({ ok: true, pid: process.pid }) }).then((r) => ((done = true), r));
+    await vi.waitFor(async () => expect(await peek('s1')).toEqual([]), { timeout: 5000, interval: 10 });
+    expect(done).toBe(false);
+    await markDisconnected('s1', 'off');
+    expect(await p).toEqual({ exitCode: 0, stderr: '' });
+  });
+  // Audit S2-N6 / R2-N2: a message sent during a turn longer than 30 min used to be dropped when it ended.
+  it('stop delivers messages regardless of their age (a long turn)', async () => {
+    await reg('s1');
+    const old = await enqueue('s1', 'sent during a 40 min turn');
+    const now = Date.parse(old.createdAt) + 40 * 60_000;
+    const r = await wait('stop', {}, { now: () => now });
+    expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['sent during a 40 min turn']);
+  });
+  it('start on startup (not a resume) also delivers old messages', async () => {
+    await reg('s1');
+    const old = await enqueue('s1', 'old');
+    const now = Date.parse(old.createdAt) + 40 * 60_000;
+    const r = await wait('start', { source: 'startup' }, { now: () => now, lookup: async () => ({ ok: true, pid: process.pid }) });
+    expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['old']);
+  });
+  // Audit R2-N2: one fs error used to end the waiter (no per-iteration try/catch), stopping delivery.
+  it('a transient fs error in one iteration is logged and the waiter keeps going', async () => {
+    await reg('s1');
+    await enqueue('s1', 'x');
+    const real = fsp.readdir.bind(fsp);
+    let fails = 3;
+    vi.spyOn(fsp, 'readdir').mockImplementation((async (p: string, o: unknown) => {
+      if (String(p).includes(`inbox`) && fails-- > 0) throw errno('EIO');
+      return real(p, o as never);
+    }) as never);
+    const r = await wait('stop');
+    expect(r.exitCode).toBe(2);
+    expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['x']);
+    expect(fs.readFileSync(path.join(paths().logDir, 'waiter.log'), 'utf8')).toMatch(/EIO/);
+  });
+  it('sweeps claimed files older than 1 hour when it starts', async () => {
+    await reg('s1');
+    const dir = paths().inboxDir('s1');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `x.msg.claimed-${Date.now() - 2 * 3600_000}-u`), '{}');
+    expect(await wait('stop', {}, { deadlineMs: 50 })).toEqual({ exitCode: 0, stderr: '' });
+    expect(fs.readdirSync(dir)).toEqual([]);
+  });
+  // Audit R2-N8: a waiter whose lock was reclaimed (its heartbeat lapsed) must stop, not drain alongside.
+  it('exits 0 without draining once its lock is no longer its own', async () => {
+    await reg('s1');
+    const p = wait('stop');
+    const lock = paths().waiterLock('s1');
+    await vi.waitFor(() => expect(fs.existsSync(lock)).toBe(true), { timeout: 5000, interval: 5 });
+    fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, ts: '2000-01-01T00:00:00.000Z' })); // another holder's content
+    await enqueue('s1', 'x');
+    expect(await p).toEqual({ exitCode: 0, stderr: '' });
+    expect((await peek('s1')).map((m) => m.text)).toEqual(['x']);
+    expect(fs.existsSync(lock)).toBe(true); // the other holder's lock is left alone
+  });
+  // Audit R2-N7 / RT10: with an unknown pid and `claude agents` failing every time, it waited 24 h.
+  it('pid unknown and every lookup fails: exits after the failure limit (30 min by default)', async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: null });
+    let lookups = 0;
+    const r = await wait('stop', {}, { reresolveMs: 5, lookupFailMs: 60, lookup: async () => (lookups++, { ok: false }) });
+    expect(r).toEqual({ exitCode: 0, stderr: '' });
+    expect(lookups).toBeGreaterThan(1);
+    const { LOOKUP_FAIL_EXIT_MS } = await import('../../src/hooks/waiter.js');
+    expect(LOOKUP_FAIL_EXIT_MS).toBe(30 * 60_000);
+  });
+  it('pid unknown: a successful lookup resets the failure clock', async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: null });
+    let lookups = 0;
+    // fail, then find it alive: it must keep waiting past the failure limit
+    const p = wait('stop', {}, {
+      reresolveMs: 5,
+      lookupFailMs: 40,
+      lookup: async () => (++lookups < 3 ? { ok: false } : { ok: true, pid: 4242 }),
+      isAlive: (pid) => pid === 4242,
+    });
+    await vi.waitFor(async () => expect((await getRegistration('s1'))?.pid).toBe(4242), { timeout: 5000, interval: 5 });
+    await sleep(100);
+    await enqueue('s1', 'still here');
+    expect(unwrapMessages((await p).stderr).map((m) => m.text)).toEqual(['still here']);
   });
   it('keeps the waiter lock heartbeat fresh while waiting', async () => {
     await reg('s1');

@@ -61,32 +61,94 @@ export async function peek(sid: string): Promise<InboxMessage[]> {
   return out;
 }
 
+const READ_RETRIES = 3;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** Claimed files are named `<name>.msg.claimed-<claim epoch ms>-<uuid>`. */
+const CLAIMED_RE = /\.msg\.claimed-(?:(\d{13,})-)?/;
+
+/** Reads a claimed message, retrying a failed read 3 times. 'malformed' for bad JSON, 'unreadable' if every try failed. */
+async function readClaimed(file: string): Promise<InboxMessage | 'malformed' | 'unreadable'> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return JSON.parse(await fs.readFile(file, 'utf8')) as InboxMessage;
+    } catch (e) {
+      if (e instanceof SyntaxError) return 'malformed';
+      if (attempt >= READ_RETRIES) return 'unreadable';
+      await sleep(20 + Math.floor(Math.random() * 31));
+    }
+  }
+}
+
 /**
  * Takes every queued message, in name order. Each file is first CLAIMED with an atomic rename to a
  * unique name; only the drain whose rename succeeds reads, deletes and returns it. A failed rename
  * (ENOENT, or EPERM/EBUSY on Windows) means another drain claimed it. Plain read-then-unlink let two
  * drains both read a file before either deleted it (double delivery on macOS and Windows).
+ *
+ * Once claimed and read, a message IS returned: deleting the claimed file is best effort (a leftover is
+ * never listed again, and sweepClaimed removes it later). A claimed file that cannot be read after 3
+ * retries is renamed back to its .msg name for the next pass; it is never dropped silently. A malformed
+ * message is dropped (it would fail forever).
  */
 export async function drain(sid: string): Promise<InboxMessage[]> {
   const out: InboxMessage[] = [];
   for (const f of await list(sid)) {
-    const claimed = `${f}.claimed-${crypto.randomUUID()}`;
+    const claimed = `${f}.claimed-${Date.now()}-${crypto.randomUUID()}`;
     try {
       await fs.rename(f, claimed);
     } catch (e) {
       if (isRace(e)) continue; // someone else took it
+      if (out.length > 0) break; // deliver what is already claimed; the rest waits for the next pass
       throw e;
     }
-    let m: InboxMessage | null = null;
-    try {
-      m = JSON.parse(await fs.readFile(claimed, 'utf8')) as InboxMessage;
-    } catch (e) {
-      if (!(e instanceof SyntaxError)) throw e; // a malformed message is dropped, not re-read forever
+    const m = await readClaimed(claimed);
+    if (m === 'unreadable') {
+      try {
+        await withFsRetry(() => fs.rename(claimed, f));
+      } catch {
+        /* still claimed: sweepClaimed is the last resort */
+      }
+      continue;
     }
-    await withFsRetry(() => fs.rm(claimed, { force: true }));
-    if (m) out.push(m);
+    if (m !== 'malformed') out.push(m);
+    try {
+      await withFsRetry(() => fs.rm(claimed, { force: true }));
+    } catch {
+      /* delivered anyway; sweepClaimed removes the leftover */
+    }
   }
   return out;
+}
+
+/**
+ * Deletes claimed files older than `maxAgeMs` (by the claim time in their name, else their mtime): left
+ * behind by a drain that delivered them but could not delete them. Call it only while holding the
+ * session's waiter lock. Returns how many were removed.
+ */
+export async function sweepClaimed(sid: string, maxAgeMs: number): Promise<number> {
+  const dir = paths().inboxDir(sid);
+  let names: string[];
+  try {
+    names = await fs.readdir(dir);
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  const now = Date.now();
+  for (const n of names) {
+    const m = CLAIMED_RE.exec(n);
+    if (!m) continue;
+    const file = path.join(dir, n);
+    try {
+      const at = m[1] ? Number(m[1]) : (await fs.stat(file)).mtimeMs;
+      if (now - at <= maxAgeMs) continue;
+      await withFsRetry(() => fs.rm(file, { force: true }));
+      removed++;
+    } catch {
+      /* gone, or still held: next time */
+    }
+  }
+  return removed;
 }
 
 /** Deletes every queued message (and stray temp file) of a session. Used when it disconnects or reconnects. */
