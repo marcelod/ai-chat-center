@@ -280,3 +280,29 @@ describe('main', () => {
     expect(IDLE_EXIT_MS).toBe(2 * 3600_000);
   });
 });
+
+// Audit R3-F4: a hub that hub.json no longer names (a twin replaced it, or the state folder was deleted)
+// exits on its own instead of lingering with an old token.
+describe('hub ownership check', () => {
+  it('calls onReplaced once hub.json names another pid or port, or is gone', async () => {
+    for (const change of ['other-pid', 'other-port', 'gone'] as const) {
+      let replaced = 0;
+      const h = await startHub({ ownershipCheckMs: 10, onReplaced: () => void replaced++ });
+      try {
+        await new Promise((r) => setTimeout(r, 60));
+        expect(replaced).toBe(0);
+        const file = path.join(home, 'hub.json');
+        if (change === 'gone') await fsp.rm(file);
+        else {
+          const cur = JSON.parse(await fsp.readFile(file, 'utf8'));
+          await fsp.writeFile(file, JSON.stringify(change === 'other-pid' ? { ...cur, pid: cur.pid + 1 } : { ...cur, port: cur.port + 1 }));
+        }
+        await vi.waitFor(() => expect(replaced).toBe(1), { timeout: 5000, interval: 10 });
+        await new Promise((r) => setTimeout(r, 50));
+        expect(replaced).toBe(1);
+      } finally {
+        await h!.close();
+      }
+    }
+  });
+});

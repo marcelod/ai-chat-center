@@ -1494,6 +1494,16 @@ async function startHub(opts = {}) {
         opts.onIdle?.();
       }
     }, opts.idleCheckMs ?? 6e4);
+    let replacedFired = false;
+    const ownTimer = setInterval(async () => {
+      if (replacedFired) return;
+      const cur = await readJson(paths().hubJson);
+      if (cur?.pid === process.pid && cur?.port === port) return;
+      if (!cur && fsSync.existsSync(paths().hubJson)) return;
+      replacedFired = true;
+      log(cur ? `hub.json now names pid ${cur.pid} port ${cur.port}: exiting` : "hub.json is gone: exiting");
+      opts.onReplaced?.();
+    }, opts.ownershipCheckMs ?? 6e4);
     let done = false;
     return {
       port,
@@ -1503,6 +1513,7 @@ async function startHub(opts = {}) {
         clearInterval(pruneTimer);
         clearInterval(exitTimer);
         clearInterval(idleTimer);
+        clearInterval(ownTimer);
         await started.close();
         const cur = await readJson(paths().hubJson);
         if (cur?.pid === process.pid && cur?.port === port) await fs8.rm(paths().hubJson, { force: true });
@@ -1516,7 +1527,7 @@ async function startHub(opts = {}) {
 async function main() {
   let hub = null;
   const stop = () => void (hub ? hub.close() : Promise.resolve()).finally(() => process.exit(0));
-  hub = await startHub({ onIdle: stop });
+  hub = await startHub({ onIdle: stop, onReplaced: stop });
   if (!hub) process.exit(0);
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);

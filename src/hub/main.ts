@@ -33,6 +33,10 @@ export interface StartHubOptions {
   listLive?: () => Promise<LiveSession[] | null>;
   /** Called once when the hub has been idle for idleMs. Default (main): close and exit. */
   onIdle?: () => void;
+  /** How often the hub checks that hub.json still names it. Default 60 s. */
+  ownershipCheckMs?: number;
+  /** Called once when hub.json names another hub or is gone. Default (main): close and exit. */
+  onReplaced?: () => void;
 }
 
 async function prune(log: (m: string) => void): Promise<void> {
@@ -197,6 +201,18 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
         opts.onIdle?.();
       }
     }, opts.idleCheckMs ?? 60_000);
+    // A hub that hub.json no longer names (another hub replaced it, or the state folder was deleted)
+    // exits: it would otherwise keep running unseen, still accepting its old token.
+    let replacedFired = false;
+    const ownTimer = setInterval(async () => {
+      if (replacedFired) return;
+      const cur = await readJson<{ pid?: number; port?: number }>(paths().hubJson);
+      if (cur?.pid === process.pid && cur?.port === port) return;
+      if (!cur && fsSync.existsSync(paths().hubJson)) return; // unreadable for a moment (Windows): next time
+      replacedFired = true;
+      log(cur ? `hub.json now names pid ${cur.pid} port ${cur.port}: exiting` : 'hub.json is gone: exiting');
+      opts.onReplaced?.();
+    }, opts.ownershipCheckMs ?? 60_000);
     let done = false;
     return {
       port,
@@ -206,6 +222,7 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
         clearInterval(pruneTimer);
         clearInterval(exitTimer);
         clearInterval(idleTimer);
+        clearInterval(ownTimer);
         await started.close();
         const cur = await readJson<{ pid?: number; port?: number }>(paths().hubJson);
         if (cur?.pid === process.pid && cur?.port === port) await fs.rm(paths().hubJson, { force: true });
@@ -220,7 +237,7 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
 export async function main(): Promise<void> {
   let hub: Awaited<ReturnType<typeof startHub>> = null;
   const stop = () => void (hub ? hub.close() : Promise.resolve()).finally(() => process.exit(0));
-  hub = await startHub({ onIdle: stop });
+  hub = await startHub({ onIdle: stop, onReplaced: stop });
   if (!hub) process.exit(0);
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);

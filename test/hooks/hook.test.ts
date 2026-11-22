@@ -377,6 +377,55 @@ describe('ensureHub', () => {
     expect(url).toBe('http://127.0.0.1:7777/?token=tok');
   });
 
+  // Audit R3-F4: a hub stalled for a moment (load, antivirus, resume from sleep) got a twin that rotated
+  // the token while the first kept running with the old one. While the recorded pid is alive and the
+  // hub does not answer, keep asking (about 5 s) before starting another.
+  it('a recorded hub that is alive but slow to answer is waited for, not replaced', async () => {
+    writeHub(7777, 'tok', 777);
+    let calls = 0;
+    const ok = realHub('tok', 777);
+    let spawned = 0;
+    const url = await ensureHub({
+      health: async (p, c) => (++calls <= 3 ? null : ok(p, c)),
+      isAlive: (pid) => pid === 777,
+      spawnHub: () => void spawned++,
+      pollMs: 5,
+      stalledWaitMs: 2000,
+    });
+    expect(spawned).toBe(0);
+    expect(calls).toBe(4);
+    expect(url).toContain('127.0.0.1:7777/');
+  });
+  it('a recorded hub whose pid is dead is not waited for', async () => {
+    writeHub(7777, 'tok', 777);
+    let calls = 0;
+    let spawned = 0;
+    await expect(
+      ensureHub({ health: async () => (calls++, null), isAlive: () => false, spawnHub: () => void spawned++, pollMs: 5, timeoutMs: 30, stalledWaitMs: 2000 }),
+    ).rejects.toThrow();
+    expect(spawned).toBe(1);
+    // one check of the recorded hub, then only the post-spawn polls (bounded by timeoutMs)
+    expect(calls).toBeLessThan(12);
+  });
+  it('a foreign answer (bad proof) is not waited for', async () => {
+    writeHub(7777, 'tok', 777);
+    let calls = 0;
+    let spawned = 0;
+    const t = Date.now();
+    await expect(
+      ensureHub({
+        health: async () => (calls++, { ok: true as const, version: VERSION, pid: 777, proof: 'f'.repeat(64) }),
+        isAlive: () => true,
+        spawnHub: () => void spawned++,
+        pollMs: 5,
+        timeoutMs: 30,
+        stalledWaitMs: 5000,
+      }),
+    ).rejects.toThrow();
+    expect(spawned).toBe(1);
+    expect(Date.now() - t).toBeLessThan(2000);
+  });
+
   it('rejects when hub never comes up', async () => {
     await expect(
       ensureHub({ spawnHub: () => {}, health: async () => null, pollMs: 5, timeoutMs: 50 }),

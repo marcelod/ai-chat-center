@@ -335,10 +335,10 @@ function defaultSpawnHub() {
 }
 function readHub() {
   try {
-    const { port } = JSON.parse(fs4.readFileSync(paths().hubJson, "utf8"));
+    const { port, pid } = JSON.parse(fs4.readFileSync(paths().hubJson, "utf8"));
     const token = fs4.readFileSync(paths().token, "utf8").trim();
     if (typeof port !== "number" || !token) return null;
-    return { port, token };
+    return { port, token, pid: typeof pid === "number" ? pid : null };
   } catch {
     return null;
   }
@@ -369,19 +369,31 @@ async function ensureHub(opts = {}) {
   });
   const pollMs = opts.pollMs ?? 100;
   const timeoutMs = opts.timeoutMs ?? 5e3;
-  const proven = async (h) => {
+  const stalledWaitMs = opts.stalledWaitMs ?? 5e3;
+  const check = async (h) => {
     const challenge = newChallenge();
     const r = await health(h.port, challenge);
-    return r && proofMatches(h.token, challenge, h.port, r) ? r : null;
+    if (!r) return "silent";
+    return proofMatches(h.token, challenge, h.port, r) ? r : null;
+  };
+  const proven = async (h) => {
+    const r = await check(h);
+    return r === "silent" ? null : r;
   };
   const hub = readHub();
   if (hub) {
-    const h = await proven(hub);
+    let r = await check(hub);
+    const until = Date.now() + stalledWaitMs;
+    while (r === "silent" && hub.pid !== null && isAlive2(hub.pid) && Date.now() < until) {
+      await sleep(Math.max(pollMs, 50));
+      r = await check(hub);
+    }
+    const h = r === "silent" ? null : r;
     if (h) {
       if (!(compareVersions(h.version, VERSION) < 0)) return urlOf(hub);
       kill(h.pid);
-      const until = Date.now() + 3e3;
-      while (isAlive2(h.pid) && Date.now() < until) await sleep(50);
+      const until2 = Date.now() + 3e3;
+      while (isAlive2(h.pid) && Date.now() < until2) await sleep(50);
     }
   }
   (opts.spawnHub ?? defaultSpawnHub)();

@@ -21,6 +21,8 @@ export interface EnsureHubOptions {
   isAlive?: (pid: number) => boolean;
   pollMs?: number;
   timeoutMs?: number;
+  /** How long a recorded hub whose pid is alive may stay silent before another is started. Default 5 s. */
+  stalledWaitMs?: number;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -66,12 +68,12 @@ export function defaultSpawnHub(): void {
   spawn(process.execPath, [hubPath], hubSpawnOptions()).unref();
 }
 
-function readHub(): { port: number; token: string } | null {
+function readHub(): { port: number; token: string; pid: number | null } | null {
   try {
-    const { port } = JSON.parse(fs.readFileSync(paths().hubJson, 'utf8')) as { port?: unknown };
+    const { port, pid } = JSON.parse(fs.readFileSync(paths().hubJson, 'utf8')) as { port?: unknown; pid?: unknown };
     const token = fs.readFileSync(paths().token, 'utf8').trim();
     if (typeof port !== 'number' || !token) return null;
-    return { port, token };
+    return { port, token, pid: typeof pid === 'number' ? pid : null };
   } catch {
     return null;
   }
@@ -118,15 +120,30 @@ export async function ensureHub(opts: EnsureHubOptions = {}): Promise<string> {
   const pollMs = opts.pollMs ?? 100;
   const timeoutMs = opts.timeoutMs ?? 5000;
 
-  const proven = async (h: { port: number; token: string }) => {
+  const stalledWaitMs = opts.stalledWaitMs ?? 5000;
+  /** The proven answer; 'silent' when nothing answered; null when something answered without a valid proof. */
+  const check = async (h: { port: number; token: string }) => {
     const challenge = newChallenge();
     const r = await health(h.port, challenge);
-    return r && proofMatches(h.token, challenge, h.port, r) ? r : null;
+    if (!r) return 'silent' as const;
+    return proofMatches(h.token, challenge, h.port, r) ? r : null;
+  };
+  const proven = async (h: { port: number; token: string }) => {
+    const r = await check(h);
+    return r === 'silent' ? null : r;
   };
 
   const hub = readHub();
   if (hub) {
-    const h = await proven(hub);
+    // A hub that is alive but does not answer right now (load, antivirus, resume from sleep) is waited
+    // for: replacing it would rotate the token while it keeps running with the old one.
+    let r = await check(hub);
+    const until = Date.now() + stalledWaitMs;
+    while (r === 'silent' && hub.pid !== null && isAlive(hub.pid) && Date.now() < until) {
+      await sleep(Math.max(pollMs, 50));
+      r = await check(hub);
+    }
+    const h = r === 'silent' ? null : r;
     if (h) {
       // Same or newer (another installed copy of the plugin): use it. Killing a newer hub would make two
       // installed versions keep replacing each other, rotating the token every time.
