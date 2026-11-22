@@ -1,0 +1,35 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { loadConfig, saveConfig } from '../../src/core/config.js';
+import { readJson, writeJsonAtomic } from '../../src/core/fsAtomic.js';
+
+let tmp: string;
+beforeEach(() => {
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'acc-'));
+  process.env.AI_CHAT_CENTER_HOME = tmp;
+});
+
+describe('config', () => {
+  it('loadConfig defaults to en, then persists pt-BR', async () => {
+    expect(await loadConfig()).toEqual({ language: 'en' });
+    await saveConfig({ language: 'pt-BR' });
+    expect((await loadConfig()).language).toBe('pt-BR');
+  });
+});
+
+describe('fsAtomic', () => {
+  it('readJson returns null on corrupt or missing file', async () => {
+    const f = path.join(tmp, 'bad.json');
+    expect(await readJson(f)).toBeNull();
+    fs.writeFileSync(f, '{not json');
+    expect(await readJson(f)).toBeNull();
+  });
+  it('writeJsonAtomic creates dirs and leaves no tmp file', async () => {
+    const f = path.join(tmp, 'a', 'b.json');
+    await writeJsonAtomic(f, { x: 1 });
+    expect(await readJson(f)).toEqual({ x: 1 });
+    expect(fs.readdirSync(path.dirname(f))).toEqual(['b.json']);
+  });
+});

@@ -1,0 +1,26 @@
+{
+  "name": "ai-chat-center",
+  "version": "0.1.0",
+  "description": "Follow and reply to terminal AI coding sessions from a WhatsApp-style web UI",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "build": "node scripts/build.mjs",
+    "test:build": "vitest run --config vitest.build.config.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@xterm/headless": "^6.0.0",
+    "esbuild": "^0.28.2",
+    "node-pty": "^1.1.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  },
+  "workspaces": [
+    "ui"
+  ]
+}

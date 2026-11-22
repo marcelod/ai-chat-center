@@ -1,0 +1,11 @@
+{ "hooks": {
+  "SessionStart": [{ "hooks": [
+    { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/hook.js\" session-start" },
+    { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/waiter.js\"", "asyncRewake": true } ] }],
+  "Stop": [{ "hooks": [
+    { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/waiter.js\"", "asyncRewake": true } ] }],
+  "UserPromptSubmit": [{ "hooks": [
+    { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/hook.js\" prompt-submit" } ] }],
+  "Notification": [{ "hooks": [
+    { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/hook.js\" notification" } ] }]
+}}

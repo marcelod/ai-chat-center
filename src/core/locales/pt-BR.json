@@ -1,0 +1,89 @@
+{
+  "hub": { "started": "O AI Chat Center está rodando em {url}" },
+  "cc": {
+    "connected": "Conectado à sessão do terminal",
+    "disconnected": "Desconectado da sessão do terminal",
+    "notRegistered": "Esta sessão não está registrada no AI Chat Center"
+  },
+  "node": { "missing": "É necessário o Node.js 20 ou mais recente" },
+  "ui": {
+    "title": "AI Chat Center",
+    "search": "Buscar por nome ou pasta",
+    "selectConversation": "Selecione uma conversa",
+    "selectConversationHint": "Escolha uma sessão à esquerda para acompanhá-la aqui.",
+    "others": "Outras sessões abertas ({n})",
+    "othersHint": "Para conversar com elas aqui, digite /cc no terminal da sessão.",
+    "waiting": "Esperando por você no terminal",
+    "disconnected": "Desconectada — digite /cc de novo",
+    "noMessages": "Nenhuma mensagem ainda",
+    "noResults": "Nenhuma conversa encontrada",
+    "empty": "Nenhuma sessão conectada ainda. Digite /cc em uma sessão do terminal para conectá-la.",
+    "you": "Você",
+    "yesterday": "ontem",
+    "settings": "Configurações",
+    "language": "Idioma",
+    "back": "Voltar",
+    "unread": "{n} não lidas",
+    "loadError": "Não foi possível falar com o hub. Tentando de novo…",
+    "noToken": {
+      "title": "Abra o link mostrado pelo /cc",
+      "body": "Esta página precisa do link de acesso exibido pelo /cc na sessão do terminal. Abra esse link para continuar."
+    },
+    "notice": {
+      "connected": "Conectada",
+      "disconnected": "Desconectada"
+    },
+    "status": {
+      "busy": "trabalhando…",
+      "idle": "parada",
+      "waiting": "aguardando você no terminal",
+      "disconnected": "desconectada — digite /cc de novo"
+    },
+    "chat": {
+      "origin": {
+        "terminal": "Enviada pelo terminal",
+        "app": "Enviada pelo app"
+      },
+      "originWord": {
+        "terminal": "terminal",
+        "app": "app"
+      },
+      "actionsOne": "{n} ação",
+      "actionsMany": "{n} ações",
+      "running": "executando…",
+      "error": "erro",
+      "done": "concluída",
+      "notDelivered": "não entregue",
+      "queued": "na fila — entregue quando o Claude terminar",
+      "connectedAt": "Conectada ao AI Chat Center · {time}",
+      "disconnectedAt": "Desconectada · {time}",
+      "typing": "Claude está trabalhando",
+      "loading": "Carregando mensagens…",
+      "waitingBanner": "O Claude está esperando você aprovar uma ação no terminal",
+      "waitingInputBanner": "O Claude está esperando sua resposta no terminal",
+      "waitingBannerHint": "Aprovar pelo app chega em uma versão futura.",
+      "messages": "Mensagens"
+    },
+    "composer": {
+      "placeholder": "Mensagem para {name}…",
+      "disconnectedPlaceholder": "Sessão desconectada",
+      "hint": "Enter envia · Shift+Enter quebra a linha · enquanto o Claude trabalha, as mensagens ficam na fila",
+      "disconnectedHint": "Esta sessão está desconectada. Digite /cc no terminal dela para reconectar.",
+      "send": "Enviar",
+      "sendDisconnected": "Esta sessão está desconectada",
+      "sendFailed": "Não foi possível enviar a mensagem.",
+      "retry": "Tentar de novo"
+    },
+    "notifications": {
+      "label": "Notificações do navegador",
+      "enable": "Ativar notificações",
+      "denied": "Bloqueadas pelo navegador"
+    },
+    "state": {
+      "busy": "Status: trabalhando",
+      "idle": "Status: ociosa",
+      "waiting": "Status: esperando você no terminal",
+      "disconnected": "Status: desconectada"
+    }
+  }
+}

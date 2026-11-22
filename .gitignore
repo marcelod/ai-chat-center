@@ -1,0 +1,7 @@
+node_modules/
+dist/
+!plugin/dist/
+.superpowers/
+*.log
+.DS_Store
+coverage/

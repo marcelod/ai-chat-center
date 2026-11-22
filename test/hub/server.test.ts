@@ -1,0 +1,324 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import { createHub } from '../../src/hub/server.js';
+import { SessionDisconnectedError, type Provider } from '../../src/hub/provider.js';
+import type { ProviderChange } from '../../src/shared/types.js';
+import { VERSION } from '../../src/core/version.js';
+
+const TOKEN = 'a'.repeat(64);
+let home: string;
+let hub: { url: string; close(): Promise<void> } | undefined;
+let prevHome: string | undefined;
+
+function fakeProvider(over: Partial<Provider> = {}): Provider & { pollCalls: number; queue: ProviderChange[][] } {
+  const p: any = {
+    pollCalls: 0,
+    queue: [],
+    listSessions: async () => ({ connected: [{ sessionId: 's1', name: 'n', cwd: '/x', state: 'idle', pendingAppMessageIds: [] }], others: [] }),
+    events: async () => [],
+    poll: async () => {
+      p.pollCalls++;
+      return p.queue.shift() ?? [];
+    },
+    send: vi.fn(async () => ({ id: 'm1' })),
+    ...over,
+  };
+  return p;
+}
+
+async function start(provider: Provider, extra: { staticDir?: string; pollMs?: number } = {}) {
+  hub = await createHub({ provider, token: TOKEN, port: 0, staticDir: extra.staticDir ?? path.join(home, 'nope'), pollMs: extra.pollMs ?? 20 });
+  return new URL(hub.url);
+}
+
+function req(u: URL, p: string, o: { method?: string; headers?: Record<string, string>; body?: string | Buffer } = {}) {
+  return new Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }>((resolve, reject) => {
+    const r = http.request(
+      { host: '127.0.0.1', port: u.port, path: p, method: o.method ?? 'GET', headers: { host: `127.0.0.1:${u.port}`, ...o.headers } },
+      (res) => {
+        let b = '';
+        res.on('data', (c) => (b += c));
+        res.on('end', () => resolve({ status: res.statusCode!, headers: res.headers, body: b }));
+      },
+    );
+    r.on('error', reject);
+    r.end(o.body);
+  });
+}
+const auth = { authorization: `Bearer ${TOKEN}` };
+const json = { ...auth, 'content-type': 'application/json' };
+
+function openStream(u: URL, p: string, headers: Record<string, string> = {}) {
+  return new Promise<{ res: http.IncomingMessage; req: http.ClientRequest; next: (re: RegExp) => Promise<string> }>((resolve, reject) => {
+    const r = http.request({ host: '127.0.0.1', port: u.port, path: p, headers: { host: `127.0.0.1:${u.port}`, ...headers } }, (res) => {
+      let buf = '';
+      const waiters: { re: RegExp; ok: (s: string) => void }[] = [];
+      res.setEncoding('utf8');
+      res.on('data', (c) => {
+        buf += c;
+        for (const w of [...waiters]) if (w.re.test(buf)) { waiters.splice(waiters.indexOf(w), 1); w.ok(buf); }
+      });
+      resolve({
+        res, req: r,
+        next: (re) => new Promise((ok) => { if (re.test(buf)) ok(buf); else waiters.push({ re, ok }); }),
+      });
+    });
+    r.on('error', reject);
+    r.end();
+  });
+}
+
+beforeEach(async () => {
+  home = await fsp.mkdtemp(path.join(os.tmpdir(), 'acc-hub-'));
+  prevHome = process.env.AI_CHAT_CENTER_HOME;
+  process.env.AI_CHAT_CENTER_HOME = home;
+});
+afterEach(async () => {
+  await hub?.close();
+  hub = undefined;
+  if (prevHome === undefined) delete process.env.AI_CHAT_CENTER_HOME; else process.env.AI_CHAT_CENTER_HOME = prevHome;
+  await fsp.rm(home, { recursive: true, force: true });
+});
+
+describe('auth and host checks', () => {
+  it('rejects missing token', async () => {
+    const u = await start(fakeProvider());
+    expect((await req(u, '/api/sessions')).status).toBe(401);
+    expect((await req(u, '/api/sessions', { headers: { authorization: 'Bearer wrong' } })).status).toBe(401);
+    expect((await req(u, '/api/sessions', { headers: { authorization: `Bearer ${'b'.repeat(64)}` } })).status).toBe(401);
+  });
+  it('health needs no token', async () => {
+    const u = await start(fakeProvider());
+    const r = await req(u, '/api/health');
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.body)).toEqual({ ok: true, pid: process.pid, version: VERSION });
+  });
+  it('rejects foreign Origin', async () => {
+    const u = await start(fakeProvider());
+    expect((await req(u, '/api/sessions', { headers: { ...auth, origin: 'http://evil.com' } })).status).toBe(403);
+    expect((await req(u, '/api/health', { headers: { origin: 'http://evil.com' } })).status).toBe(403);
+    expect((await req(u, '/api/sessions', { headers: { ...auth, origin: `http://localhost:${u.port}` } })).status).toBe(200);
+  });
+  it('rejects foreign Host', async () => {
+    const u = await start(fakeProvider());
+    expect((await req(u, '/api/sessions', { headers: { ...auth, host: 'evil.com' } })).status).toBe(403);
+    expect((await req(u, '/', { headers: { host: 'evil.com' } })).status).toBe(403);
+    expect((await req(u, '/api/health', { headers: { host: `localhost:${u.port}` } })).status).toBe(200);
+  });
+  it('token via query rejected outside /api/stream', async () => {
+    const u = await start(fakeProvider());
+    expect((await req(u, `/api/sessions?token=${TOKEN}`)).status).toBe(401);
+    const s = await openStream(u, `/api/stream?token=${TOKEN}`);
+    expect(s.res.statusCode).toBe(200);
+    s.req.destroy();
+  });
+  it('security headers present', async () => {
+    const u = await start(fakeProvider());
+    const r = await req(u, '/api/sessions', { headers: auth });
+    expect(r.headers['x-content-type-options']).toBe('nosniff');
+    expect(r.headers['referrer-policy']).toBe('no-referrer');
+    expect(r.headers['cache-control']).toBe('no-store');
+    expect(Object.keys(r.headers).some((h) => h.startsWith('access-control-'))).toBe(false);
+    const h = await req(u, '/');
+    expect(h.headers['content-security-policy']).toBe(
+      "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
+    );
+    expect(h.headers['x-content-type-options']).toBe('nosniff');
+    const bad = await req(u, '/api/sessions');
+    expect(bad.headers['x-content-type-options']).toBe('nosniff');
+  });
+});
+
+describe('api', () => {
+  it('lists sessions', async () => {
+    const u = await start(fakeProvider());
+    const r = await req(u, '/api/sessions', { headers: auth });
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.body).connected[0].sessionId).toBe('s1');
+  });
+  it('lists events', async () => {
+    const u = await start(fakeProvider());
+    const r = await req(u, '/api/sessions/s1/events', { headers: auth });
+    expect(JSON.parse(r.body)).toEqual([]);
+  });
+  it('posts message returns 202 and calls provider.send', async () => {
+    const p = fakeProvider();
+    const u = await start(p);
+    const r = await req(u, '/api/sessions/s1/messages', { method: 'POST', headers: json, body: JSON.stringify({ text: ' hi ' }) });
+    expect(r.status).toBe(202);
+    expect(JSON.parse(r.body)).toEqual({ id: 'm1' });
+    expect(p.send).toHaveBeenCalledWith('s1', ' hi ');
+  });
+  it('posting to disconnected returns 409', async () => {
+    const u = await start(fakeProvider({ send: async (sid) => { throw new SessionDisconnectedError(sid); } }));
+    const r = await req(u, '/api/sessions/s1/messages', { method: 'POST', headers: json, body: JSON.stringify({ text: 'x' }) });
+    expect(r.status).toBe(409);
+  });
+  it('other errors return generic 500', async () => {
+    const u = await start(fakeProvider({ send: async () => { throw new Error('secret detail ' + TOKEN); } }));
+    const r = await req(u, '/api/sessions/s1/messages', { method: 'POST', headers: json, body: JSON.stringify({ text: 'x' }) });
+    expect(r.status).toBe(500);
+    expect(r.body).not.toContain('secret');
+  });
+  it('empty text returns 400', async () => {
+    const u = await start(fakeProvider());
+    for (const body of [{ text: '   ' }, { text: 5 }, {}, { text: 'x'.repeat(32_001) }]) {
+      const r = await req(u, '/api/sessions/s1/messages', { method: 'POST', headers: json, body: JSON.stringify(body) });
+      expect(r.status).toBe(400);
+    }
+  });
+  it('invalid JSON returns 400', async () => {
+    const u = await start(fakeProvider());
+    const r = await req(u, '/api/sessions/s1/messages', { method: 'POST', headers: json, body: '{nope' });
+    expect(r.status).toBe(400);
+  });
+  it('body too large returns 413', async () => {
+    const u = await start(fakeProvider());
+    const r = await req(u, '/api/sessions/s1/messages', { method: 'POST', headers: json, body: JSON.stringify({ text: 'x'.repeat(70_000) }) });
+    expect(r.status).toBe(413);
+  });
+  it('wrong content type returns 415', async () => {
+    const u = await start(fakeProvider());
+    const r = await req(u, '/api/sessions/s1/messages', { method: 'POST', headers: { ...auth, 'content-type': 'text/plain' }, body: '{"text":"x"}' });
+    expect(r.status).toBe(415);
+  });
+  it('config roundtrip', async () => {
+    const u = await start(fakeProvider());
+    expect(JSON.parse((await req(u, '/api/config', { headers: auth })).body)).toEqual({ language: 'en' });
+    const put = await req(u, '/api/config', { method: 'PUT', headers: json, body: JSON.stringify({ language: 'pt-BR' }) });
+    expect(put.status).toBe(200);
+    expect(JSON.parse((await req(u, '/api/config', { headers: auth })).body)).toEqual({ language: 'pt-BR' });
+  });
+  it('invalid language returns 400', async () => {
+    const u = await start(fakeProvider());
+    const r = await req(u, '/api/config', { method: 'PUT', headers: json, body: JSON.stringify({ language: 'xx' }) });
+    expect(r.status).toBe(400);
+  });
+  it('unknown api route returns 404', async () => {
+    const u = await start(fakeProvider());
+    expect((await req(u, '/api/nope', { headers: auth })).status).toBe(404);
+  });
+});
+
+describe('stream', () => {
+  it('stream delivers events after provider change', async () => {
+    const p = fakeProvider();
+    const u = await start(p);
+    const s = await openStream(u, '/api/stream', auth);
+    expect(s.res.headers['content-type']).toContain('text/event-stream');
+    await s.next(/retry: 3000/);
+    p.queue.push([{ type: 'events', sessionId: 's1', events: [{ kind: 'assistant', id: 'e1', ts: 't', text: 'yo' }] }]);
+    const got = await s.next(/event: events\ndata: .*\n\n/);
+    expect(got.indexOf('retry: 3000')).toBe(0);
+    expect(got).toContain('"sessionId":"s1"');
+    s.req.destroy();
+  });
+  it('stream requires token', async () => {
+    const u = await start(fakeProvider());
+    const s = await openStream(u, '/api/stream');
+    expect(s.res.statusCode).toBe(401);
+    s.req.destroy();
+  });
+  it('one poll timer shared by two stream clients', async () => {
+    const p = fakeProvider();
+    const u = await start(p, { pollMs: 50 });
+    const a = await openStream(u, '/api/stream', auth);
+    const b = await openStream(u, '/api/stream', auth);
+    await a.next(/retry/); await b.next(/retry/);
+    const before = p.pollCalls;
+    await new Promise((r) => setTimeout(r, 500));
+    const calls = p.pollCalls - before;
+    expect(calls).toBeGreaterThan(3);
+    expect(calls).toBeLessThan(14); // two timers would give ~20
+    p.queue.push([{ type: 'sessions' }]);
+    await a.next(/event: sessions/); await b.next(/event: sessions/);
+    a.req.destroy(); b.req.destroy();
+    await new Promise((r) => setTimeout(r, 150));
+    const stopped = p.pollCalls;
+    await new Promise((r) => setTimeout(r, 200));
+    expect(p.pollCalls).toBe(stopped);
+  });
+  it('reconnect during in-flight poll keeps a single poll chain', async () => {
+    let active = 0, maxActive = 0, calls = 0;
+    const p = fakeProvider({
+      poll: async () => {
+        calls++; active++; maxActive = Math.max(maxActive, active);
+        await new Promise((r) => setTimeout(r, 120));
+        active--;
+        return [];
+      },
+    });
+    const u = await start(p, { pollMs: 20 });
+    const a = await openStream(u, '/api/stream', auth);
+    await a.next(/retry/);
+    await new Promise((r) => setTimeout(r, 60)); // poll is now in flight
+    a.req.destroy();
+    await new Promise((r) => setTimeout(r, 20));
+    const b = await openStream(u, '/api/stream', auth);
+    await b.next(/retry/);
+    await new Promise((r) => setTimeout(r, 200));
+    const before = calls;
+    await new Promise((r) => setTimeout(r, 1000));
+    const rate = calls - before;
+    expect(maxActive).toBe(1);
+    expect(rate).toBeGreaterThan(4);
+    expect(rate).toBeLessThan(10); // one chain: ~1000/140 = 7
+    b.req.destroy();
+    await new Promise((r) => setTimeout(r, 300));
+  });
+  it('invalid session id returns 404', async () => {
+    const u = await start(fakeProvider());
+    expect((await req(u, '/api/sessions/a.b/events', { headers: auth })).status).toBe(404);
+    expect((await req(u, '/api/sessions/%E0%A4%A/events', { headers: auth })).status).toBe(404);
+  });
+  it('survives a throwing poll', async () => {
+    let n = 0;
+    const p = fakeProvider({ poll: async () => { n++; if (n === 1) throw new Error('boom'); return n === 3 ? [{ type: 'sessions' }] : []; } });
+    const u = await start(p);
+    const s = await openStream(u, '/api/stream', auth);
+    await s.next(/event: sessions/);
+    s.req.destroy();
+  });
+});
+
+describe('static', () => {
+  it('serves built-in page when staticDir missing', async () => {
+    const u = await start(fakeProvider());
+    const r = await req(u, '/');
+    expect(r.status).toBe(200);
+    expect(r.body).toContain('UI not built');
+  });
+  it('serves files with content types and SPA fallback', async () => {
+    const dir = path.join(home, 'ui');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'index.html'), '<h1>app</h1>');
+    fs.writeFileSync(path.join(dir, 'a.js'), 'x');
+    fs.writeFileSync(path.join(dir, 'a.css'), 'x');
+    const u = await start(fakeProvider(), { staticDir: dir });
+    const js = await req(u, '/a.js');
+    expect(js.headers['content-type']).toContain('text/javascript');
+    expect((await req(u, '/a.css')).headers['content-type']).toContain('text/css');
+    const spa = await req(u, '/chat/s1', { headers: { accept: 'text/html' } });
+    expect(spa.body).toBe('<h1>app</h1>');
+    expect(spa.headers['content-security-policy']).toBeDefined();
+    expect((await req(u, '/missing.js', { headers: { accept: 'text/html' } })).status).toBe(404);
+    expect((await req(u, '/chat/s1', { headers: { accept: 'application/json' } })).status).toBe(404);
+    expect((await req(u, '/x', { method: 'POST', headers: { accept: 'text/html' } })).status).toBe(404);
+  });
+  it('path traversal is blocked', async () => {
+    const dir = path.join(home, 'ui');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'index.html'), 'ok');
+    fs.writeFileSync(path.join(home, 'secret.txt'), 'SECRET');
+    const u = await start(fakeProvider(), { staticDir: dir });
+    for (const p of ['/../secret.txt', '/%2e%2e/secret.txt', '/..%2fsecret.txt', '/%2e%2e%2fsecret.txt', '/a%00b']) {
+      const r = await req(u, p);
+      expect(r.status).toBe(404);
+      expect(r.body).not.toContain('SECRET');
+    }
+  });
+});

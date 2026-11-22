@@ -1,0 +1,12 @@
+{
+  "name": "ai-chat-center",
+  "description": "AI Chat Center: a WhatsApp-style local web app for your terminal AI coding sessions.",
+  "owner": { "name": "Marcelo Diniz" },
+  "plugins": [
+    {
+      "name": "ai-chat-center",
+      "source": "./plugin",
+      "description": "Follow and reply to your terminal AI coding sessions from a WhatsApp-style local web app."
+    }
+  ]
+}

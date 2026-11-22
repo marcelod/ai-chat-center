@@ -1,0 +1,34 @@
+import { describe, it, expect, vi } from 'vitest';
+
+const execFile = vi.fn();
+vi.mock('node:child_process', () => ({ execFile: (...a: unknown[]) => execFile(...a) }));
+
+describe('runClaudeAgentsJson', () => {
+  it('runs `claude agents --json` hidden, with timeout and buffer limits', async () => {
+    execFile.mockImplementation((_c: string, _a: string[], _o: object, cb: (e: null, out: string) => void) => cb(null, '[]'));
+    const { runClaudeAgentsJson } = await import('../../src/core/claudeAgents.js');
+    expect(await runClaudeAgentsJson()).toBe('[]');
+    const [cmd, args, opts] = execFile.mock.calls[0]!;
+    expect(cmd).toBe('claude');
+    expect(args).toEqual(['agents', '--json']);
+    expect(opts).toEqual({
+      shell: process.platform === 'win32',
+      windowsHide: true,
+      timeout: 5000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+  });
+  it('rejects on error', async () => {
+    execFile.mockImplementation((_c: string, _a: string[], _o: object, cb: (e: Error) => void) => cb(new Error('nope')));
+    const { runClaudeAgentsJson } = await import('../../src/core/claudeAgents.js');
+    await expect(runClaudeAgentsJson()).rejects.toThrow('nope');
+  });
+  it('status and claudePid both use it (no other execFile of claude)', async () => {
+    const fs = await import('node:fs');
+    for (const f of ['src/hub/status.ts', 'src/hooks/claudePid.ts']) {
+      const src = fs.readFileSync(f, 'utf8');
+      expect(src, f).toContain('runClaudeAgentsJson');
+      expect(src, f).not.toContain('execFile');
+    }
+  });
+});

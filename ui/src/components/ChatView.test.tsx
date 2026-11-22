@@ -1,0 +1,195 @@
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+import type { ChatEvent, SessionView } from '@shared/types';
+import { LangProvider } from '../i18n';
+import { ChatView } from './ChatView';
+import type { PendingMessage } from '../useLiveSessions';
+
+const session = (over: Partial<SessionView> = {}): SessionView => ({
+  sessionId: 's1',
+  name: 'billing-api',
+  cwd: '/home/me/billing-api',
+  state: 'idle',
+  pendingAppMessageIds: [],
+  ...over,
+});
+
+const ts = (n: number) => new Date(2026, 0, 5, 10, n).toISOString();
+
+const events: ChatEvent[] = [
+  { kind: 'notice', id: 'n1', ts: ts(0), code: 'connected' },
+  { kind: 'user', id: 'u1', ts: ts(1), text: 'from the keyboard', origin: 'terminal' },
+  { kind: 'user', id: 'u2', ts: ts(2), text: 'from the phone', origin: 'app', appMessageId: 'a2' },
+  { kind: 'assistant', id: 'c1', ts: ts(3), text: 'Here is **bold** and `inline` text' },
+  {
+    kind: 'actions',
+    id: 'x1',
+    ts: ts(4),
+    items: [
+      { toolUseId: 't1', name: 'Read', summary: 'src/a.ts', result: 'ok' },
+      { toolUseId: 't2', name: 'Bash', summary: 'npm test', result: 'boom', isError: true },
+      { toolUseId: 't3', name: 'Read', summary: 'src/b.ts' },
+    ],
+  },
+];
+
+function setup(
+  props: Partial<{
+    session: SessionView;
+    events: ChatEvent[];
+    pending: PendingMessage[];
+    onSend: (text: string) => Promise<void>;
+  }> = {},
+) {
+  const onSend = props.onSend ?? vi.fn(async () => {});
+  const ui = (p: typeof props) => (
+    <LangProvider lang="en">
+      <ChatView
+        session={p.session ?? session()}
+        events={p.events ?? events}
+        pending={p.pending ?? []}
+        loading={false}
+        onSend={onSend}
+        onBack={() => {}}
+      />
+    </LangProvider>
+  );
+  const r = render(ui(props));
+  return { ...r, onSend, rerenderWith: (p: typeof props) => r.rerender(ui(p)) };
+}
+
+describe('ChatView', () => {
+  it('renders bubbles with origin icons', () => {
+    setup();
+    const term = screen.getByText('from the keyboard').closest('[data-bubble]') as HTMLElement;
+    expect(term).toHaveAttribute('data-bubble', 'user');
+    expect(within(term).getByLabelText('Sent from the terminal')).toBeInTheDocument();
+    const app = screen.getByText('from the phone').closest('[data-bubble]') as HTMLElement;
+    expect(within(app).getByLabelText('Sent from the app')).toBeInTheDocument();
+    const claude = screen.getByText('bold').closest('[data-bubble]') as HTMLElement;
+    expect(claude).toHaveAttribute('data-bubble', 'assistant');
+    expect(screen.getByText('bold').tagName).toBe('STRONG');
+    expect(screen.getByText('inline').tagName).toBe('CODE');
+    expect(screen.getByText(/Connected to AI Chat Center · /)).toBeInTheDocument();
+  });
+
+  it('markdown links open in a new tab and raw html is not rendered', () => {
+    setup({
+      events: [{ kind: 'assistant', id: 'c', ts: ts(1), text: '[x](https://example.com) <b>raw</b>' }],
+    });
+    const a = screen.getByRole('link', { name: 'x' });
+    expect(a).toHaveAttribute('target', '_blank');
+    expect(a).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(document.querySelector('b')).toBeNull();
+  });
+
+  it('actions group collapsed then expands', async () => {
+    const user = userEvent.setup();
+    setup();
+    const toggle = screen.getByRole('button', { name: /3 actions/ });
+    expect(toggle).toHaveTextContent('Read · Bash');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('npm test')).not.toBeInTheDocument();
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('npm test')).toBeInTheDocument();
+    expect(screen.getByText('src/a.ts')).toBeInTheDocument();
+    expect(screen.getByText('error')).toBeInTheDocument();
+    expect(screen.getByText('running…')).toBeInTheDocument();
+    expect(screen.getByLabelText('done')).toBeInTheDocument();
+    await user.click(toggle);
+    expect(screen.queryByText('npm test')).not.toBeInTheDocument();
+  });
+
+  it('optimistic message shows queued then reconciles by appMessageId', () => {
+    const pending: PendingMessage[] = [{ id: 'a9', text: 'please continue', ts: ts(5) }];
+    const { rerenderWith } = setup({ events: [], pending, session: session({ state: 'busy', pendingAppMessageIds: ['a9'] }) });
+    expect(screen.getByText('please continue')).toBeInTheDocument();
+    expect(screen.getByText('queued — delivered when Claude finishes')).toBeInTheDocument();
+    rerenderWith({
+      events: [{ kind: 'user', id: 'u9', ts: ts(6), text: 'please continue', origin: 'app', appMessageId: 'a9' }],
+      pending,
+      session: session({ state: 'busy' }),
+    });
+    expect(screen.getAllByText('please continue')).toHaveLength(1);
+    expect(screen.queryByText(/^queued/)).not.toBeInTheDocument();
+  });
+
+  it('composer disabled when disconnected', () => {
+    setup({ session: session({ state: 'disconnected' }) });
+    const box = screen.getByPlaceholderText('Session disconnected');
+    expect(box).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.getAllByText(/type \/cc/).length).toBeGreaterThan(0);
+  });
+
+  it('enter sends, shift+enter newline', async () => {
+    const user = userEvent.setup();
+    const { onSend } = setup();
+    const box = screen.getByPlaceholderText('Message billing-api…');
+    await user.type(box, 'line1{Shift>}{Enter}{/Shift}line2');
+    expect(onSend).not.toHaveBeenCalled();
+    expect(box).toHaveValue('line1\nline2');
+    await user.keyboard('{Enter}');
+    expect(onSend).toHaveBeenCalledWith('line1\nline2');
+    expect(box).toHaveValue('');
+  });
+
+  it('409 shows inline error and restores the text; other errors offer retry', async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn().mockRejectedValueOnce(Object.assign(new Error('409'), { status: 409 }));
+    setup({ onSend });
+    const box = screen.getByPlaceholderText('Message billing-api…');
+    await user.type(box, 'hello{Enter}');
+    expect(await screen.findByText('This session is disconnected')).toBeInTheDocument();
+    expect(box).toHaveValue('hello');
+
+    onSend.mockRejectedValueOnce(new Error('500')).mockResolvedValueOnce(undefined);
+    await user.keyboard('{Enter}');
+    const retry = await screen.findByRole('button', { name: 'Retry' });
+    await user.click(retry);
+    expect(onSend).toHaveBeenLastCalledWith('hello');
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  });
+
+  it('waiting state label', () => {
+    setup({ session: session({ state: 'waiting', waitingKind: 'permission' }) });
+    expect(screen.getAllByText('waiting for you in the terminal').length).toBeGreaterThan(0);
+    expect(screen.getByText('Claude is waiting for you to approve an action in the terminal')).toBeInTheDocument();
+    expect(screen.getByText('Approving from the app comes in a later version.')).toBeInTheDocument();
+  });
+
+  it('waiting for input shows the answer banner without the approval hint', () => {
+    setup({ session: session({ state: 'waiting', waitingKind: 'input' }) });
+    expect(screen.getByText('Claude is waiting for your answer in the terminal')).toBeInTheDocument();
+    expect(screen.queryByText('Claude is waiting for you to approve an action in the terminal')).not.toBeInTheDocument();
+    expect(screen.queryByText('Approving from the app comes in a later version.')).not.toBeInTheDocument();
+  });
+
+  it('busy shows working pill and typing indicator', () => {
+    setup({ session: session({ state: 'busy' }) });
+    expect(screen.getByText('working…')).toBeInTheDocument();
+    expect(screen.getByTestId('typing')).toBeInTheDocument();
+  });
+
+  it('409 does not overwrite text typed since', async () => {
+    const user = userEvent.setup();
+    let reject: (e: unknown) => void = () => {};
+    const onSend = vi.fn(() => new Promise<void>((_, rej) => (reject = rej)));
+    setup({ onSend });
+    const box = screen.getByPlaceholderText('Message billing-api…');
+    await user.type(box, 'first{Enter}');
+    await user.type(box, 'second');
+    reject(Object.assign(new Error('409'), { status: 409 }));
+    expect(await screen.findByText('This session is disconnected')).toBeInTheDocument();
+    expect(box).toHaveValue('second');
+  });
+
+  it('not-delivered item shows retry', async () => {
+    const { container } = setup({ events: [], pending: [{ id: 'a1', text: 'lost', ts: ts(1), failed: true }] });
+    expect(screen.getByText('not delivered')).toBeInTheDocument();
+    expect(container.querySelector('[data-bubble="queued"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+});
