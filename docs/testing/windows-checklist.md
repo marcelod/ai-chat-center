@@ -76,6 +76,7 @@ Invoke-RestMethod "http://127.0.0.1:$port/api/sessions" -Headers $hdr | ConvertT
 - [ ] **W9. The project folder is not locked by the hub.** Start the hub from a fresh test folder (close any running hub first, see W6, then `/cc` in a session opened in `C:\Temp\cc lock`). Exit that session, then delete the folder (`Remove-Item -Recurse "C:\Temp\cc lock"`) while the hub keeps running. The delete succeeds (the hub's working directory is your user folder), and the app keeps working for other sessions.
 - [ ] **W10. A hub killed without its cleanup.** With a hub running, kill it the way Windows does (`Stop-Process -Id <hub pid>`, Task Manager, or a reboot): `hub.json` stays behind. Run `/cc` again: it answers within a second or two with a working link, and `hub.json` names the new hub's pid.
 - [ ] **W11. A planted `node` in the project folder is never run.** Every hook runs `node` with the project as its working directory. In an empty folder `C:\Temp\cc node`, create `node.cmd` with `@echo planted > "%TEMP%\acc-planted-node.txt"` (and, separately, copy any harmless `.exe` there as `node.exe`). Open `claude` in that folder, type a prompt and `/cc`. `%TEMP%\acc-planted-node.txt` must not exist, and the hooks must work (they ran the real Node from the `PATH`). If the marker file appears, stop and report it: Claude Code resolved `node` from the project folder.
+- [ ] **W12. Delivery confirms the claude process first.** Windows never re-parents a process, so before taking queued messages the waiter runs `claude agents --json` once and delivers only if the session runs in its parent process. With a connected session, send a message from the app while the session is idle: it is delivered as usual (no console window flashes for that lookup), and `waiter.log` has no "not in this waiter's parent" line. Then close the terminal with a message queued (send it during a long turn, then close the window): the message is not delivered anywhere, stays queued, and `waiter.log` shows either "is gone" or "not in this waiter's parent".
 - [ ] **W7. Line endings.** In a clone made with default Git for Windows settings (`core.autocrlf=true`), `git status` is clean after `npm ci` and `npm run build`, with no CRLF changes in `plugin/dist`.
 
 ## Results
@@ -103,3 +104,4 @@ Invoke-RestMethod "http://127.0.0.1:$port/api/sessions" -Headers $hdr | ConvertT
 | W9 | | |
 | W10 | | |
 | W11 | | |
+| W12 | | |

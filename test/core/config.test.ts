@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { loadConfig, saveConfig } from '../../src/core/config.js';
 import { readJson, writeJsonAtomic } from '../../src/core/fsAtomic.js';
+import { tmpDir } from '../helpers/tmp.js';
 
 let tmp: string;
 beforeEach(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'acc-'));
+  tmp = tmpDir('acc-');
   process.env.AI_CHAT_CENTER_HOME = tmp;
 });
 

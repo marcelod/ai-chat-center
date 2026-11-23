@@ -62,6 +62,8 @@ export const BUSY_CHECK_MS = 15_000;
 export const PROMPT_SETTLE_MS = 3000;
 /** A signed message dated more than this in the future is dropped. */
 export const MAX_CLOCK_SKEW_MS = 2 * 60_000;
+/** A pinned waiter that finds the lock held retries it this long (the holder may be about to exit). */
+export const PINNED_LOCK_WAIT_MS = 3000;
 const SWITCH_SOURCES = new Set(['startup', 'resume', 'clear', 'fork']);
 
 const NOTHING: WaiterResult = { exitCode: 0, stderr: '' };
@@ -109,6 +111,10 @@ export interface WaiterOptions {
   parentPid?: number | null;
   /** The parent now (main: () => process.ppid); POSIX re-parents an orphan, so a change means claude is gone. */
   currentParentPid?: () => number;
+  /** How long a pinned waiter retries a lock held by another waiter. Default PINNED_LOCK_WAIT_MS. */
+  pinnedLockWaitMs?: number;
+  /** Default process.platform (tests). */
+  platform?: NodeJS.Platform;
 }
 
 /** The session's status from `claude agents --json`; null when the lookup fails or does not list it. */
@@ -295,10 +301,24 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
   const lock = paths().waiterLock(sid);
   // The exact content we published ({pid, ts}): touchLock only changes the mtime, so any other content
   // means the lock was reclaimed (our heartbeat lapsed, e.g. a suspended machine) by another waiter.
-  const mine = await acquireLockContent(lock);
+  let mine = await acquireLockContent(lock);
+  if (mine === null && pinned) {
+    // Audit R5-L1: the session was resumed in this claude process while the previous one is still open. Its
+    // waiter holds the lock and exits within a poll once it sees this process in the registration: wait for
+    // it a little (it polls every second) instead of leaving the session with no waiter at all.
+    const until = Date.now() + (opts.pinnedLockWaitMs ?? PINNED_LOCK_WAIT_MS);
+    while (mine === null && Date.now() < until) {
+      await sleep(Math.min(pollMs, 100));
+      mine = await acquireLockContent(lock);
+    }
+  }
   if (mine === null) return NOTHING;
   let lastBeat = Date.now();
   let deadChecked = false;
+  // Audit S5-L2: Windows never re-parents, so a pinned waiter whose claude process exited cannot tell that
+  // another process reused that pid. Before the first claim, one `claude agents` lookup confirms that the
+  // session runs in this waiter's parent (kept for the waiter's lifetime). A failed lookup delivers as before.
+  let parentConfirmed = !(pinned && (opts.platform ?? process.platform) === 'win32');
   let lastStatusAt = -Infinity;
   let secretWarned = false;
   /**
@@ -319,7 +339,10 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
   };
   try {
     try {
-      await sweepClaimed(sid, CLAIMED_SWEEP_MS, await readDelivered(sid));
+      await sweepClaimed(sid, CLAIMED_SWEEP_MS, await readDelivered(sid), async () => {
+        const sec = await loadSecret();
+        return sec.ok ? (m) => verifyMessage(m, sid, sec.secret) : null;
+      });
     } catch (e) {
       logError(e);
     }
@@ -386,7 +409,16 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
           // skipped and every message stays queued (audit S4-S2). A signed message is still dropped when its
           // id was already delivered (a replay), when it is dated in the future, or when it predates this
           // connection (S4-S1).
-          const sec = (await inboxHasMessages(sid)) ? await loadSecret() : null;
+          const queued = await inboxHasMessages(sid);
+          if (queued && !parentConfirmed) {
+            const r = await lookup();
+            if (r.ok && r.pid !== parent) {
+              logError(`waiter for session ${sid}: claude agents lists it ${r.pid === null ? 'nowhere' : `in process ${r.pid}`}, not in this waiter's parent ${parent}: exiting without draining`);
+              return NOTHING;
+            }
+            if (r.ok) parentConfirmed = true;
+          }
+          const sec = queued ? await loadSecret() : null;
           let drained: Awaited<ReturnType<typeof drain>> = [];
           if (sec && !sec.ok) {
             if (!secretWarned) logError(`the install secret is ${sec.reason}: nothing is taken from the inbox of session ${sid} until it can be read`);

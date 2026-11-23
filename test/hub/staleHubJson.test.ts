@@ -68,7 +68,7 @@ afterAll(() => {
 describe('a hub killed without cleanup (R4-C1)', () => {
   it('the next /cc starts a hub on the same port, fast, and hub.json names it', async () => {
     const home = path.join(dir, 'state');
-    const port = await freePort();
+    let port = await freePort();
     // No `claude` on PATH: the pid lookup fails fast (the hook still connects).
     const env = { ...process.env, AI_CHAT_CENTER_HOME: home, AI_CHAT_CENTER_PORT: String(port), PATH: path.dirname(process.execPath) };
     const cc = () => {
@@ -86,7 +86,16 @@ describe('a hub killed without cleanup (R4-C1)', () => {
       return { ms: Date.now() - t0, ctx: out.hookSpecificOutput?.additionalContext ?? '', hub };
     };
 
-    const first = cc();
+    let first = cc();
+    // Audit R5-Info: freePort() releases the port before the hub binds it; under parallel runs another process
+    // can take it meanwhile (the hub then binds the next one). Only that case is retried, with a new port.
+    for (let attempt = 1; first.hub.port !== port && attempt < 5; attempt++) {
+      process.kill(first.hub.pid, 'SIGTERM');
+      for (let i = 0; i < 50 && isAlive(first.hub.pid); i++) await new Promise((r) => setTimeout(r, 50));
+      port = await freePort();
+      env.AI_CHAT_CENTER_PORT = String(port);
+      first = cc();
+    }
     expect(first.ctx.split('\n')[0]).toBe('AI Chat Center: connected');
     expect(first.hub.port).toBe(port);
     expect(isAlive(first.hub.pid)).toBe(true);

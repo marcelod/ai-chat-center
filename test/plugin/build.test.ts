@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { tmpDir } from '../helpers/tmp.js';
 
 const root = path.resolve(__dirname, '..', '..');
 const dist = path.join(root, 'plugin', 'dist');
 const stdin = JSON.stringify({ session_id: 'x', transcript_path: '', cwd: '.' });
 
 function tmpHome(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'acc-build-'));
+  return tmpDir('acc-build-');
 }
 
 function run(script: string, args: string[], home: string) {

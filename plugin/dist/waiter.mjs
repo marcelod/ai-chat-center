@@ -266,15 +266,6 @@ async function list(sid) {
     throw e;
   }
 }
-async function readMsg(file) {
-  try {
-    return JSON.parse(await fs4.readFile(file, "utf8"));
-  } catch (e) {
-    if (isRace(e)) return null;
-    if (e instanceof SyntaxError) return null;
-    throw e;
-  }
-}
 var READ_RETRIES = 3;
 var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
 var CLAIMED_RE = /\.msg\.claimed-(?:(\d{13,})-)?/;
@@ -361,7 +352,7 @@ async function markerOwnerAlive(marker) {
     return true;
   }
 }
-async function sweepClaimed(sid, maxAgeMs, delivered = /* @__PURE__ */ new Set()) {
+async function sweepClaimed(sid, maxAgeMs, delivered = /* @__PURE__ */ new Set(), current = async () => null) {
   const dir = paths().inboxDir(sid);
   let names;
   try {
@@ -371,6 +362,7 @@ async function sweepClaimed(sid, maxAgeMs, delivered = /* @__PURE__ */ new Set()
   }
   let swept = 0;
   const now = Date.now();
+  let judge;
   for (const n of names) {
     if (n.endsWith(`.msg${CLAIM_MARK}`)) {
       const marker = path4.join(dir, n);
@@ -389,9 +381,18 @@ async function sweepClaimed(sid, maxAgeMs, delivered = /* @__PURE__ */ new Set()
     try {
       const at = m[1] ? Number(m[1]) : (await fs4.stat(file)).mtimeMs;
       if (now - at <= maxAgeMs) continue;
-      const msg = await readMsg(file);
-      if (msg && typeof msg.id === "string" && delivered.has(msg.id)) await withFsRetry(() => fs4.rm(file, { force: true }));
-      else await withFsRetry(() => fs4.rename(file, path4.join(dir, n.slice(0, m.index + ".msg".length))));
+      if (judge === void 0) judge = await current().catch(() => null);
+      if (judge === null) continue;
+      let msg;
+      try {
+        msg = JSON.parse(await fs4.readFile(file, "utf8"));
+      } catch (e) {
+        if (!(e instanceof SyntaxError)) continue;
+        msg = null;
+      }
+      const putBack = m[1] !== void 0 && msg !== null && typeof msg === "object" && typeof msg.id === "string" && !delivered.has(msg.id) && judge(msg);
+      if (putBack) await withFsRetry(() => fs4.rename(file, path4.join(dir, n.slice(0, m.index + ".msg".length))));
+      else await withFsRetry(() => fs4.rm(file, { force: true }));
       swept++;
     } catch {
     }
@@ -620,6 +621,7 @@ var STALE_BUSY_MS = 1e4;
 var BUSY_CHECK_MS = 15e3;
 var PROMPT_SETTLE_MS = 3e3;
 var MAX_CLOCK_SKEW_MS = 2 * 6e4;
+var PINNED_LOCK_WAIT_MS = 3e3;
 var SWITCH_SOURCES = /* @__PURE__ */ new Set(["startup", "resume", "clear", "fork"]);
 var NOTHING = { exitCode: 0, stderr: "" };
 var sleep3 = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -760,10 +762,18 @@ async function runWaiter(event, input, opts = {}) {
     }
   }
   const lock = paths().waiterLock(sid);
-  const mine = await acquireLockContent(lock);
+  let mine = await acquireLockContent(lock);
+  if (mine === null && pinned) {
+    const until = Date.now() + (opts.pinnedLockWaitMs ?? PINNED_LOCK_WAIT_MS);
+    while (mine === null && Date.now() < until) {
+      await sleep3(Math.min(pollMs, 100));
+      mine = await acquireLockContent(lock);
+    }
+  }
   if (mine === null) return NOTHING;
   let lastBeat = Date.now();
   let deadChecked = false;
+  let parentConfirmed = !(pinned && (opts.platform ?? process.platform) === "win32");
   let lastStatusAt = -Infinity;
   let secretWarned = false;
   const dropStaleBusy = async () => {
@@ -780,7 +790,10 @@ async function runWaiter(event, input, opts = {}) {
   };
   try {
     try {
-      await sweepClaimed(sid, CLAIMED_SWEEP_MS, await readDelivered(sid));
+      await sweepClaimed(sid, CLAIMED_SWEEP_MS, await readDelivered(sid), async () => {
+        const sec = await loadSecret();
+        return sec.ok ? (m) => verifyMessage(m, sid, sec.secret) : null;
+      });
     } catch (e) {
       logError(e);
     }
@@ -833,7 +846,16 @@ async function runWaiter(event, input, opts = {}) {
         } else if (await isBusy(sid) && !await dropStaleBusy()) {
         } else {
           if (await lockLost()) return NOTHING;
-          const sec = await inboxHasMessages(sid) ? await loadSecret() : null;
+          const queued = await inboxHasMessages(sid);
+          if (queued && !parentConfirmed) {
+            const r = await lookup();
+            if (r.ok && r.pid !== parent) {
+              logError(`waiter for session ${sid}: claude agents lists it ${r.pid === null ? "nowhere" : `in process ${r.pid}`}, not in this waiter's parent ${parent}: exiting without draining`);
+              return NOTHING;
+            }
+            if (r.ok) parentConfirmed = true;
+          }
+          const sec = queued ? await loadSecret() : null;
           let drained = [];
           if (sec && !sec.ok) {
             if (!secretWarned) logError(`the install secret is ${sec.reason}: nothing is taken from the inbox of session ${sid} until it can be read`);

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { tmpDir } from '../helpers/tmp.js';
 
 type Hook = { type: string; command: string; args?: string[]; shell?: string; asyncRewake?: boolean; async?: boolean; timeout?: number };
 type Group = { matcher?: string; hooks: Hook[] };
@@ -90,7 +90,7 @@ describe('hooks.json', () => {
 
   it('spawned without a shell: node is the direct child and gets the plugin path as one argument (spaces, quotes)', () => {
     // Quotes are not valid in Windows file names; spaces are.
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), process.platform === 'win32' ? 'acc root $x-' : `acc root "q" 'a' $x-`));
+    const root = tmpDir(process.platform === 'win32' ? 'acc root $x-' : `acc root "q" 'a' $x-`);
     fs.mkdirSync(path.join(root, 'dist'));
     fs.writeFileSync(path.join(root, 'dist', 'hook.mjs'), 'process.stdout.write(JSON.stringify({ pid: process.pid, argv: process.argv.slice(1) }));');
     const h = cfg.hooks.UserPromptSubmit[0].hooks[0];
@@ -106,7 +106,7 @@ describe('hooks.json', () => {
   // visible, non-blocking hook error. It is documented in both READMEs under Requirements.
   it('without node on PATH the spawn fails (a non-blocking hook error), it does not hang', () => {
     const h = cfg.hooks.UserPromptSubmit[0].hooks[0];
-    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'acc-nopath-'));
+    const empty = tmpDir('acc-nopath-');
     const r = runExec(h, '/nonexistent', { PATH: empty });
     expect((r.error as NodeJS.ErrnoException | undefined)?.code).toBe('ENOENT');
   });

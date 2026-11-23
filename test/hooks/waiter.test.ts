@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { runWaiter, type WaiterOptions, type WaiterEvent, type PidLookup } from '../../src/hooks/waiter.js';
 import { register, markDisconnected, getRegistration, updateRegistration } from '../../src/core/registry.js';
@@ -12,6 +11,7 @@ import { signMessage } from '../../src/core/secret.js';
 import { unwrapMessages } from '../../src/core/protocol.js';
 import { paths } from '../../src/core/paths.js';
 import { PROTOCOL, VERSION } from '../../src/core/version.js';
+import { tmpDir } from '../helpers/tmp.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const errno = (code: string) => Object.assign(new Error(code), { code });
@@ -23,7 +23,7 @@ const wait = (event: WaiterEvent, o: Record<string, unknown> = {}, extra: Waiter
   runWaiter(event, input(o) as never, { ...opts, ...extra });
 
 beforeEach(() => {
-  process.env.AI_CHAT_CENTER_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'acc-'));
+  process.env.AI_CHAT_CENTER_HOME = tmpDir('acc-');
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -791,6 +791,82 @@ describe('waiter: pinned to the claude process it serves', () => {
     const r = await wait('stop', {}, { parentPid: PARENT, isAlive: aliveFn, lookup: async () => ({ ok: true, pid: OTHER }) });
     expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['through a shim']);
     expect((await getRegistration('s1'))!.pid).toBe(OTHER);
+  });
+  // Audit R5-L1 (r5rt/resume-elsewhere.mjs): the session is resumed in claude B while claude A is still open.
+  // B's start waiter records B and finds the lock held by A's waiter, which exits within a poll once it sees
+  // B in the registration. B's waiter used to give up at once, leaving no waiter at all.
+  it('resumed in a second terminal: the new pinned waiter retries the lock and takes over', async () => {
+    await regWith(PARENT); // claude A
+    await setBusy('s1');
+    const a = wait('stop', {}, { parentPid: PARENT, isAlive: aliveFn, spawnedAt: 0, pollMs: 300 });
+    await sleep(40);
+    fs.rmSync(paths().busyFile('s1'));
+    const b = wait('start', { source: 'resume' }, { parentPid: OTHER, isAlive: aliveFn, lookup: async () => ({ ok: true, pid: OTHER }) });
+    expect(await a).toEqual({ exitCode: 0, stderr: '' });
+    await enqueue('s1', 'sent after the resume in B');
+    const r = await b;
+    expect(r.exitCode).toBe(2);
+    expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['sent after the resume in B']);
+  });
+  it('a pinned waiter gives up after about 3 s when the lock stays held', async () => {
+    await regWith(PARENT);
+    const holder = paths().waiterLock('s1');
+    fs.mkdirSync(path.dirname(holder), { recursive: true });
+    fs.writeFileSync(holder, JSON.stringify({ pid: process.pid, ts: Date.now() })); // a live holder that never leaves
+    const t = Date.now();
+    expect(await wait('stop', {}, { parentPid: PARENT, isAlive: aliveFn, spawnedAt: 0 })).toEqual({ exitCode: 0, stderr: '' });
+    expect(Date.now() - t).toBeGreaterThanOrEqual(2500);
+    expect(Date.now() - t).toBeLessThan(6000);
+  });
+  it('an unpinned waiter that finds the lock held still exits at once', async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: OTHER });
+    const holder = paths().waiterLock('s1');
+    fs.mkdirSync(path.dirname(holder), { recursive: true });
+    fs.writeFileSync(holder, JSON.stringify({ pid: process.pid, ts: Date.now() }));
+    const t = Date.now();
+    expect(await wait('stop', {}, { isAlive: aliveFn })).toEqual({ exitCode: 0, stderr: '' });
+    expect(Date.now() - t).toBeLessThan(1000);
+  });
+  // Audit S5-L2: Windows never re-parents, so a waiter whose claude process exited cannot tell when another
+  // process reuses that pid. Right before claiming, it confirms once with `claude agents` that the session
+  // runs in its parent. A failed lookup delivers as before.
+  describe('on Windows, one lookup confirms the parent before claiming', () => {
+    const win = { platform: 'win32' as const, parentPid: PARENT, isAlive: aliveFn };
+    it('the session runs in its parent: delivered, one lookup', async () => {
+      await regWith(PARENT);
+      await enqueue('s1', 'x');
+      let lookups = 0;
+      const r = await wait('stop', {}, { ...win, lookup: async () => (lookups++, { ok: true, pid: PARENT }) });
+      expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['x']);
+      expect(lookups).toBe(1);
+    });
+    it('the session runs in another process, or is not listed (the parent pid was reused): nothing is taken', async () => {
+      for (const found of [OTHER, null]) {
+        await regWith(PARENT);
+        await enqueue('s1', 'x');
+        const r = await wait('stop', {}, { ...win, lookup: async () => ({ ok: true, pid: found }) });
+        expect(r).toEqual({ exitCode: 0, stderr: '' });
+        expect((await peek('s1')).map((m) => m.text)).toEqual(['x']);
+        await markDisconnected('s1', 'off');
+      }
+    });
+    it('the lookup fails: delivered as before', async () => {
+      await regWith(PARENT);
+      await enqueue('s1', 'x');
+      const r = await wait('stop', {}, { ...win, lookup: async () => ({ ok: false }) as PidLookup });
+      expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['x']);
+    });
+    it('no lookup while nothing is queued, and none on other platforms', async () => {
+      await regWith(PARENT);
+      let lookups = 0;
+      const lookup = async () => (lookups++, { ok: true, pid: PARENT } as PidLookup);
+      expect(await wait('stop', {}, { ...win, lookup, deadlineMs: 150 })).toEqual({ exitCode: 0, stderr: '' });
+      expect(lookups).toBe(0);
+      await enqueue('s1', 'x');
+      const r = await wait('stop', {}, { ...win, platform: 'linux', lookup });
+      expect(r.exitCode).toBe(2);
+      expect(lookups).toBe(0);
+    });
   });
   it('with a shim parent, it still exits once the registration names another process', async () => {
     await regWith(OTHER);

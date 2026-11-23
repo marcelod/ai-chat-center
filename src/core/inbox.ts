@@ -207,11 +207,21 @@ async function markerOwnerAlive(marker: string): Promise<boolean> {
  * files it removed or put back.
  * - A claim marker whose holder pid is dead, or older than a minute (or maxAgeMs if shorter), is removed:
  *   never the message it guarded, which becomes claimable again.
- * - A claimed file older than `maxAgeMs` (by the claim time in its name, else its mtime) was left by a drain
- *   that died or could not delete it. Its id in `delivered`: it was delivered, delete it. Otherwise it is
- *   renamed back to its .msg name (audit R4-L3: a second delivery is safer than a lost message).
+ * - A claimed file older than `maxAgeMs` (by the claim time in its name) was left by a drain that died or
+ *   could not delete it. It is renamed back to its .msg name (audit R4-L3: a second delivery is safer than a
+ *   lost message) only when it is a current message (`current`: its signature checks out) whose id is not
+ *   in `delivered`. Anything else is deleted (audit R5-L2): a delivered one; one with no claim time in its
+ *   name or another signature, left by a drain of 0.2.2 or older, which claimed only to deliver (putting it
+ *   back made the app ask the user to send again a message Claude had already acted on); a malformed one.
+ *   `current` is asked once, and only when such a file exists; null (the secret cannot be read) leaves every
+ *   claimed file for a later sweep.
  */
-export async function sweepClaimed(sid: string, maxAgeMs: number, delivered: ReadonlySet<string> = new Set()): Promise<number> {
+export async function sweepClaimed(
+  sid: string,
+  maxAgeMs: number,
+  delivered: ReadonlySet<string> = new Set(),
+  current: () => Promise<((m: InboxMessage) => boolean) | null> = async () => null,
+): Promise<number> {
   const dir = paths().inboxDir(sid);
   let names: string[];
   try {
@@ -221,6 +231,7 @@ export async function sweepClaimed(sid: string, maxAgeMs: number, delivered: Rea
   }
   let swept = 0;
   const now = Date.now();
+  let judge: ((m: InboxMessage) => boolean) | null | undefined;
   for (const n of names) {
     if (n.endsWith(`.msg${CLAIM_MARK}`)) {
       const marker = path.join(dir, n);
@@ -240,9 +251,18 @@ export async function sweepClaimed(sid: string, maxAgeMs: number, delivered: Rea
     try {
       const at = m[1] ? Number(m[1]) : (await fs.stat(file)).mtimeMs;
       if (now - at <= maxAgeMs) continue;
-      const msg = await readMsg(file);
-      if (msg && typeof msg.id === 'string' && delivered.has(msg.id)) await withFsRetry(() => fs.rm(file, { force: true }));
-      else await withFsRetry(() => fs.rename(file, path.join(dir, n.slice(0, m.index + '.msg'.length))));
+      if (judge === undefined) judge = await current().catch(() => null);
+      if (judge === null) continue;
+      let msg: InboxMessage | null;
+      try {
+        msg = JSON.parse(await fs.readFile(file, 'utf8')) as InboxMessage;
+      } catch (e) {
+        if (!(e instanceof SyntaxError)) continue; // unreadable now: next time
+        msg = null;
+      }
+      const putBack = m[1] !== undefined && msg !== null && typeof msg === 'object' && typeof msg.id === 'string' && !delivered.has(msg.id) && judge(msg);
+      if (putBack) await withFsRetry(() => fs.rename(file, path.join(dir, n.slice(0, m.index + '.msg'.length))));
+      else await withFsRetry(() => fs.rm(file, { force: true }));
       swept++;
     } catch {
       /* gone, or still held: next time */

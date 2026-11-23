@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { acquireLock, releaseLock, reclaimStaleLock, touchLock, withLock, LOCK_STALE_MS } from '../../src/core/lock.js';
+import { tmpDir } from '../helpers/tmp.js';
 
 const owner = (f: string) => JSON.parse(fs.readFileSync(f, 'utf8')) as { pid: number; ts: string };
 
@@ -15,7 +15,7 @@ async function deadPid(): Promise<number> {
 
 let file: string;
 beforeEach(() => {
-  file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'acc-')), 'sub', 'x.lock');
+  file = path.join(tmpDir('acc-'), 'sub', 'x.lock');
 });
 
 describe('lock', () => {

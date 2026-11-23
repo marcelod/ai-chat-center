@@ -1581,6 +1581,11 @@ async function startHub(opts = {}) {
       await hub.close();
       return deferred(`after binding port ${port}`);
     }
+    try {
+      await installSecret();
+    } catch (e) {
+      log(`the install secret could not be prepared: ${e.message}`);
+    }
     await writeJsonAtomic(paths().hubJson, { pid: process.pid, port });
     log(`hub listening on ${hub.url}`);
     await prune(log);

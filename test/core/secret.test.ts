@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { installSecret, loadSecret, signMessage, verifyMessage } from '../../src/core/secret.js';
 import { paths } from '../../src/core/paths.js';
+import { tmpDir } from '../helpers/tmp.js';
 
 beforeEach(() => {
-  process.env.AI_CHAT_CENTER_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'acc-'));
+  process.env.AI_CHAT_CENTER_HOME = tmpDir('acc-');
 });
 afterEach(() => {
   vi.restoreAllMocks();

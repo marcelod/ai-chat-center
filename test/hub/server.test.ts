@@ -9,6 +9,7 @@ import { createHub } from '../../src/hub/server.js';
 import { SessionDisconnectedError, SessionProtocolError, type Provider } from '../../src/hub/provider.js';
 import type { ProviderChange } from '../../src/shared/types.js';
 import { VERSION } from '../../src/core/version.js';
+import { tmpDir } from '../helpers/tmp.js';
 
 const TOKEN = 'a'.repeat(64);
 let home: string;
@@ -85,7 +86,7 @@ function openStream(u: URL, p: string, headers: Record<string, string> = {}) {
 }
 
 beforeEach(async () => {
-  home = await fsp.mkdtemp(path.join(os.tmpdir(), 'acc-hub-'));
+  home = tmpDir('acc-hub-');
   prevHome = process.env.AI_CHAT_CENTER_HOME;
   process.env.AI_CHAT_CENTER_HOME = home;
 });
@@ -93,7 +94,7 @@ afterEach(async () => {
   await hub?.close();
   hub = undefined;
   if (prevHome === undefined) delete process.env.AI_CHAT_CENTER_HOME; else process.env.AI_CHAT_CENTER_HOME = prevHome;
-  await fsp.rm(home, { recursive: true, force: true });
+  await fsp.rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 describe('auth and host checks', () => {

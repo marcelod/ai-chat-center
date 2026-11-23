@@ -11,6 +11,7 @@ import { acquireLock, releaseLock, isAlive } from '../core/lock.js';
 import { isActive, listRegistrations, pruneRegistrations, type Registration } from '../core/registry.js';
 import type { LiveSession } from '../shared/types.js';
 import { createHub } from './server.js';
+import { installSecret } from '../core/secret.js';
 
 const TOKEN_RE = /^[0-9a-f]{64}$/;
 /** Disconnected registrations older than this are deleted (with their inbox, busy and waiting files). */
@@ -187,6 +188,14 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
     if (await liveHubExists({ port })) {
       await hub.close();
       return deferred(`after binding port ${port}`);
+    }
+    // Audit R5-L3: the waiter judges queued messages only once the install secret exists. After an upgrade
+    // from 0.1.0 it did not exist until the first send, so old unsigned messages stayed "pending" with no
+    // notice. A secret that cannot be read right now is not replaced (installSecret throws): logged only.
+    try {
+      await installSecret();
+    } catch (e) {
+      log(`the install secret could not be prepared: ${(e as Error).message}`);
     }
     await writeJsonAtomic(paths().hubJson, { pid: process.pid, port });
     log(`hub listening on ${hub.url}`);

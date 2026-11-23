@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { readJson, withFsRetry, writeJsonAtomic } from '../../src/core/fsAtomic.js';
+import { tmpDir } from '../helpers/tmp.js';
 
 let dir: string;
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acc-fs-'));
+  dir = tmpDir('acc-fs-');
 });
 
 describe('writeJsonAtomic', () => {

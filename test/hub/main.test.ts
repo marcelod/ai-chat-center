@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
 import { startHub } from '../../src/hub/main.js';
 import { ensureHub } from '../../src/hooks/ensureHub.js';
+import { tmpDir } from '../helpers/tmp.js';
 
 /**
  * Audit S2-N1: a squatter on the port recorded in a stale hub.json that relays every health challenge
@@ -48,7 +48,7 @@ let home: string;
 let prev: string | undefined;
 let prevPort: string | undefined;
 beforeEach(async () => {
-  home = await fsp.mkdtemp(path.join(os.tmpdir(), 'acc-main-'));
+  home = tmpDir('acc-main-');
   prev = process.env.AI_CHAT_CENTER_HOME;
   prevPort = process.env.AI_CHAT_CENTER_PORT;
   process.env.AI_CHAT_CENTER_HOME = home;
@@ -57,7 +57,7 @@ beforeEach(async () => {
 afterEach(async () => {
   if (prev === undefined) delete process.env.AI_CHAT_CENTER_HOME; else process.env.AI_CHAT_CENTER_HOME = prev;
   if (prevPort === undefined) delete process.env.AI_CHAT_CENTER_PORT; else process.env.AI_CHAT_CENTER_PORT = prevPort;
-  await fsp.rm(home, { recursive: true, force: true });
+  await fsp.rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 describe('main', () => {
@@ -143,18 +143,24 @@ describe('main', () => {
   // Audit R4-C1: hub.json left by a hub killed without cleanup names the port the new hub binds again.
   // Its last check then reaches itself: that is not another live hub.
   it('a stale hub.json naming the port this hub binds does not make it defer to itself', async () => {
-    const port = await freePort();
     const { spawnSync } = await import('node:child_process');
     const dead = spawnSync(process.execPath, ['-e', '']).pid!;
-    await fsp.writeFile(path.join(home, 'hub.json'), JSON.stringify({ pid: dead, port }));
-    process.env.AI_CHAT_CENTER_PORT = String(port);
-    const h = await startHub();
-    try {
-      expect(h).not.toBeNull();
-      expect(h!.port).toBe(port);
-      expect(JSON.parse(await fsp.readFile(path.join(home, 'hub.json'), 'utf8'))).toEqual({ pid: process.pid, port });
-    } finally {
-      await h?.close();
+    // Audit R5-Info: freePort() releases the port before the hub binds it; under parallel runs another
+    // process can take it meanwhile (the hub then binds the next one). Only that case is retried.
+    for (let attempt = 1; ; attempt++) {
+      const port = await freePort();
+      await fsp.writeFile(path.join(home, 'hub.json'), JSON.stringify({ pid: dead, port }));
+      process.env.AI_CHAT_CENTER_PORT = String(port);
+      const h = await startHub();
+      try {
+        expect(h).not.toBeNull();
+        if (h!.port !== port && attempt < 5) continue; // taken meanwhile by another process
+        expect(h!.port).toBe(port);
+        expect(JSON.parse(await fsp.readFile(path.join(home, 'hub.json'), 'utf8'))).toEqual({ pid: process.pid, port });
+        return;
+      } finally {
+        await h?.close();
+      }
     }
   });
   it('logs why it does not start when another live hub answers', async () => {
@@ -338,6 +344,29 @@ describe('main', () => {
   });
 });
 
+// Audit R5-L3: after an upgrade from 0.1.0 the secret did not exist until the first send, so the waiter
+// could not judge (and report) the old unsigned messages: they showed as pending forever.
+describe('install secret', () => {
+  it('the hub creates the install secret when it starts (before hub.json names it)', async () => {
+    expect(fs.existsSync(path.join(home, 'install-secret'))).toBe(false);
+    const h = await startHub({});
+    try {
+      expect(fs.readFileSync(path.join(home, 'install-secret'), 'utf8')).toMatch(/^[0-9a-f]{64}$/);
+    } finally {
+      await h!.close();
+    }
+  });
+  it('an existing secret is kept', async () => {
+    fs.writeFileSync(path.join(home, 'install-secret'), 'c'.repeat(64));
+    const h = await startHub({});
+    try {
+      expect(fs.readFileSync(path.join(home, 'install-secret'), 'utf8')).toBe('c'.repeat(64));
+    } finally {
+      await h!.close();
+    }
+  });
+});
+
 // Audit R3-F4: a hub that hub.json no longer names (a twin replaced it, or the state folder was deleted)
 // exits on its own instead of lingering with an old token.
 describe('hub ownership check', () => {
@@ -351,7 +380,7 @@ describe('hub ownership check', () => {
         expect(replaced).toBe(0);
         const file = path.join(home, 'hub.json');
         if (change === 'gone') await fsp.rm(file);
-        else if (change === 'folder') await fsp.rm(home, { recursive: true, force: true });
+        else if (change === 'folder') await fsp.rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 }); // the hub may append to hub.log meanwhile
         else {
           const cur = JSON.parse(await fsp.readFile(file, 'utf8'));
           await fsp.writeFile(file, JSON.stringify(change === 'other-pid' ? { ...cur, pid: cur.pid + 1 } : { ...cur, port: cur.port + 1 }));

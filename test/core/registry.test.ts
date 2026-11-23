@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { register, getRegistration, listRegistrations, markDisconnected, isActive, updateRegistration, pruneRegistrations } from '../../src/core/registry.js';
 import { enqueue } from '../../src/core/inbox.js';
 import { setBusy, clearBusy, isBusy } from '../../src/core/busy.js';
 import { paths } from '../../src/core/paths.js';
 import { setWaiting, getWaiting, clearWaiting } from '../../src/core/waiting.js';
+import { tmpDir } from '../helpers/tmp.js';
 
 beforeEach(() => {
-  process.env.AI_CHAT_CENTER_HOME = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'acc-')), 'home');
+  process.env.AI_CHAT_CENTER_HOME = path.join(tmpDir('acc-'), 'home');
 });
 
 describe('registry', () => {

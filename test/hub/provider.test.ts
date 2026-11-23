@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { ClaudeCodeProvider, SessionDisconnectedError, SessionProtocolError } from '../../src/hub/provider.js';
 import { PROTOCOL, VERSION } from '../../src/core/version.js';
@@ -10,11 +9,12 @@ import { register, getRegistration } from '../../src/core/registry.js';
 import { setWaiting } from '../../src/core/waiting.js';
 import { peek } from '../../src/core/inbox.js';
 import { paths } from '../../src/core/paths.js';
+import { tmpDir } from '../helpers/tmp.js';
 
 let dir: string;
 let transcript: string;
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acc-'));
+  dir = tmpDir('acc-');
   process.env.AI_CHAT_CENTER_HOME = dir;
   transcript = path.join(dir, 't.jsonl');
   fs.writeFileSync(transcript, '');

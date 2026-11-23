@@ -1,13 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
-import { enqueue, drain, peek, clearInbox, sweepClaimed, countUnsigned } from '../../src/core/inbox.js';
+import { enqueue, drain, peek, clearInbox, sweepClaimed, countUnsigned, type InboxMessage } from '../../src/core/inbox.js';
+import { signMessage, verifyMessage } from '../../src/core/secret.js';
+import crypto from 'node:crypto';
 import { paths } from '../../src/core/paths.js';
+import { tmpDir } from '../helpers/tmp.js';
 
 beforeEach(() => {
-  process.env.AI_CHAT_CENTER_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'acc-'));
+  process.env.AI_CHAT_CENTER_HOME = tmpDir('acc-');
 });
 
 afterEach(() => {
@@ -111,24 +113,44 @@ describe('inbox', () => {
   });
   // Audit R4-L3: an old claimed file is put back as .msg (re-delivery is safer than loss), unless its id
   // is among the delivered ones: then it is deleted.
-  it('sweepClaimed puts back claimed files older than the limit, deletes delivered ones, keeps fresh ones', async () => {
+  // Audit R4-L3 / R5-L2: a claimed file older than the limit is put back only when it is a current (v2-signed)
+  // message that was not delivered. One left by a drain of 0.2.2 or older (no claim time in its name, or a v1
+  // signature) was claimed only to be delivered: it is deleted, never turned into "not delivered, send it again".
+  it('sweepClaimed puts back only old v2-signed undelivered claims; deletes delivered, older-format and unsigned ones', async () => {
     await enqueue('s1', 'queued');
     const dir = paths().inboxDir('s1');
+    const secret = fs.readFileSync(paths().secret, 'utf8').trim();
     const old = Date.now() - 2 * 3600_000;
-    fs.writeFileSync(path.join(dir, `001-000001-x.msg.claimed-${old}-u1`), JSON.stringify({ id: 'x', text: 'x', createdAt: '' }));
-    fs.writeFileSync(path.join(dir, `002-000001-d.msg.claimed-${old}-u3`), JSON.stringify({ id: 'd', text: 'd', createdAt: '' }));
+    const v2 = (id: string) => signMessage('s1', { id, text: id, createdAt: new Date(old).toISOString() });
+    const v1 = (id: string) => ({ id, text: id, createdAt: '', sig: crypto.createHmac('sha256', secret).update(`${id}|${id}`).digest('hex') });
+    fs.writeFileSync(path.join(dir, `001-000001-x.msg.claimed-${old}-u1`), JSON.stringify(await v2('x')));
+    fs.writeFileSync(path.join(dir, `002-000001-d.msg.claimed-${old}-u3`), JSON.stringify(await v2('d')));
+    fs.writeFileSync(path.join(dir, `003-000001-o.msg.claimed-${old}-u4`), JSON.stringify(v1('o')));
+    fs.writeFileSync(path.join(dir, `004-000001-n.msg.claimed-${old}-u5`), JSON.stringify({ id: 'n', text: 'n', createdAt: '' }));
     fs.writeFileSync(path.join(dir, `y.msg.claimed-${Date.now()}-u2`), '{}');
-    // older naming (no claim time): falls back to the file mtime
-    fs.writeFileSync(path.join(dir, 'z.msg.claimed-0d6e2c9a-uuid'), '{}');
+    // 0.2.2 naming (no claim time), even with a current signature: deleted
+    fs.writeFileSync(path.join(dir, 'z.msg.claimed-0d6e2c9a-uuid'), JSON.stringify(await v2('z')));
     fs.utimesSync(path.join(dir, 'z.msg.claimed-0d6e2c9a-uuid'), new Date(old), new Date(old));
-    expect(await sweepClaimed('s1', 3600_000, new Set(['d']))).toBe(3);
+    const current = async () => (m: InboxMessage) => verifyMessage(m, 's1', secret);
+    expect(await sweepClaimed('s1', 3600_000, new Set(['d']), current)).toBe(5);
     const left = names();
     expect(left.some((n) => n.startsWith('y.msg.claimed-'))).toBe(true);
     expect(left).toContain('001-000001-x.msg');
-    expect(left).toContain('z.msg');
-    expect(left.some((n) => n.startsWith('002-'))).toBe(false);
-    expect(left).toHaveLength(4);
+    expect(left).toHaveLength(3); // the queued one, x put back, y (fresh)
     expect(await sweepClaimed('nobody', 3600_000)).toBe(0);
+  });
+  it('sweepClaimed leaves old claimed files alone when it cannot judge them (no secret), and asks only when needed', async () => {
+    const dir = paths().inboxDir('s1');
+    fs.mkdirSync(dir, { recursive: true });
+    let asked = 0;
+    const cannot = async () => (asked++, null);
+    expect(await sweepClaimed('s1', 3600_000, new Set(), cannot)).toBe(0);
+    expect(asked).toBe(0); // nothing claimed: the secret is never read
+    const old = Date.now() - 2 * 3600_000;
+    fs.writeFileSync(path.join(dir, `001-000001-x.msg.claimed-${old}-u1`), JSON.stringify({ id: 'x', text: 'x', createdAt: '', sig: 'f'.repeat(64) }));
+    expect(await sweepClaimed('s1', 3600_000, new Set(), cannot)).toBe(0);
+    expect(asked).toBe(1);
+    expect(names()).toEqual([`001-000001-x.msg.claimed-${old}-u1`]);
   });
   it('a claim marker whose holder died is removed at once, by the sweep and by the next drain', async () => {
     await enqueue('s1', 'a');

@@ -1,16 +1,15 @@
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { appendFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { TranscriptReader } from '../../src/hub/transcript/reader.js';
+import { tmpDir } from '../helpers/tmp.js';
 
 let dir: string;
 let file: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'reader-'));
+  dir = tmpDir('reader-');
   file = join(dir, 't.jsonl');
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const user = (n: number, text = `msg ${n}`) =>
   JSON.stringify({

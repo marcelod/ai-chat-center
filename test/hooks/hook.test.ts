@@ -12,6 +12,7 @@ import { isBusy, setBusy } from '../../src/core/busy.js';
 import { getWaiting } from '../../src/core/waiting.js';
 import { paths } from '../../src/core/paths.js';
 import { saveConfig } from '../../src/core/config.js';
+import { tmpDir } from '../helpers/tmp.js';
 
 const URL_ = 'http://127.0.0.1:7777/#token=t';
 const ctx = (parentPid = 42) => ({
@@ -26,7 +27,7 @@ const inp = (o: Partial<HookInput> = {}): HookInput => ({
 });
 
 beforeEach(() => {
-  process.env.AI_CHAT_CENTER_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'acc-'));
+  process.env.AI_CHAT_CENTER_HOME = tmpDir('acc-');
 });
 
 const out = (r: { stdout?: string }) => JSON.parse(r.stdout!) as {
