@@ -16,10 +16,10 @@ const statusOf = (e: unknown): number | undefined => {
   return typeof s === 'number' ? s : Number((e as Error | null)?.message);
 };
 
-const LINE_PX = 22;
-const PAD_PX = 12;
-const MAX_LINES = 8;
-const MAX_HEIGHT = MAX_LINES * LINE_PX + 2 * PAD_PX;
+export const LINE_PX = 22;
+export const PAD_PX = 12;
+export const MAX_LINES = 8;
+export const MAX_HEIGHT = MAX_LINES * LINE_PX + 2 * PAD_PX;
 
 export function Composer({ name, disabled: sessionOff, blockedByQuestion = false, onSend }: Props) {
   const t = useT();
@@ -33,7 +33,10 @@ export function Composer({ name, disabled: sessionOff, blockedByQuestion = false
     const el = ref.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
+    // scrollHeight includes padding but not the border (box-sizing: border-box).
+    const border = el.offsetHeight - el.clientHeight;
+    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT) + border}px`;
+    el.style.overflowY = el.scrollHeight > MAX_HEIGHT ? 'auto' : 'hidden';
   }, [text]);
 
   const deliver = async (body: string) => {
@@ -93,7 +96,7 @@ export function Composer({ name, disabled: sessionOff, blockedByQuestion = false
         <textarea
           ref={ref}
           rows={1}
-          style={{ maxHeight: MAX_HEIGHT, lineHeight: `${LINE_PX}px`, overflowY: 'auto' }}
+          style={{ lineHeight: `${LINE_PX}px`, overflowY: 'hidden' }}
           value={text}
           disabled={disabled}
           onChange={(e) => setText(e.target.value)}
