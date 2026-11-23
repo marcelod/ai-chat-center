@@ -23,48 +23,99 @@ function readStored(): string | null {
   }
 }
 
+const PAIR_CODE_RE = /^[0-9a-f]{64}$/;
+
+function keep(t: string): void {
+  try {
+    storage()?.setItem(TOKEN_KEY, t);
+  } catch {
+    /* storage unavailable: the token lives in memory only */
+  }
+}
+
 /**
  * Reads the token on first load from the fragment (`#token=`, printed by /cc since 0.2.2: never sent to
  * the server, less likely to persist) or, for links printed by 0.2.1 and earlier, from `?token=`. Keeps
  * it for this tab and clears it from the URL either way. (`?token=` is accepted during 0.2.x only.)
+ * A window opened by /cc carries `#pair=<one-time code>` instead (the token never goes on the browser's
+ * command line): the code is cleared from the URL here too and returned for the trade (see `ready`).
  */
-function initToken(): string | null {
+function initToken(): { token: string | null; pairCode: string | null } {
   try {
     localStorage.removeItem(TOKEN_KEY); // left by 0.1.x
   } catch {
     /* storage unavailable */
   }
   let token: string | null = null;
+  let pairCode: string | null = null;
   try {
     const url = new URL(window.location.href);
     const frag = new URLSearchParams(url.hash.replace(/^#/, ''));
     const fromHash = frag.get('token');
     const fromQuery = url.searchParams.get('token');
+    const fromPair = frag.get('pair');
     token = fromHash || fromQuery;
-    if (fromHash !== null || fromQuery !== null) {
+    if (fromHash !== null || fromQuery !== null || fromPair !== null) {
       frag.delete('token');
+      frag.delete('pair');
       url.searchParams.delete('token');
       const hash = frag.toString();
       window.history.replaceState(null, '', url.pathname + url.search + (hash ? `#${hash}` : ''));
     }
+    if (!token && fromPair !== null && PAIR_CODE_RE.test(fromPair)) pairCode = fromPair;
   } catch {
     /* ignore */
   }
   if (token) {
-    try {
-      storage()?.setItem(TOKEN_KEY, token);
-    } catch {
-      /* storage unavailable: the token lives in memory only */
-    }
-    return token;
+    keep(token);
+    return { token, pairCode: null };
   }
-  return readStored();
+  return { token: readStored(), pairCode };
 }
 
-let token: string | null = initToken();
+/** Trades a one-time pairing code for the token (POST /api/pair). Any failure leaves no token; never throws. */
+async function redeemPairCode(code: string): Promise<void> {
+  try {
+    const res = await fetch('/api/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+      cache: 'no-store',
+    });
+    if (!res.ok) return;
+    const j = (await res.json()) as { token?: unknown };
+    if (typeof j?.token === 'string' && j.token !== '') {
+      token = j.token;
+      keep(j.token);
+    }
+  } catch {
+    /* hub unreachable or bad answer: no token */
+  }
+}
+
+const initial = initToken();
+let token: string | null = initial.token;
+/** The pairing trade started at load (at most once per page load), or null when there was no `#pair=`. */
+const pairing: Promise<void> | null = initial.pairCode ? redeemPairCode(initial.pairCode) : null;
+
+let pairingPending = pairing !== null;
+void pairing?.then(() => {
+  pairingPending = false;
+});
+
+/** True while the `#pair=` trade started at load has not finished (the App waits for `ready`). */
+export function isPairing(): boolean {
+  return pairingPending;
+}
+
+/** Resolves once the token is settled (after the `#pair=` trade, if any): whether there is one. */
+export async function ready(): Promise<boolean> {
+  if (pairing) await pairing;
+  return hasToken();
+}
 
 export function hasToken(): boolean {
-  if (!token) token = initToken();
+  if (!token) token = initToken().token;
   return Boolean(token);
 }
 
@@ -106,6 +157,7 @@ async function errorCode(res: Response): Promise<string | undefined> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  if (pairing) await pairing; // never send a request before the #pair= trade settled the token
   const res = await fetch(path, {
     ...init,
     headers: {
@@ -135,6 +187,7 @@ const hex = (b: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(b), (x) =
  * valid proof; 'unreachable' when nothing answered (the hub may be restarting).
  */
 export async function verifyHub(): Promise<HubCheck> {
+  if (pairing) await pairing;
   const subtle = globalThis.crypto?.subtle;
   if (!token || !subtle) return 'mismatch'; // 127.0.0.1 is a secure context: WebCrypto is always there
   const challenge = hex(globalThis.crypto.getRandomValues(new Uint8Array(16)));

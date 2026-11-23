@@ -549,3 +549,48 @@ describe('name endpoint', () => {
     expect(await getDisplayName('s1')).toBeNull();
   });
 });
+
+describe('pairing endpoints', () => {
+  const pairCode = (u: URL, headers: Record<string, string> = auth) => req(u, '/api/pair-code', { method: 'POST', headers });
+  const pair = (u: URL, body: unknown, headers: Record<string, string> = { 'content-type': 'application/json' }) =>
+    req(u, '/api/pair', { method: 'POST', headers, body: typeof body === 'string' ? body : JSON.stringify(body) });
+
+  it('pair-code needs the token and returns a one-time code that pair trades for the token', async () => {
+    const u = await start(fakeProvider());
+    expect((await pairCode(u, {})).status).toBe(401);
+    expect((await pairCode(u, { authorization: 'Bearer wrong' })).status).toBe(401);
+    const r = await pairCode(u);
+    expect(r.status).toBe(200);
+    const { code } = JSON.parse(r.body);
+    expect(code).toMatch(/^[0-9a-f]{64}$/);
+    const ok = await pair(u, { code });
+    expect(ok.status).toBe(200);
+    expect(JSON.parse(ok.body)).toEqual({ token: TOKEN });
+    expect(ok.headers['cache-control']).toBe('no-store');
+    const again = await pair(u, { code });
+    expect(again.status).toBe(400);
+    expect(again.body.includes(TOKEN)).toBe(false);
+  });
+  it('pair-code only answers POST', async () => {
+    const u = await start(fakeProvider());
+    expect((await req(u, '/api/pair-code', { headers: auth })).status).toBe(404);
+    expect((await req(u, '/api/pair', { headers: auth })).status).toBe(404);
+  });
+  it('pair rejects unknown codes and bad bodies with 400', async () => {
+    const u = await start(fakeProvider());
+    for (const body of [{ code: 'f'.repeat(64) }, { code: 1 }, {}, [], null, 'nope']) {
+      expect((await pair(u, body)).status).toBe(400);
+    }
+  });
+  it('pair keeps the Origin/Host checks, content type and body limit', async () => {
+    const u = await start(fakeProvider());
+    const { code } = JSON.parse((await pairCode(u)).body);
+    expect((await pair(u, { code }, { 'content-type': 'application/json', origin: 'http://evil.com' })).status).toBe(403);
+    expect((await pair(u, { code }, { 'content-type': 'application/json', host: 'evil.com' })).status).toBe(403);
+    expect((await pair(u, { code }, { 'content-type': 'text/plain' })).status).toBe(415);
+    expect((await pair(u, 'x'.repeat(70 * 1024))).status).toBe(413);
+    // none of the rejected attempts consumed the code
+    const ok = await pair(u, { code }, { 'content-type': 'application/json', origin: `http://127.0.0.1:${u.port}` });
+    expect(ok.status).toBe(200);
+  });
+});

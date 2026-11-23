@@ -5,6 +5,8 @@ import type { ProviderChange, SessionsResponse } from '@shared/types';
 
 vi.mock('./api', () => ({
   hasToken: vi.fn(() => true),
+  isPairing: vi.fn(() => false),
+  ready: vi.fn(async () => true),
   onAuthLost: vi.fn(() => () => {}),
   getSessions: vi.fn(),
   getEvents: vi.fn(async () => []),

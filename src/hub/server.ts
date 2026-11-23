@@ -14,6 +14,7 @@ import { setDisplayName, validDisplayName } from '../core/names.js';
 import { getRegistration, isActive } from '../core/registry.js';
 import { VERSION } from '../core/version.js';
 import { CHALLENGE_RE, healthProof } from '../core/healthProof.js';
+import { createPairing } from './pairing.js';
 
 export interface HubOptions {
   provider: Provider;
@@ -115,6 +116,7 @@ export async function createHub(
   const log = opts.log ?? (() => {});
   let port = opts.port;
 
+  const pairing = createPairing();
   const clients = new Set<http.ServerResponse>();
   let pollTimer: NodeJS.Timeout | null = null;
   let heartbeat: NodeJS.Timeout | null = null;
@@ -253,6 +255,15 @@ export async function createHub(
       return sendJson(res, 200, { ok: true, version: VERSION, pid: process.pid, proof });
     }
 
+    if (p === '/api/pair' && method === 'POST') {
+      // Unauthenticated, like health, but behind the same Origin/Host check and body limit as every route:
+      // trades a one-time code from /api/pair-code for the token (a window opened at #pair=<code>).
+      const body = (await readJsonBody(req)) as { code?: unknown } | null;
+      const code = body && typeof body === 'object' && !Array.isArray(body) ? body.code : undefined;
+      if (typeof code !== 'string' || !pairing.redeem(code)) throw new HttpError(400, 'invalid code');
+      return sendJson(res, 200, { token });
+    }
+
     const bearer = /^Bearer (.+)$/.exec(String(req.headers.authorization ?? ''))?.[1];
     const given = p === '/api/stream' ? (bearer ?? url.searchParams.get('token')) : bearer;
     if (!tokenOk(given, token)) return sendJson(res, 401, { error: 'unauthorized' });
@@ -269,6 +280,10 @@ export async function createHub(
         if (clients.size === 0) stopTimers();
       });
       return;
+    }
+    if (p === '/api/pair-code' && method === 'POST') {
+      req.resume();
+      return sendJson(res, 200, { code: pairing.issue() });
     }
     if (p === '/api/sessions' && method === 'GET') return sendJson(res, 200, await provider.listSessions());
     if (p === '/api/config' && method === 'GET') return sendJson(res, 200, await loadConfig());

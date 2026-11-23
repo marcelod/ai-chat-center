@@ -92,9 +92,21 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
 
 export function App() {
   const [lang, setLang] = useState<Language>('en');
-  const [token, setToken] = useState(api.hasToken);
+  // null while a #pair= code is being traded for the token: nothing authenticated runs until it settles.
+  const [token, setToken] = useState<boolean | null>(() => (api.isPairing() ? null : api.hasToken()));
 
   useEffect(() => api.onAuthLost(() => setToken(false)), []);
+
+  useEffect(() => {
+    if (token !== null) return;
+    let live = true;
+    void api.ready().then((ok) => {
+      if (live) setToken(ok);
+    });
+    return () => {
+      live = false;
+    };
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -114,6 +126,6 @@ export function App() {
   };
 
   return (
-    <LangProvider lang={lang}>{token ? <Shell onLanguage={changeLanguage} /> : <NoToken />}</LangProvider>
+    <LangProvider lang={lang}>{token === null ? null : token ? <Shell onLanguage={changeLanguage} /> : <NoToken />}</LangProvider>
   );
 }

@@ -76,6 +76,103 @@ describe('token', () => {
   });
 });
 
+// A window opened by /cc gets #pair=<one-time code> instead of #token=, so the token never sits on the
+// browser's command line. The UI clears the fragment at once and trades the code for the token before its
+// first authenticated call; a failed trade leaves it with no token (the "open the /cc link" screen).
+describe('pairing', () => {
+  const CODE = 'c'.repeat(64);
+  const TOKEN = 't'.repeat(64);
+  type Seen = { url: string; method: string; body?: string; auth?: string };
+  const stub = (pair: () => Promise<Response> | Response) => {
+    const seen: Seen[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        seen.push({ url, method: init?.method ?? 'GET', body: init?.body as string | undefined, auth: headers.Authorization });
+        if (url === '/api/pair') return pair();
+        return new Response(JSON.stringify({ connected: [], others: [] }), { status: 200 });
+      }),
+    );
+    return seen;
+  };
+
+  it('clears #pair= from the URL at once, trades the code for the token and keeps it like #token=', async () => {
+    window.history.replaceState(null, '', `/#pair=${CODE}&view=s1`);
+    const seen = stub(() => new Response(JSON.stringify({ token: TOKEN }), { status: 200 }));
+    const api = await load();
+    expect(window.location.hash).toBe('#view=s1');
+    expect(window.location.href.includes(CODE)).toBe(false);
+    expect(await api.ready()).toBe(true);
+    expect(api.hasToken()).toBe(true);
+    expect(sessionStorage.getItem('acc.token')).toBe(TOKEN);
+    expect(seen).toEqual([
+      { url: '/api/pair', method: 'POST', body: JSON.stringify({ code: CODE }), auth: undefined },
+    ]);
+  });
+
+  it('an authenticated call made during the trade waits for it and carries the new token', async () => {
+    window.history.replaceState(null, '', `/#pair=${CODE}`);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const seen = stub(async () => {
+      await gate;
+      return new Response(JSON.stringify({ token: TOKEN }), { status: 200 });
+    });
+    const api = await load();
+    const sessions = api.getSessions();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(seen.map((s) => s.url)).toEqual(['/api/pair']);
+    release();
+    await sessions;
+    expect(seen[1]).toMatchObject({ url: '/api/sessions', auth: `Bearer ${TOKEN}` });
+  });
+
+  for (const [name, answer] of [
+    ['a 400 (unknown or spent code)', () => new Response('{"error":"invalid code"}', { status: 400 })],
+    ['a 200 without a token', () => new Response('{}', { status: 200 })],
+    ['a network failure', () => Promise.reject(new TypeError('Failed to fetch'))],
+  ] as const) {
+    it(`${name} leaves no token, once, with the fragment cleared`, async () => {
+      window.history.replaceState(null, '', `/#pair=${CODE}`);
+      const seen = stub(answer);
+      const api = await load();
+      expect(window.location.hash).toBe('');
+      expect(await api.ready()).toBe(false);
+      expect(api.hasToken()).toBe(false);
+      expect(sessionStorage.getItem('acc.token')).toBeNull();
+      expect(seen).toHaveLength(1);
+    });
+  }
+
+  it('a malformed code is cleared and never sent', async () => {
+    window.history.replaceState(null, '', '/#pair=not-a-code');
+    const seen = stub(() => new Response('{}', { status: 200 }));
+    const api = await load();
+    expect(window.location.hash).toBe('');
+    expect(await api.ready()).toBe(false);
+    expect(seen).toHaveLength(0);
+  });
+
+  it('#token= wins over #pair= (no trade), and both are cleared', async () => {
+    window.history.replaceState(null, '', `/#token=abc&pair=${CODE}`);
+    const seen = stub(() => new Response(JSON.stringify({ token: TOKEN }), { status: 200 }));
+    const api = await load();
+    expect(window.location.hash).toBe('');
+    expect(await api.ready()).toBe(true);
+    expect(sessionStorage.getItem('acc.token')).toBe('abc');
+    expect(seen).toHaveLength(0);
+  });
+
+  it('without #pair= ready reflects the stored token', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    expect(await (await load()).ready()).toBe(false);
+    sessionStorage.setItem('acc.token', 'abc');
+    expect(await (await load()).ready()).toBe(true);
+  });
+});
+
 // Audit S4-S3: a tab left open must not send its messages to whatever listens on the port after the hub
 // is gone. It asks for the port-bound HMAC proof before connecting and before every message.
 describe('hub verification', () => {
