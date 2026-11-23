@@ -13,18 +13,24 @@ beforeEach(() => {
 
 describe('config', () => {
   it('loadConfig defaults to en, then persists pt-BR', async () => {
-    expect(await loadConfig()).toEqual({ language: 'en', answersFromApp: false });
+    expect(await loadConfig()).toEqual({ language: 'en', answersFromApp: false, openWindow: false });
     await saveConfig({ language: 'pt-BR' });
     expect((await loadConfig()).language).toBe('pt-BR');
   });
   it('saveConfig merges the patch and returns the result', async () => {
     await saveConfig({ answersFromApp: true });
-    expect(await saveConfig({ language: 'pt-BR' })).toEqual({ language: 'pt-BR', answersFromApp: true });
-    expect(await loadConfig()).toEqual({ language: 'pt-BR', answersFromApp: true });
+    expect(await saveConfig({ language: 'pt-BR' })).toEqual({ language: 'pt-BR', answersFromApp: true, openWindow: false });
+    expect(await loadConfig()).toEqual({ language: 'pt-BR', answersFromApp: true, openWindow: false });
+  });
+  it('openWindow is saved and only true counts', async () => {
+    await saveConfig({ openWindow: true });
+    expect((await loadConfig()).openWindow).toBe(true);
+    await writeJsonAtomic(path.join(tmp, 'config.json'), { language: 'en', openWindow: 'yes' });
+    expect((await loadConfig()).openWindow).toBe(false);
   });
   it('an old file without answersFromApp loads as false', async () => {
     await writeJsonAtomic(path.join(tmp, 'config.json'), { language: 'en' });
-    expect(await loadConfig()).toEqual({ language: 'en', answersFromApp: false });
+    expect(await loadConfig()).toEqual({ language: 'en', answersFromApp: false, openWindow: false });
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
-import { ANSWERS_OFF, ANSWERS_ON, CONNECTED, UNKNOWN_ARG } from '../../src/hooks/hook.js';
+import { ANSWERS_OFF, ANSWERS_ON, WINDOW_OFF, WINDOW_ON, CONNECTED, UNKNOWN_ARG } from '../../src/hooks/hook.js';
 
 const md = fs.readFileSync('plugin/commands/cc.md', 'utf8');
 
@@ -62,8 +62,14 @@ describe('plugin/commands/cc.md answers from the app', () => {
     expect(md).toContain('If the argument below is exactly `off` (and nothing else): ');
     expect(md).not.toContain('If the argument below is "off"');
   });
+  it('has a branch for the window ON and OFF status lines, before the "did not run" catch-all', () => {
+    expect(md).toContain(`"${WINDOW_ON}"`);
+    expect(md).toContain(`"${WINDOW_OFF}"`);
+    expect(md.indexOf(WINDOW_ON)).toBeLessThan(md.indexOf('the plugin hook did not run'));
+    expect(UNKNOWN_ARG).toContain('/ai-chat-center:cc window on');
+  });
   it('the unknown-argument branch names every form of /cc', () => {
     expect(UNKNOWN_ARG).toContain('/ai-chat-center:cc answers on');
-    expect(md).toMatch(/saying to use \/cc, \/ai-chat-center:cc off, \/ai-chat-center:cc answers on or \/ai-chat-center:cc answers off\./);
+    expect(md).toMatch(/saying to use \/cc, \/ai-chat-center:cc off, \/ai-chat-center:cc answers on, \/ai-chat-center:cc answers off, \/ai-chat-center:cc window on or \/ai-chat-center:cc window off\./);
   });
 });

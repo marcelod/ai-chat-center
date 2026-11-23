@@ -13,7 +13,7 @@ import { getWaiting, setWaiting } from '../../src/core/waiting.js';
 import { paths } from '../../src/core/paths.js';
 import { saveConfig, loadConfig } from '../../src/core/config.js';
 import { getTurnOrigin, setTurnOrigin } from '../../src/core/turn.js';
-import { ANSWERS_ON, ANSWERS_OFF } from '../../src/hooks/hook.js';
+import { ANSWERS_ON, ANSWERS_OFF, WINDOW_ON, WINDOW_OFF } from '../../src/hooks/hook.js';
 import { tmpDir } from '../helpers/tmp.js';
 
 const URL_ = 'http://127.0.0.1:7777/#token=t';
@@ -90,8 +90,8 @@ describe('hook', () => {
     const f = await handleHook('prompt-submit', inp({ prompt: '/cc' }), { ...ctx(), ensureHub: async () => { throw new Error('x'); } });
     expect(out(f).systemMessage).toBe(`AI Chat Center: o hub não iniciou. Veja ${path.join(paths().logDir, 'hook.log')}`);
     const u = await handleHook('prompt-submit', inp({ prompt: '/cc foo' }), ctx());
-    expect(out(u).systemMessage).toBe('AI Chat Center: argumento desconhecido. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on ou /ai-chat-center:cc answers off.');
-    expect(out(u).hookSpecificOutput.additionalContext).toBe('AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on or /ai-chat-center:cc answers off.');
+    expect(out(u).systemMessage).toBe('AI Chat Center: argumento desconhecido. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on ou /ai-chat-center:cc window off.');
+    expect(out(u).hookSpecificOutput.additionalContext).toBe('AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on or /ai-chat-center:cc window off.');
   });
 
   // Audit S4-U3: the registration records the Claude config dir of the session.
@@ -149,7 +149,7 @@ describe('hook', () => {
   });
 
   it('/cc with an unknown argument changes nothing', async () => {
-    const msg = 'AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on or /ai-chat-center:cc answers off.';
+    const msg = 'AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on or /ai-chat-center:cc window off.';
     const r = await handleHook('prompt-submit', inp({ prompt: '/cc foo' }), ctx());
     expect(out(r).hookSpecificOutput.additionalContext).toBe(msg);
     expect(fs.readdirSync(paths().home)).toEqual([]);
@@ -701,6 +701,44 @@ describe('answers command and turn origin', () => {
     const off = await handleHook('prompt-submit', inp({ prompt: '/cc answers off' }), ctx());
     expect(out(off).hookSpecificOutput.additionalContext).toContain(ANSWERS_OFF);
     expect((await loadConfig()).answersFromApp).toBe(false);
+  });
+
+  it('isCcCommand parses window on/off', () => {
+    expect(isCcCommand('/cc window on')).toBe('window-on');
+    expect(isCcCommand('/ai-chat-center:cc  WINDOW  off ')).toBe('window-off');
+    expect(isCcCommand('/cc window')).toBe('unknown');
+    expect(isCcCommand('/cc window maybe')).toBe('unknown');
+  });
+
+  it('/cc window on|off saves the flag, works without a session', async () => {
+    const on = await handleHook('prompt-submit', inp({ prompt: '/cc window on' }), { ...ctx(), findBrowser: () => '/usr/bin/chromium' });
+    expect(out(on).hookSpecificOutput.additionalContext).toContain(WINDOW_ON);
+    expect(out(on).systemMessage).toBeTruthy();
+    expect(out(on).systemMessage).not.toMatch(/Chrome, Chromium/);
+    expect((await loadConfig()).openWindow).toBe(true);
+    expect((await loadConfig()).answersFromApp).toBe(false);
+    const off = await handleHook('prompt-submit', inp({ prompt: '/cc window off' }), ctx());
+    expect(out(off).hookSpecificOutput.additionalContext).toContain(WINDOW_OFF);
+    expect((await loadConfig()).openWindow).toBe(false);
+  });
+
+  it('/cc window on adds a localized note when no browser is found', async () => {
+    const none = { ...ctx(), findBrowser: () => null };
+    expect(out(await handleHook('prompt-submit', inp({ prompt: '/cc window on' }), none)).systemMessage).toMatch(/No Chrome, Chromium or Edge found/);
+    await saveConfig({ language: 'pt-BR' });
+    expect(out(await handleHook('prompt-submit', inp({ prompt: '/cc window on' }), none)).systemMessage).toMatch(/Nenhum Chrome, Chromium ou Edge encontrado/);
+  });
+
+  it('/cc window on|off in an active session records the typed turn like answers', async () => {
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
+    await setTurnOrigin('s1', 'app');
+    await setWaiting('s1', 'input');
+    const r = await handleHook('prompt-submit', inp({ prompt: '/cc window on' }), ctx());
+    expect(out(r).hookSpecificOutput.additionalContext).toContain(WINDOW_ON);
+    expect((await loadConfig()).openWindow).toBe(true);
+    expect(await getTurnOrigin('s1')).toBe('terminal');
+    expect(await isBusy('s1')).toBe(true);
+    expect(await getWaiting('s1')).toBeNull();
   });
 
   it('records the turn origin on an active session', async () => {

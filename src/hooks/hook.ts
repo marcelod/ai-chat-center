@@ -49,6 +49,8 @@ export interface HookContext {
   ensureHub: (notice?: (msg: string) => void) => Promise<string>;
   /** Resolves the claude process pid of a session, or null. Default: resolveClaudePid. */
   resolvePid?: (sessionId: string) => Promise<number | null>;
+  /** Path of a Chrome, Chromium or Edge binary, or null. */
+  findBrowser?: () => string | null;
 }
 export interface HookResult {
   stdout?: string;
@@ -57,7 +59,9 @@ export interface HookResult {
 
 const MAX_PREVIOUS_KEYS = 20;
 
-export const UNKNOWN_ARG = 'AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on or /ai-chat-center:cc answers off.';
+export const UNKNOWN_ARG = 'AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on or /ai-chat-center:cc window off.';
+export const WINDOW_ON = 'AI Chat Center: opening the app in its own window is ON';
+export const WINDOW_OFF = 'AI Chat Center: opening the app in its own window is OFF';
 export const ANSWERS_ON = 'AI Chat Center: answering questions from the app is ON';
 export const ANSWERS_OFF = 'AI Chat Center: answering questions from the app is OFF';
 export const CONNECTED = 'AI Chat Center: connected';
@@ -144,15 +148,22 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
   if (event === 'prompt-submit') {
     const cmd = isCcCommand(input.prompt);
     if (cmd === 'unknown') return output(UNKNOWN_ARG, t((await loadConfig()).language, 'hook.unknownArg'));
-    const answers = cmd === 'answers-on' || cmd === 'answers-off';
     let answersResult: HookResult | undefined;
-    if (answers) {
+    if (cmd === 'window-on' || cmd === 'window-off') {
+      const on = cmd === 'window-on';
+      const { language } = await saveConfig({ openWindow: on });
+      // Task 3: default to the real findBrowser (src/hooks/browser.ts) instead of this stub.
+      const find = ctx.findBrowser ?? (() => null);
+      const note = on && find() === null ? `\n${t(language, 'hook.windowNoBrowser')}` : '';
+      answersResult = output(on ? WINDOW_ON : WINDOW_OFF, t(language, on ? 'hook.windowOn' : 'hook.windowOff') + note);
+    }
+    if (cmd === 'answers-on' || cmd === 'answers-off') {
       const on = cmd === 'answers-on';
       const { language } = await saveConfig({ answersFromApp: on });
       answersResult = output(on ? ANSWERS_ON : ANSWERS_OFF, t(language, on ? 'hook.answersOn' : 'hook.answersOff'));
     }
     if (cmd === 'on') return connect(input, resolve, ctx);
-    // `/cc answers on|off` is a typed turn too: it gets the same bookkeeping as any other prompt.
+    // `/cc answers on|off` and `/cc window on|off` are typed turns too: it gets the same bookkeeping as any other prompt.
     const reg = await getRegistration(sid);
     if (!reg) return answersResult ?? nothing;
     if (cmd === 'off') await markDisconnected(sid, 'off');

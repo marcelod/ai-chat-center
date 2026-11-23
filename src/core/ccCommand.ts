@@ -2,7 +2,7 @@
 // (which shows its connected/disconnected notice), so both always agree.
 const CC_RE = /^\s*\/(?:ai-chat-center:)?cc(?:\s+(\S[\s\S]*?))?\s*$/i;
 
-export type CcCommand = 'on' | 'off' | 'answers-on' | 'answers-off' | 'unknown';
+export type CcCommand = 'on' | 'off' | 'answers-on' | 'answers-off' | 'window-on' | 'window-off' | 'unknown';
 
 export function isCcCommand(prompt: unknown): CcCommand | null {
   if (typeof prompt !== 'string') return null;
@@ -13,5 +13,7 @@ export function isCcCommand(prompt: unknown): CcCommand | null {
   if (arg === 'off') return 'off';
   if (arg === 'answers on') return 'answers-on';
   if (arg === 'answers off') return 'answers-off';
+  if (arg === 'window on') return 'window-on';
+  if (arg === 'window off') return 'window-off';
   return 'unknown';
 }

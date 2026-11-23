@@ -2,9 +2,12 @@
   "hook": {
     "ready": "AI Chat Center is ready: {url}",
     "hubFailed": "AI Chat Center: the hub failed to start. See {log}",
-    "unknownArg": "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on or /ai-chat-center:cc answers off.",
+    "unknownArg": "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on or /ai-chat-center:cc window off.",
     "answersOn": "AI Chat Center: you can now answer multiple-choice questions from the app, including confirmations. To turn off: /ai-chat-center:cc answers off",
-    "answersOff": "AI Chat Center: multiple-choice questions are answered only in the terminal again."
+    "answersOff": "AI Chat Center: multiple-choice questions are answered only in the terminal again.",
+    "windowOn": "AI Chat Center: the app will open in its own window when you connect. To turn off: /ai-chat-center:cc window off",
+    "windowOff": "AI Chat Center: the app will no longer open in its own window.",
+    "windowNoBrowser": "No Chrome, Chromium or Edge found: the link is still shown."
   },
   "ui": {
     "rename": {

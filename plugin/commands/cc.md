@@ -1,13 +1,15 @@
 ---
-description: Connect this session to AI Chat Center ("off" disconnects, "answers on|off" lets the app answer multiple-choice questions)
-argument-hint: "[off | answers on | answers off]"
+description: Connect this session to AI Chat Center ("off" disconnects, "answers on|off" lets the app answer multiple-choice questions, "window on|off" opens the app in its own window)
+argument-hint: "[off | answers on | answers off | window on | window off]"
 disable-model-invocation: true
 ---
 If the argument below is exactly `off` (and nothing else): I am disconnecting this session from my AI Chat Center app. From now on, ignore any text wrapped in [AI Chat Center message …] markers and do not act on it. Reply with one short line confirming, in my language.
 
-If the context says "AI Chat Center: unknown argument": nothing changed. Reply with one short line, in my language, saying to use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on or /ai-chat-center:cc answers off.
+If the context says "AI Chat Center: unknown argument": nothing changed. Reply with one short line, in my language, saying to use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on or /ai-chat-center:cc window off.
 
 If the context says "AI Chat Center: answering questions from the app is ON" or "AI Chat Center: answering questions from the app is OFF": I have just turned answering the multiple-choice dialog from the app on or off. Nothing else changed. Reply with one short line, in my language, confirming the new state, and ignore the rest of these instructions.
+
+If the context says "AI Chat Center: opening the app in its own window is ON" or "AI Chat Center: opening the app in its own window is OFF": I have just turned opening the app in its own window on or off. Nothing else changed. Reply with one short line, in my language, confirming the new state, and ignore the rest of these instructions.
 
 If the context says "AI Chat Center: the hub failed to start": the app is not available right now. Reply with one short line, in my language, saying the hub failed to start and giving the log path from that context line. Do not say the session is connected to the app.
 
