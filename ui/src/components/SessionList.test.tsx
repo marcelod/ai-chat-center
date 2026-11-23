@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionView } from '@shared/types';
 import { LangProvider } from '../i18n';
 import { SessionList } from './SessionList';
@@ -29,6 +29,8 @@ function Harness({ onSelect = () => {} }: { onSelect?: (id: string) => void }) {
   );
 }
 
+afterEach(() => vi.restoreAllMocks());
+
 describe('collapsible session list', () => {
   it('toggles and persists in localStorage', async () => {
     const user = userEvent.setup();
@@ -44,7 +46,7 @@ describe('collapsible session list', () => {
     const onSelect = vi.fn();
     const user = userEvent.setup();
     render(<Harness onSelect={onSelect} />);
-    const btn = screen.getByRole('button', { name: 'Beta' });
+    const btn = screen.getByRole('button', { name: /^Beta/ });
     expect(btn).toHaveAttribute('title', 'Beta');
     await user.click(btn);
     expect(onSelect).toHaveBeenCalledWith('b');
@@ -64,7 +66,46 @@ describe('collapsible session list', () => {
     render(<Harness />);
     await user.click(screen.getByRole('button', { name: 'Collapse list' }));
     expect(screen.getByTestId('wrap')).toHaveAttribute('data-collapsed', 'true');
-    spy.mockRestore();
-    set.mockRestore();
+  });
+
+  it('collapsed accessible name starts with the name and includes state and unread; badge caps at 99+', () => {
+    localStorage.setItem('acc.sessionsCollapsed', '1');
+    render(
+      <LangProvider lang="en">
+        <SessionList connected={[s('a', 'Alpha', 'waiting'), s('b', 'Beta')]} others={[]} unread={{ a: 150 }} selectedId={null}
+          onSelect={() => {}} onLanguage={() => {}} collapsed onToggleCollapsed={() => {}} />
+      </LangProvider>,
+    );
+    const btn = screen.getByRole('button', { name: /^Alpha/ });
+    expect(btn).toHaveAccessibleName(/^Alpha\.\s*150 unread/);
+    expect(btn).toHaveAccessibleName(/waiting/i);
+    expect(screen.getByText('99+')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Beta/ })).toHaveAttribute('title', 'Beta');
+  });
+
+  it('collapse then expand keeps selection and unread', async () => {
+    const user = userEvent.setup();
+    function Sel() {
+      const [collapsed, toggle] = useCollapsedList();
+      return (
+        <LangProvider lang="en">
+          <SessionList connected={[s('a', 'Alpha'), s('b', 'Beta')]} others={[]} unread={{ b: 3 }} selectedId="a"
+            onSelect={() => {}} onLanguage={() => {}} collapsed={collapsed} onToggleCollapsed={toggle} />
+        </LangProvider>
+      );
+    }
+    render(<Sel />);
+    await user.click(screen.getByRole('button', { name: 'Collapse list' }));
+    await user.click(screen.getByRole('button', { name: 'Expand list' }));
+    expect(screen.getByRole('button', { name: /Alpha/ })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('3 unread')).toBeInTheDocument();
+  });
+
+  it('never collapses on mobile even if stored', () => {
+    localStorage.setItem('acc.sessionsCollapsed', '1');
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
+    render(<Harness />);
+    expect(screen.getByTestId('wrap')).toHaveAttribute('data-collapsed', 'false');
+    vi.unstubAllGlobals();
   });
 });

@@ -91,7 +91,6 @@ export function SessionList({ connected, others, unread, selectedId, onSelect, o
                 data-state={s.state}
                 aria-current={selected || undefined}
                 onClick={() => onSelect(s.sessionId)}
-                aria-label={collapsed ? s.name : undefined}
                 title={collapsed ? s.name : undefined}
                 className={`flex min-h-[64px] w-full items-center py-2 text-left ${
                   collapsed ? 'justify-center px-2' : 'gap-3 px-4'
@@ -100,17 +99,16 @@ export function SessionList({ connected, others, unread, selectedId, onSelect, o
                 }`}
               >
                 <span className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-avatar text-sm font-semibold text-avatar-text">
-                  {initials(s.name)}
+                  <span aria-hidden="true">{initials(s.name)}</span>
                   <span
                     aria-hidden="true"
                     className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface ${dotColor[s.state]}`}
                   />
+                  {collapsed && <span className="sr-only">{s.name}. </span>}
                   {collapsed && n > 0 && (
-                    <span
-                      aria-hidden="true"
-                      className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-accent-contrast"
-                    >
-                      {n}
+                    <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-accent-contrast">
+                      <span aria-hidden="true">{n > 99 ? '99+' : n}</span>
+                      <span className="sr-only">{t('ui.unread', { n })}. </span>
                     </span>
                   )}
                   <span className="sr-only">{s.waitingKind === 'question' ? t('ui.question.statusAria') : t(`ui.state.${s.state}`)}</span>
