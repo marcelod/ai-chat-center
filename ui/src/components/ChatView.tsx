@@ -261,7 +261,24 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
             onRename={onRename}
             onRenamed={(n) => setOverride({ base: session.name, name: n })}
           />
-          <p className="truncate font-mono text-xs text-muted">{session.cwd}</p>
+          <p className="flex min-w-0 items-baseline gap-1.5 font-mono text-xs text-muted">
+            <span className="min-w-0 truncate">{session.cwd}</span>
+            {session.branch && (
+              <span title={t('ui.chat.branch')} className="max-w-[40%] shrink-0 truncate">
+                · ⎇ {session.branch}
+              </span>
+            )}
+            {session.model && (
+              <span title={t('ui.chat.model')} className="shrink-0">
+                · {session.model}
+              </span>
+            )}
+            {session.effort && (
+              <span title={t('ui.chat.effort')} className="shrink-0">
+                · 🧠 {session.effort}
+              </span>
+            )}
+          </p>
         </div>
         <StatusPill state={state} asking={session.waitingKind === 'question'} />
       </header>

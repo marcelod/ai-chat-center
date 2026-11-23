@@ -62,6 +62,27 @@ function setup(
 }
 
 describe('ChatView', () => {
+  it('header shows cwd, branch, model and effort, each with a label', () => {
+    setup({ session: session({ branch: 'feat/x', model: 'Opus 5.5', effort: 'high' }) });
+    expect(screen.getByText('/home/me/billing-api')).toBeInTheDocument();
+    expect(screen.getByTitle('Branch')).toHaveTextContent('⎇ feat/x');
+    expect(screen.getByTitle('Model')).toHaveTextContent('Opus 5.5');
+    expect(screen.getByTitle('Reasoning level')).toHaveTextContent('🧠 high');
+  });
+  it('header with only the cwd shows no extra parts', () => {
+    setup();
+    expect(screen.getByText('/home/me/billing-api')).toBeInTheDocument();
+    expect(screen.queryByTitle('Branch')).toBeNull();
+    expect(screen.queryByTitle('Model')).toBeNull();
+    expect(screen.queryByTitle('Reasoning level')).toBeNull();
+  });
+  it('header without a branch skips only the branch', () => {
+    setup({ session: session({ model: 'Opus 5.5', effort: 'low' }) });
+    expect(screen.queryByTitle('Branch')).toBeNull();
+    expect(screen.getByTitle('Model')).toBeInTheDocument();
+    expect(screen.getByTitle('Reasoning level')).toBeInTheDocument();
+  });
+
   it('renders bubbles with origin icons', () => {
     setup();
     const term = screen.getByText('from the keyboard').closest('[data-bubble]') as HTMLElement;

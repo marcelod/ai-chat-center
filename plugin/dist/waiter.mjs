@@ -32,6 +32,7 @@ function paths() {
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
     questionsDir: (sid) => (assertSessionId(sid), path.join(home, "questions", sid)),
     namesFile: (sid) => (assertSessionId(sid), path.join(home, "names", `${sid}.json`)),
+    metaFile: (sid) => (assertSessionId(sid), path.join(home, "meta", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
     logDir: path.join(home, "logs")
   };

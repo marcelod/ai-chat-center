@@ -197,7 +197,13 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
       await setBusy(sid);
       await setTurnOrigin(sid, promptOrigin(input.prompt, reg.key));
       const level = input.effort?.level;
-      if (typeof level === 'string') await setEffort(sid, level);
+      if (typeof level === 'string') {
+        try {
+          await setEffort(sid, level);
+        } catch (e) {
+          logError(e); // display-only data: never break the prompt hook
+        }
+      }
     }
     return answersResult ?? nothing;
   }

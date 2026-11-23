@@ -897,4 +897,11 @@ describe('prompt-submit effort', () => {
     await handleHook('prompt-submit', inp({ prompt: 'hi', effort: { level: 'high' } }), ctx());
     expect(await getEffort('s1')).toBeNull();
   });
+  it('an I/O error while recording effort never breaks the prompt hook', async () => {
+    await active();
+    const f = paths().metaFile('s1');
+    fs.mkdirSync(f, { recursive: true }); // a directory where the file goes: the write fails
+    expect(await handleHook('prompt-submit', inp({ prompt: 'hi', effort: { level: 'high' } }), ctx())).toEqual({ exitCode: 0 });
+    expect(await isBusy('s1')).toBe(true);
+  });
 });

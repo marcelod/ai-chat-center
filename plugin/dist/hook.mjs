@@ -33,6 +33,7 @@ function paths() {
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
     questionsDir: (sid) => (assertSessionId(sid), path.join(home, "questions", sid)),
     namesFile: (sid) => (assertSessionId(sid), path.join(home, "names", `${sid}.json`)),
+    metaFile: (sid) => (assertSessionId(sid), path.join(home, "meta", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
     logDir: path.join(home, "logs")
   };
@@ -307,6 +308,19 @@ async function markDisconnected(sid, reason) {
   if (!done) return;
   await clearInbox(sid);
   await clearBusy(sid);
+}
+
+// src/core/meta.ts
+var EFFORT_RE = /^[a-z]{1,16}$/;
+async function getEffort(sid) {
+  const d = await readJson(paths().metaFile(sid));
+  return d && typeof d.effort === "string" && EFFORT_RE.test(d.effort) ? d.effort : null;
+}
+async function setEffort(sid, level) {
+  const file = paths().metaFile(sid);
+  if (typeof level !== "string" || !EFFORT_RE.test(level)) return;
+  if (await getEffort(sid) === level) return;
+  await writeJsonAtomic(file, { effort: level });
 }
 
 // src/core/protocol.ts
@@ -601,6 +615,9 @@ var en_default = {
       connectedAt: "Connected to AI Chat Center \xB7 {time}",
       disconnectedAt: "Disconnected \xB7 {time}",
       typing: "Claude is working",
+      branch: "Branch",
+      model: "Model",
+      effort: "Reasoning level",
       loading: "Loading messages\u2026",
       waitingBanner: "Claude is waiting for you to approve an action in the terminal",
       waitingInputBanner: "Claude is waiting for your answer in the terminal",
@@ -724,6 +741,9 @@ var pt_BR_default = {
       connectedAt: "Conectada ao AI Chat Center \xB7 {time}",
       disconnectedAt: "Desconectada \xB7 {time}",
       typing: "Claude est\xE1 trabalhando",
+      branch: "Branch",
+      model: "Modelo",
+      effort: "N\xEDvel de racioc\xEDnio",
       loading: "Carregando mensagens\u2026",
       waitingBanner: "O Claude est\xE1 esperando voc\xEA aprovar uma a\xE7\xE3o no terminal",
       waitingInputBanner: "O Claude est\xE1 esperando sua resposta no terminal",
@@ -1029,6 +1049,14 @@ ${t(language, "hook.windowNoBrowser")}` : "";
       await clearWaiting(sid);
       await setBusy(sid);
       await setTurnOrigin(sid, promptOrigin(input.prompt, reg.key));
+      const level = input.effort?.level;
+      if (typeof level === "string") {
+        try {
+          await setEffort(sid, level);
+        } catch (e) {
+          logError(e);
+        }
+      }
     }
     return answersResult ?? nothing;
   }

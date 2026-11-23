@@ -2,9 +2,9 @@ import { createRequire as __acc_createRequire } from 'node:module';
 const require = __acc_createRequire(import.meta.url);
 
 // src/hub/main.ts
-import fs10 from "node:fs/promises";
+import fs11 from "node:fs/promises";
 import fsSync from "node:fs";
-import path9 from "node:path";
+import path10 from "node:path";
 import crypto8 from "node:crypto";
 import { fileURLToPath } from "node:url";
 
@@ -35,6 +35,7 @@ function paths() {
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
     questionsDir: (sid) => (assertSessionId(sid), path.join(home, "questions", sid)),
     namesFile: (sid) => (assertSessionId(sid), path.join(home, "names", `${sid}.json`)),
+    metaFile: (sid) => (assertSessionId(sid), path.join(home, "meta", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
     logDir: path.join(home, "logs")
   };
@@ -114,28 +115,81 @@ async function setDisplayName(sid, name) {
   else await writeJsonAtomic(file, { name });
 }
 
+// src/core/gitBranch.ts
+import fs2 from "node:fs/promises";
+import path3 from "node:path";
+var HASH_RE = /^[0-9a-f]{40,64}$/i;
+function parseHead(head) {
+  const text = head.trim();
+  const ref = /^ref:\s*(\S+)$/.exec(text)?.[1];
+  if (ref) return ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) || null : ref;
+  return HASH_RE.test(text) ? text.slice(0, 7) : null;
+}
+async function readGitBranch(cwd) {
+  try {
+    if (typeof cwd !== "string" || !path3.isAbsolute(cwd)) return null;
+    let dir = path3.resolve(cwd);
+    for (; ; ) {
+      const dotGit = path3.join(dir, ".git");
+      let st;
+      try {
+        st = await fs2.stat(dotGit);
+      } catch {
+        st = null;
+      }
+      if (st) {
+        let gitDir = dotGit;
+        if (st.isFile()) {
+          const target = /^gitdir:\s*(.+?)\s*$/m.exec(await fs2.readFile(dotGit, "utf8"))?.[1];
+          if (!target) return null;
+          gitDir = path3.resolve(dir, target);
+        }
+        return parseHead(await fs2.readFile(path3.join(gitDir, "HEAD"), "utf8"));
+      }
+      const parent = path3.dirname(dir);
+      if (parent === dir) return null;
+      dir = parent;
+    }
+  } catch {
+    return null;
+  }
+}
+
+// src/core/meta.ts
+var EFFORT_RE = /^[a-z]{1,16}$/;
+async function getEffort(sid) {
+  const d = await readJson(paths().metaFile(sid));
+  return d && typeof d.effort === "string" && EFFORT_RE.test(d.effort) ? d.effort : null;
+}
+var MODEL_RE = /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/;
+function shortModel(id) {
+  const m = MODEL_RE.exec(id);
+  if (!m) return id;
+  return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ""}`;
+}
+
 // src/hub/provider.ts
-import fs8 from "node:fs/promises";
-import path7 from "node:path";
+import fs9 from "node:fs/promises";
+import path8 from "node:path";
 
 // src/core/registry.ts
-import fs6 from "node:fs/promises";
+import fs7 from "node:fs/promises";
 import os2 from "node:os";
-import path5 from "node:path";
+import path6 from "node:path";
 
 // src/core/inbox.ts
-import fs4 from "node:fs/promises";
-import path4 from "node:path";
+import fs5 from "node:fs/promises";
+import path5 from "node:path";
 import crypto5 from "node:crypto";
 
 // src/core/secret.ts
-import fs2 from "node:fs/promises";
+import fs3 from "node:fs/promises";
 import crypto3 from "node:crypto";
 var SECRET_RE = /^[0-9a-f]{64}$/;
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function readOnce() {
   try {
-    const s = (await fs2.readFile(paths().secret, "utf8")).trim();
+    const s = (await fs3.readFile(paths().secret, "utf8")).trim();
     return SECRET_RE.test(s) ? { ok: true, secret: s } : { ok: false, reason: "malformed" };
   } catch (e) {
     return { ok: false, reason: e.code === "ENOENT" ? "missing" : "unreadable" };
@@ -161,7 +215,7 @@ async function installSecret() {
   const fresh = crypto3.randomBytes(32).toString("hex");
   if (have.reason === "missing") {
     try {
-      await fs2.writeFile(file, fresh, { flag: "wx", mode: FILE_MODE });
+      await fs3.writeFile(file, fresh, { flag: "wx", mode: FILE_MODE });
       return fresh;
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
@@ -174,8 +228,8 @@ async function installSecret() {
     }
   }
   const tmp = `${file}.${crypto3.randomUUID()}.tmp`;
-  await fs2.writeFile(tmp, fresh, { mode: FILE_MODE });
-  await withFsRetry(() => fs2.rename(tmp, file));
+  await fs3.writeFile(tmp, fresh, { mode: FILE_MODE });
+  await withFsRetry(() => fs3.rename(tmp, file));
   const after = await readOnce();
   return after.ok ? after.secret : fresh;
 }
@@ -187,8 +241,8 @@ async function signMessage(sid, m) {
 }
 
 // src/core/lock.ts
-import fs3 from "node:fs/promises";
-import path3 from "node:path";
+import fs4 from "node:fs/promises";
+import path4 from "node:path";
 import crypto4 from "node:crypto";
 var EMPTY_GRACE_MS = 1e4;
 var LOCK_STALE_MS = 9e4;
@@ -218,27 +272,27 @@ async function publish(file) {
   const tmp = `${file}.${crypto4.randomUUID()}.tmp`;
   const content = JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() });
   try {
-    await fs3.writeFile(tmp, content, { flag: "wx" });
-    await fs3.link(tmp, file);
+    await fs4.writeFile(tmp, content, { flag: "wx" });
+    await fs4.link(tmp, file);
     return content;
   } catch (e) {
     if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return null;
     throw e;
   } finally {
-    await fs3.rm(tmp, { force: true });
+    await fs4.rm(tmp, { force: true });
   }
 }
 async function staleContent(file) {
   let content;
   let mtimeMs;
   try {
-    content = await fs3.readFile(file, "utf8");
+    content = await fs4.readFile(file, "utf8");
   } catch (e) {
     if (code(e) === "ENOENT") return null;
     content = "";
   }
   try {
-    mtimeMs = (await fs3.stat(file)).mtimeMs;
+    mtimeMs = (await fs4.stat(file)).mtimeMs;
   } catch {
     return null;
   }
@@ -253,8 +307,8 @@ async function reclaim(file, seen) {
   const guard = `${file}.reclaim`;
   if (await publish(guard) === null) {
     try {
-      const st = await fs3.stat(guard);
-      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs3.rm(guard, { force: true });
+      const st = await fs4.stat(guard);
+      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs4.rm(guard, { force: true });
     } catch {
     }
     return null;
@@ -262,7 +316,7 @@ async function reclaim(file, seen) {
   try {
     if (await staleContent(file) !== seen) return null;
     try {
-      await fs3.unlink(file);
+      await fs4.unlink(file);
     } catch (e) {
       if (code(e) !== "ENOENT") {
         if (contention(e)) return null;
@@ -272,7 +326,7 @@ async function reclaim(file, seen) {
     return await publish(file);
   } finally {
     try {
-      if (lockPid(await fs3.readFile(guard, "utf8")) === process.pid) await fs3.rm(guard, { force: true });
+      if (lockPid(await fs4.readFile(guard, "utf8")) === process.pid) await fs4.rm(guard, { force: true });
     } catch {
     }
   }
@@ -281,7 +335,7 @@ async function acquireLock(file) {
   return await acquireLockContent(file) !== null;
 }
 async function acquireLockContent(file) {
-  await ensureDir(path3.dirname(file));
+  await ensureDir(path4.dirname(file));
   const mine = await publish(file);
   if (mine !== null) return mine;
   const seen = await staleContent(file);
@@ -290,11 +344,11 @@ async function acquireLockContent(file) {
 }
 async function releaseLock(file) {
   try {
-    if (lockPid(await fs3.readFile(file, "utf8")) !== process.pid) return;
+    if (lockPid(await fs4.readFile(file, "utf8")) !== process.pid) return;
   } catch {
     return;
   }
-  await fs3.rm(file, { force: true });
+  await fs4.rm(file, { force: true });
 }
 async function withLock(file, waitMs, fn) {
   const deadline = Date.now() + waitMs;
@@ -324,12 +378,12 @@ async function enqueue(sid, text) {
   const msg = await signMessage(sid, { id: crypto5.randomUUID(), text, createdAt: new Date(now).toISOString() });
   counter = (counter + 1) % 1e6;
   const name = `${String(now).padStart(15, "0")}-${String(counter).padStart(6, "0")}-${msg.id}.msg`;
-  const tmp = path4.join(dir, `.${msg.id}.tmp`);
+  const tmp = path5.join(dir, `.${msg.id}.tmp`);
   try {
-    await fs4.writeFile(tmp, JSON.stringify(msg), { encoding: "utf8", mode: FILE_MODE });
-    await withFsRetry(() => fs4.rename(tmp, path4.join(dir, name)));
+    await fs5.writeFile(tmp, JSON.stringify(msg), { encoding: "utf8", mode: FILE_MODE });
+    await withFsRetry(() => fs5.rename(tmp, path5.join(dir, name)));
   } catch (e) {
-    await fs4.rm(tmp, { force: true });
+    await fs5.rm(tmp, { force: true });
     throw e;
   }
   return msg;
@@ -337,7 +391,7 @@ async function enqueue(sid, text) {
 async function list(sid) {
   const dir = paths().inboxDir(sid);
   try {
-    return (await fs4.readdir(dir)).filter((n) => n.endsWith(".msg")).sort().map((n) => path4.join(dir, n));
+    return (await fs5.readdir(dir)).filter((n) => n.endsWith(".msg")).sort().map((n) => path5.join(dir, n));
   } catch (e) {
     if (e.code === "ENOENT") return [];
     throw e;
@@ -345,7 +399,7 @@ async function list(sid) {
 }
 async function readMsg(file) {
   try {
-    return JSON.parse(await fs4.readFile(file, "utf8"));
+    return JSON.parse(await fs5.readFile(file, "utf8"));
   } catch (e) {
     if (isRace(e)) return null;
     if (e instanceof SyntaxError) return null;
@@ -364,7 +418,7 @@ var CLAIM_MARK = ".claim";
 var UNSIGNED = ".unsigned";
 async function countUnsigned(sid) {
   try {
-    return (await fs4.readdir(paths().inboxDir(sid))).filter((n) => n.endsWith(`.msg${UNSIGNED}`)).length;
+    return (await fs5.readdir(paths().inboxDir(sid))).filter((n) => n.endsWith(`.msg${UNSIGNED}`)).length;
   } catch {
     return 0;
   }
@@ -373,7 +427,7 @@ async function clearInbox(sid) {
   const dir = paths().inboxDir(sid);
   let names;
   try {
-    names = await fs4.readdir(dir);
+    names = await fs5.readdir(dir);
   } catch (e) {
     if (e.code === "ENOENT") return;
     throw e;
@@ -381,7 +435,7 @@ async function clearInbox(sid) {
   for (const n of names) {
     if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`) && !n.endsWith(`.msg${UNSIGNED}`)) continue;
     try {
-      await withFsRetry(() => fs4.rm(path4.join(dir, n), { force: true }));
+      await withFsRetry(() => fs5.rm(path5.join(dir, n), { force: true }));
     } catch (e) {
       if (!isRace(e)) throw e;
     }
@@ -389,13 +443,13 @@ async function clearInbox(sid) {
 }
 
 // src/core/busy.ts
-import fs5 from "node:fs/promises";
+import fs6 from "node:fs/promises";
 async function clearBusy(sid) {
   await removeFile(paths().busyFile(sid));
 }
 async function busyAge(sid, now = Date.now()) {
   try {
-    return now - (await fs5.stat(paths().busyFile(sid))).mtimeMs;
+    return now - (await fs6.stat(paths().busyFile(sid))).mtimeMs;
   } catch {
     return null;
   }
@@ -423,16 +477,16 @@ var SESSION_LOCK_WAIT_MS = 2e3;
 var locked = (sid, fn) => withLock(paths().sessionLock(sid), SESSION_LOCK_WAIT_MS, fn);
 function regFile(sid) {
   assertSessionId(sid);
-  return path5.join(paths().sessionsDir, `${sid}.json`);
+  return path6.join(paths().sessionsDir, `${sid}.json`);
 }
 var isActive = (r) => !r.disconnectedAt;
 function claudeConfigDir() {
   const raw = process.env.CLAUDE_CONFIG_DIR;
-  return path5.resolve(raw && raw.trim() ? raw : path5.join(os2.homedir(), ".claude"));
+  return path6.resolve(raw && raw.trim() ? raw : path6.join(os2.homedir(), ".claude"));
 }
 function sameConfigDir(r, mine = claudeConfigDir()) {
   if (!r.configDir) return true;
-  const a = path5.resolve(r.configDir);
+  const a = path6.resolve(r.configDir);
   return process.platform === "win32" ? a.toLowerCase() === mine.toLowerCase() : a === mine;
 }
 var trustedKeys = (r) => [...r.previousKeys ?? [], ...r.key ? [r.key] : []];
@@ -442,7 +496,7 @@ async function getRegistration(sid) {
 async function listRegistrations() {
   let names;
   try {
-    names = await fs6.readdir(paths().sessionsDir);
+    names = await fs7.readdir(paths().sessionsDir);
   } catch (e) {
     if (e.code === "ENOENT") return [];
     throw e;
@@ -450,7 +504,7 @@ async function listRegistrations() {
   const out = [];
   for (const n of names) {
     if (!n.endsWith(".json")) continue;
-    const r = await readJson(path5.join(paths().sessionsDir, n));
+    const r = await readJson(path6.join(paths().sessionsDir, n));
     if (r) out.push(r);
   }
   return out;
@@ -486,7 +540,7 @@ async function pruneRegistrations(maxAgeMs, now = Date.now()) {
     });
     if (!pruned.includes(sid)) continue;
     await clearInbox(sid);
-    await fs6.rm(paths().inboxDir(sid), { recursive: true, force: true }).catch(() => {
+    await fs7.rm(paths().inboxDir(sid), { recursive: true, force: true }).catch(() => {
     });
     await clearBusy(sid);
     await clearWaiting(sid);
@@ -496,8 +550,8 @@ async function pruneRegistrations(maxAgeMs, now = Date.now()) {
 }
 
 // src/core/questions.ts
-import fs7 from "node:fs/promises";
-import path6 from "node:path";
+import fs8 from "node:fs/promises";
+import path7 from "node:path";
 var TOOL_USE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 function assertToolUseId(id) {
   if (typeof id !== "string" || !TOOL_USE_ID_RE.test(id)) {
@@ -526,22 +580,22 @@ function parseQuestions(input) {
   }
   return out;
 }
-var pendingFile = (sid, id) => (assertToolUseId(id), path6.join(paths().questionsDir(sid), `${id}.json`));
-var answerFile = (sid, id) => (assertToolUseId(id), path6.join(paths().questionsDir(sid), `${id}.answer.json`));
+var pendingFile = (sid, id) => (assertToolUseId(id), path7.join(paths().questionsDir(sid), `${id}.json`));
+var answerFile = (sid, id) => (assertToolUseId(id), path7.join(paths().questionsDir(sid), `${id}.answer.json`));
 async function getPending(sid) {
   let names;
   try {
-    names = await fs7.readdir(paths().questionsDir(sid));
+    names = await fs8.readdir(paths().questionsDir(sid));
   } catch {
     return null;
   }
   let best = null;
   for (const n of names) {
     if (!n.endsWith(".json") || n.endsWith(".answer.json")) continue;
-    const p = await readJson(path6.join(paths().questionsDir(sid), n));
+    const p = await readJson(path7.join(paths().questionsDir(sid), n));
     if (p && typeof p.pid === "number" && !isAlive(p.pid)) {
       if (typeof p.toolUseId === "string" && `${p.toolUseId}.json` === n) await removePending(sid, p.toolUseId);
-      else await removeFile(path6.join(paths().questionsDir(sid), n));
+      else await removeFile(path7.join(paths().questionsDir(sid), n));
       continue;
     }
     if (p && typeof p.createdAt === "string" && (!best || p.createdAt > best.createdAt)) best = p;
@@ -556,7 +610,7 @@ async function writeAnswer(sid, toolUseId, a) {
   if (await readJson(pendingFile(sid, toolUseId)) === null) return "not-found";
   await ensureDir(paths().questionsDir(sid));
   try {
-    await fs7.writeFile(answerFile(sid, toolUseId), JSON.stringify(a, null, 2), { encoding: "utf8", flag: "wx", mode: FILE_MODE });
+    await fs8.writeFile(answerFile(sid, toolUseId), JSON.stringify(a, null, 2), { encoding: "utf8", flag: "wx", mode: FILE_MODE });
     return "ok";
   } catch (e) {
     if (e.code === "EEXIST") return "conflict";
@@ -669,6 +723,8 @@ var TranscriptParser = class {
   queued = [];
   /** The last `!` command, for the output entry that follows it. */
   lastShell = null;
+  /** `message.model` of the latest main-thread assistant entry (synthetic ones ignored). */
+  model;
   /** Returns new or updated events (same id = replace). */
   push(entry) {
     if (!isRecord(entry)) return [];
@@ -679,7 +735,11 @@ var TranscriptParser = class {
     if (entry.type === "attachment") return this.attachment(uuid, ts, entry.attachment);
     const message = isRecord(entry.message) ? entry.message : void 0;
     if (!message) return [];
-    if (entry.type === "assistant") return this.assistant(uuid, ts, message.content);
+    if (entry.type === "assistant") {
+      const model = message.model;
+      if (typeof model === "string" && model && model !== "<synthetic>") this.model = model;
+      return this.assistant(uuid, ts, message.content);
+    }
     if (entry.type === "user" && entry.isMeta !== true) {
       if (entry.isCompactSummary === true) return [{ kind: "notice", id: uuid, ts, code: "compacted" }];
       return this.user(uuid, ts, message.content, entry.toolUseResult);
@@ -842,8 +902,8 @@ var TranscriptParser = class {
 // src/hub/transcript/reader.ts
 var CHUNK = 64 * 1024;
 var TranscriptReader = class {
-  constructor(path10, keys) {
-    this.path = path10;
+  constructor(path11, keys) {
+    this.path = path11;
     this.keys = keys;
     this.parser = new TranscriptParser(keys);
   }
@@ -868,6 +928,10 @@ var TranscriptReader = class {
   /** Consolidated list: first-appearance order, latest version of each id. */
   all() {
     return [...this.events.values()];
+  }
+  /** Raw model id of the latest assistant reply, if any. */
+  model() {
+    return this.parser.model;
   }
   reset() {
     this.offset = 0;
@@ -1006,6 +1070,8 @@ var ClaudeCodeProvider = class {
   // read but not yet emitted by poll
   lastEvents = /* @__PURE__ */ new Map();
   // disconnected sessions
+  lastModels = /* @__PURE__ */ new Map();
+  // disconnected sessions
   misses = /* @__PURE__ */ new Map();
   liveCache = null;
   lastGood = null;
@@ -1056,6 +1122,7 @@ var ClaudeCodeProvider = class {
     await tmp.readNew();
     const last = tmp.all().at(-1);
     this.lastEvents.set(sid, last);
+    this.lastModels.set(sid, tmp.model());
     return last;
   }
   shouldMarkExited(reg, live) {
@@ -1080,7 +1147,7 @@ var ClaudeCodeProvider = class {
     const oldest = Math.min(...queued.map((m) => Date.parse(m.createdAt)).filter((n) => !Number.isNaN(n)));
     if (!Number.isFinite(oldest) || this.now() - oldest < STALLED_AFTER_MS) return false;
     try {
-      return this.now() - (await fs8.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
+      return this.now() - (await fs9.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
     } catch {
       return true;
     }
@@ -1133,12 +1200,15 @@ var ClaudeCodeProvider = class {
       }
       if (!disconnected) activeIds.add(sid);
       let lastEvent;
+      let rawModel;
       if (disconnected) {
         lastEvent = await this.lastEventOf(reg);
+        rawModel = this.lastModels.get(sid) ?? this.readers.get(sid)?.reader.model();
       } else {
         const e = this.entry(reg);
         if (!e.read) await this.refresh(sid, e);
         lastEvent = e.reader.all().at(-1);
+        rawModel = e.reader.model();
       }
       const waiting = disconnected ? null : await getWaiting(sid);
       const pendingQuestion = disconnected ? null : await getPending(sid);
@@ -1159,7 +1229,7 @@ var ClaudeCodeProvider = class {
       if (!disconnected && live.ok && l?.status === "idle") await this.dropStaleBusy(sid);
       const cwd = l?.cwd ?? reg.cwd;
       const queued = disconnected ? [] : await peek(sid);
-      const originalName = l?.name || path7.basename(cwd);
+      const originalName = l?.name || path8.basename(cwd);
       const custom = await getDisplayName(sid);
       const view = {
         sessionId: sid,
@@ -1177,6 +1247,11 @@ var ClaudeCodeProvider = class {
       const unsigned = disconnected ? 0 : await countUnsigned(sid);
       if (unsigned > 0) view.undeliveredUnsigned = unsigned;
       if (lastEvent) view.lastEvent = lastEvent;
+      const branch = await readGitBranch(cwd);
+      if (branch) view.branch = branch;
+      if (rawModel) view.model = shortModel(rawModel);
+      const effort = await getEffort(sid);
+      if (effort) view.effort = effort;
       connected.push(view);
     }
     connected.sort((a, b) => {
@@ -1216,6 +1291,7 @@ var ClaudeCodeProvider = class {
         const e = this.readers.get(sid);
         await this.refresh(sid, e);
         this.lastEvents.set(sid, e.reader.all().at(-1));
+        this.lastModels.set(sid, e.reader.model());
         this.readers.delete(sid);
       } else {
         this.pending.delete(sid);
@@ -1225,7 +1301,7 @@ var ClaudeCodeProvider = class {
       this.pending.delete(sid);
       if (events?.length) changes.push({ type: "events", sessionId: sid, events });
     }
-    for (const m of [this.readers, this.pending, this.lastEvents, this.misses]) {
+    for (const m of [this.readers, this.pending, this.lastEvents, this.lastModels, this.misses]) {
       for (const sid of [...m.keys()]) if (!known.has(sid)) m.delete(sid);
     }
     const { connected, others } = await this.listSessions();
@@ -1241,7 +1317,10 @@ var ClaudeCodeProvider = class {
         s.lastEvent?.id ?? null,
         s.pendingAppMessageIds,
         s.deliveryStalled ?? false,
-        s.undeliveredUnsigned ?? 0
+        s.undeliveredUnsigned ?? 0,
+        s.branch ?? null,
+        s.model ?? null,
+        s.effort ?? null
       ])
     });
     if (signature !== this.lastSignature) {
@@ -1261,7 +1340,7 @@ var ClaudeCodeProvider = class {
     if (!again || !isActive(again)) {
       const dir = paths().inboxDir(sid);
       try {
-        for (const n of await fs8.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs8.rm(path7.join(dir, n), { force: true });
+        for (const n of await fs9.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs9.rm(path8.join(dir, n), { force: true });
       } catch {
       }
       throw new SessionDisconnectedError(sid);
@@ -1272,8 +1351,8 @@ var ClaudeCodeProvider = class {
 
 // src/hub/server.ts
 import http from "node:http";
-import fs9 from "node:fs/promises";
-import path8 from "node:path";
+import fs10 from "node:fs/promises";
+import path9 from "node:path";
 import crypto7 from "node:crypto";
 
 // src/core/config.ts
@@ -1492,15 +1571,15 @@ data: ${JSON.stringify(c)}
       return sendJson(res, 404, { error: "not found" });
     }
     if (rel.includes("\0")) return sendJson(res, 404, { error: "not found" });
-    const root = path8.resolve(staticDir);
-    const target = path8.resolve(root, "." + path8.sep + rel);
-    if (target !== root && !target.startsWith(root + path8.sep)) return sendJson(res, 404, { error: "not found" });
+    const root = path9.resolve(staticDir);
+    const target = path9.resolve(root, "." + path9.sep + rel);
+    if (target !== root && !target.startsWith(root + path9.sep)) return sendJson(res, 404, { error: "not found" });
     const send = async (file) => {
       try {
-        const st = await fs9.stat(file);
+        const st = await fs10.stat(file);
         if (!st.isFile()) return false;
-        const data = await fs9.readFile(file);
-        const ext = path8.extname(file).toLowerCase();
+        const data = await fs10.readFile(file);
+        const ext = path9.extname(file).toLowerCase();
         const type = MIME[ext] ?? "application/octet-stream";
         const headers = { "Content-Type": type, "Content-Length": data.length };
         if (ext === ".html") headers["Content-Security-Policy"] = CSP;
@@ -1513,12 +1592,12 @@ data: ${JSON.stringify(c)}
     };
     let rootExists = true;
     try {
-      rootExists = (await fs9.stat(root)).isDirectory();
+      rootExists = (await fs10.stat(root)).isDirectory();
     } catch {
       rootExists = false;
     }
     const accepts = String(req.headers.accept ?? "").includes("text/html");
-    const spaEligible = req.method === "GET" && accepts && path8.extname(pathname) === "";
+    const spaEligible = req.method === "GET" && accepts && path9.extname(pathname) === "";
     const isRoot = pathname === "/";
     if (!rootExists) {
       if (isRoot || spaEligible) {
@@ -1529,7 +1608,7 @@ data: ${JSON.stringify(c)}
     }
     if (target !== root && await send(target)) return;
     if (isRoot || spaEligible) {
-      if (await send(path8.join(root, "index.html"))) return;
+      if (await send(path9.join(root, "index.html"))) return;
     }
     sendJson(res, 404, { error: "not found" });
   };
@@ -1635,7 +1714,7 @@ data: ${JSON.stringify(c)}
         if (!reg) throw new HttpError(404, "no such session");
         await setDisplayName(sid, name);
         let shown = name;
-        if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path8.basename(reg.cwd);
+        if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path9.basename(reg.cwd);
         return sendJson(res, 200, { name: shown });
       }
       if (m[2] === "events" && method === "GET") return sendJson(res, 200, await provider.events(sid));
@@ -1721,7 +1800,7 @@ async function holdsHub(r, now = Date.now()) {
   if (r.pid !== null) return isAlive(r.pid);
   let last = Date.parse(r.connectedAt) || 0;
   try {
-    last = Math.max(last, (await fs10.stat(r.transcriptPath)).mtimeMs);
+    last = Math.max(last, (await fs11.stat(r.transcriptPath)).mtimeMs);
   } catch {
   }
   return now - last < UNKNOWN_PID_HOLD_MS;
@@ -1736,20 +1815,20 @@ async function prune(log) {
 }
 async function rotateToken() {
   const file = paths().token;
-  await ensureDir(path9.dirname(file));
+  await ensureDir(path10.dirname(file));
   const t = crypto8.randomBytes(32).toString("hex");
   await writeFileAtomic600(file, t);
-  await fs10.chmod(file, 384).catch(() => {
+  await fs11.chmod(file, 384).catch(() => {
   });
   return t;
 }
 async function writeFileAtomic600(file, data) {
   const tmp = `${file}.${process.pid}.${crypto8.randomUUID()}.tmp`;
   try {
-    await fs10.writeFile(tmp, data, { mode: 384 });
-    await withFsRetry(() => fs10.rename(tmp, file));
+    await fs11.writeFile(tmp, data, { mode: 384 });
+    await withFsRetry(() => fs11.rename(tmp, file));
   } catch (e) {
-    await fs10.rm(tmp, { force: true });
+    await fs11.rm(tmp, { force: true });
     throw e;
   }
 }
@@ -1759,7 +1838,7 @@ async function liveHubExists(self) {
   if (self && info.port === self.port) return false;
   let token;
   try {
-    token = (await fs10.readFile(paths().token, "utf8")).trim();
+    token = (await fs11.readFile(paths().token, "utf8")).trim();
   } catch {
     return false;
   }
@@ -1792,7 +1871,7 @@ async function acquireHubLock(lock) {
 async function startHub(opts = {}) {
   const logDir = paths().logDir;
   await ensureDir(logDir);
-  const logFile = path9.join(logDir, "hub.log");
+  const logFile = path10.join(logDir, "hub.log");
   let secret = "";
   const log = (msg) => {
     try {
@@ -1807,7 +1886,7 @@ async function startHub(opts = {}) {
     return null;
   };
   if (await liveHubExists()) return deferred("before the lock");
-  const lock = path9.join(paths().home, "hub.lock");
+  const lock = path10.join(paths().home, "hub.lock");
   const locked2 = await acquireHubLock(lock);
   let hub;
   try {
@@ -1816,7 +1895,7 @@ async function startHub(opts = {}) {
     secret = token;
     const base = pickPort();
     const tries = base === 0 ? 1 : 11;
-    const staticDir = path9.join(path9.dirname(fileURLToPath(import.meta.url)), "ui");
+    const staticDir = path10.join(path10.dirname(fileURLToPath(import.meta.url)), "ui");
     const provider = opts.listLive ? new ClaudeCodeProvider(opts.listLive) : new ClaudeCodeProvider();
     let lastErr;
     for (let i = 0; i < tries && !hub; i++) {
@@ -1907,7 +1986,7 @@ async function startHub(opts = {}) {
         clearInterval(ownTimer);
         await started.close();
         const cur = await readJson(paths().hubJson);
-        if (cur?.pid === process.pid && cur?.port === port) await fs10.rm(paths().hubJson, { force: true });
+        if (cur?.pid === process.pid && cur?.port === port) await fs11.rm(paths().hubJson, { force: true });
         log("hub stopped");
       }
     };
