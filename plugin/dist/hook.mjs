@@ -4,7 +4,7 @@ const require = __acc_createRequire(import.meta.url);
 // src/hooks/hook.ts
 import fs5 from "node:fs";
 import path7 from "node:path";
-import crypto4 from "node:crypto";
+import crypto5 from "node:crypto";
 
 // src/core/paths.ts
 import os from "node:os";
@@ -289,6 +289,7 @@ async function markDisconnected(sid, reason) {
 }
 
 // src/hooks/ensureHub.ts
+import crypto4 from "node:crypto";
 import fs4 from "node:fs";
 import http from "node:http";
 import os3 from "node:os";
@@ -401,12 +402,16 @@ async function ensureHub(opts = {}) {
   const pollMs = opts.pollMs ?? 100;
   const timeoutMs = opts.timeoutMs ?? 5e3;
   const stalledWaitMs = opts.stalledWaitMs ?? 5e3;
+  let foreignPid;
   const check = async (h) => {
     const challenge = newChallenge();
     const r = await health(h.port, challenge);
+    foreignPid = void 0;
     if (r === null) return "silent";
     if (r === "refused" || r === "unproven") return r;
-    return proofMatches(h.token, challenge, h.port, r) ? r : "foreign";
+    if (proofMatches(h.token, challenge, h.port, r)) return r;
+    foreignPid = r.pid;
+    return "foreign";
   };
   const proven = async (h) => {
     const r = await check(h);
@@ -425,19 +430,21 @@ async function ensureHub(opts = {}) {
       await sleep(Math.max(pollMs, 50));
       r = await check(hub);
     }
+    const unverified = (version) => opts.notice?.(
+      `AI Chat Center: an older AI Chat Center hub (version ${version.slice(0, 32)}) seems to still run on port ${hub.port}, but it could not be verified, so it was not stopped. Restart the computer (or stop that process) so that app messages are not sent through it: they would not be delivered.`
+    );
     if (typeof r !== "string") {
       if (!(compareVersions(r.version, VERSION) < 0)) return urlOf(hub);
-      await stop(r.pid);
+      if (hub.pid !== null && r.pid === hub.pid) await stop(hub.pid);
+      else unverified(r.version);
     } else if ((r === "unproven" || r === "foreign") && hub.pid !== null && isAlive2(hub.pid)) {
+      const challengedPid = r === "foreign" ? foreignPid : void 0;
       const id = await identify(hub.port);
       if (id && compareVersions(id.version, VERSION) < 0) {
-        const pidMatches = id.pid === void 0 || id.pid === hub.pid;
-        if (pidMatches && await tokenAccepted(hub.port, hub.token)) await stop(hub.pid);
-        else {
-          opts.notice?.(
-            `AI Chat Center: an older AI Chat Center hub (version ${id.version.slice(0, 32)}) seems to still run on port ${hub.port}, but it could not be verified, so it was not stopped. Restart the computer (or stop that process) so that app messages are not sent through it: they would not be delivered.`
-          );
-        }
+        const reported = id.pid ?? challengedPid;
+        const ours = reported !== void 0 && reported === hub.pid && !await tokenAccepted(hub.port, crypto4.randomBytes(32).toString("hex")) && await tokenAccepted(hub.port, hub.token);
+        if (ours) await stop(hub.pid);
+        else unverified(id.version);
       }
     }
   }
@@ -742,7 +749,7 @@ async function connect(input, resolve, ctx) {
     pid,
     configDir: claudeConfigDir(),
     // The key stays while the connection is active; a reactivation gets a new one.
-    key: keep && prev.key ? prev.key : crypto4.randomBytes(16).toString("hex"),
+    key: keep && prev.key ? prev.key : crypto5.randomBytes(16).toString("hex"),
     ...previousKeys.length ? { previousKeys } : {},
     // Re-running /cc on an active session keeps its original connectedAt.
     ...keep ? { connectedAt: prev.connectedAt } : {}

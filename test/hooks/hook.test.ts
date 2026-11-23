@@ -463,16 +463,37 @@ describe('ensureHub', () => {
   // health), a proven 0.2.1 hub, and the refused case. Real HTTP servers, the default checkHealth.
   describe('older hubs and the upgrade path', () => {
     const TOK = 'a'.repeat(64);
-    /** A fake hub: `/api/health` as `version` answers it, and `/api/config` behind the bearer `token`. */
-    const fakeHub = async (version: string, pid: number, token: string, proofs: boolean) => {
+    /** Every Authorization header any fake hub received (the token on disk must never reach a foreign one). */
+    const bearers: string[] = [];
+    /**
+     * A fake hub: `/api/health` as `version` answers it, and `/api/config` behind the bearer `token`.
+     * `proofs`: true = the current proof format; false = 0.1.0 (`{ ok, pid, version }`, no proof); '0.2.0' =
+     * no pid unchallenged, a proof WITHOUT the port when challenged. `pidInHealth: false` leaves the pid out
+     * of every answer; `anyBearer` accepts any bearer (a foreign server answering 200 to everything).
+     */
+    const fakeHub = async (
+      version: string,
+      pid: number,
+      token: string,
+      proofs: boolean | '0.2.0',
+      extra: { pidInHealth?: boolean; anyBearer?: boolean } = {},
+    ) => {
       const srv = http.createServer((q, s) => {
         const u = new URL(q.url!, 'http://x');
+        if (q.headers.authorization) bearers.push(q.headers.authorization);
         if (u.pathname === '/api/health') {
           const c = u.searchParams.get('challenge');
           const port = (srv.address() as { port: number }).port;
-          return void s.end(JSON.stringify(proofs && c ? { ok: true, version, pid, proof: proofOf(token, c, port, pid, version) } : proofs ? { ok: true, version } : { ok: true, pid, version }));
+          let body: Record<string, unknown>;
+          if (proofs === '0.2.0') {
+            body = c
+              ? { ok: true, version, pid, proof: crypto.createHmac('sha256', token).update(`${c}|${pid}|${version}`).digest('hex') }
+              : { ok: true, version };
+          } else body = proofs && c ? { ok: true, version, pid, proof: proofOf(token, c, port, pid, version) } : proofs ? { ok: true, version } : { ok: true, pid, version };
+          if (extra.pidInHealth === false) delete body.pid;
+          return void s.end(JSON.stringify(body));
         }
-        if (q.headers.authorization !== `Bearer ${token}`) {
+        if (!extra.anyBearer && q.headers.authorization !== `Bearer ${token}`) {
           s.writeHead(401);
           return void s.end('{"error":"unauthorized"}');
         }
@@ -487,8 +508,17 @@ describe('ensureHub', () => {
       servers.push(h.srv);
       writeHub(h.port, 'b'.repeat(64), 9999);
     };
-    const run = async (o: { version: string; pid: number; token?: string; proofs: boolean; alive?: (pid: number) => boolean }) => {
-      const old = await fakeHub(o.version, o.pid, o.token ?? TOK, o.proofs);
+    const run = async (o: {
+      version: string;
+      pid: number;
+      token?: string;
+      proofs: boolean | '0.2.0';
+      alive?: (pid: number) => boolean;
+      pidInHealth?: boolean;
+      anyBearer?: boolean;
+    }) => {
+      bearers.length = 0;
+      const old = await fakeHub(o.version, o.pid, o.token ?? TOK, o.proofs, { pidInHealth: o.pidInHealth, anyBearer: o.anyBearer });
       const servers = [old.srv];
       writeHub(old.port, TOK, 4242);
       const killed: number[] = [];
@@ -549,6 +579,57 @@ describe('ensureHub', () => {
     it('an older-looking hub whose pid is not the one in hub.json is never killed: the user is told', async () => {
       const r = await run({ version: '0.1.0', pid: 5555, proofs: false });
       expect(r.killed).toEqual([]);
+      expect(r.notices).toHaveLength(1);
+    });
+    // Audit S5-M1: a listener on a stale hub.json's port that leaves out the pid and answers 200 to anything
+    // (r5/repro-kill-foreign.mjs) made /cc SIGTERM whatever process now has hub.json's pid, and sent it the token.
+    it('a version-only answer WITHOUT a pid, 200 to any bearer: nothing is killed, the token is never sent', async () => {
+      const r = await run({ version: '0.1.0', pid: 4242, proofs: false, pidInHealth: false, anyBearer: true });
+      expect(r.killed).toEqual([]);
+      expect(bearers.some((b) => b.includes(TOK))).toBe(false);
+      expect(r.spawned).toBe(1);
+      expect(r.notices).toHaveLength(1);
+    });
+    it('a version-only answer without a pid (token accepted): a missing pid is never accepted', async () => {
+      const r = await run({ version: '0.1.0', pid: 4242, proofs: false, pidInHealth: false });
+      expect(r.killed).toEqual([]);
+      expect(bearers.some((b) => b.includes(TOK))).toBe(false);
+      expect(r.notices).toHaveLength(1);
+    });
+    it('a 0.1.0-looking answer with the right pid that accepts a random bearer is foreign: no token, no kill', async () => {
+      const r = await run({ version: '0.1.0', pid: 4242, proofs: false, anyBearer: true });
+      expect(r.killed).toEqual([]);
+      expect(bearers.some((b) => b.includes(TOK))).toBe(false);
+      expect(bearers.length).toBeGreaterThan(0); // only the random probe was sent
+    });
+    it('0.2.0 (pid only in the challenged answer, proof without the port), pid and token match: killed and replaced', async () => {
+      const r = await run({ version: '0.2.0', pid: 4242, proofs: '0.2.0' });
+      expect(r.killed).toEqual([4242]);
+      expect(r.notices).toEqual([]);
+      expect(r.url).toMatch(/#token=b{64}$/);
+    });
+    it('0.2.0-format foreign: its pid is not the one in hub.json: never killed, no token sent', async () => {
+      const r = await run({ version: '0.2.0', pid: 5555, proofs: '0.2.0' });
+      expect(r.killed).toEqual([]);
+      expect(bearers.some((b) => b.includes(TOK))).toBe(false);
+      expect(r.notices).toHaveLength(1);
+    });
+    it('0.2.0-format foreign: right pid but 200 to a random bearer: never killed, no token sent', async () => {
+      const r = await run({ version: '0.2.0', pid: 4242, proofs: '0.2.0', anyBearer: true });
+      expect(r.killed).toEqual([]);
+      expect(bearers.some((b) => b.includes(TOK))).toBe(false);
+    });
+    it('0.2.0-format without any pid: never killed, no token sent', async () => {
+      const r = await run({ version: '0.2.0', pid: 4242, proofs: '0.2.0', pidInHealth: false });
+      expect(r.killed).toEqual([]);
+      expect(bearers.some((b) => b.includes(TOK))).toBe(false);
+    });
+    // The namespace variant: a proven hub reports its own pid, which may name another process outside its
+    // pid namespace (a container with host networking). Only hub.json's pid, when the two agree, is stopped.
+    it('a proven older hub whose reported pid differs from hub.json is not killed: the user is told', async () => {
+      const r = await run({ version: '0.2.1', pid: 5555, proofs: true });
+      expect(r.killed).toEqual([]);
+      expect(r.spawned).toBe(1);
       expect(r.notices).toHaveLength(1);
     });
     it('a recorded pid that is dead: nothing is killed, no notice', async () => {

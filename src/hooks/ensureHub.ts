@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -172,12 +173,17 @@ export async function ensureHub(opts: EnsureHubOptions = {}): Promise<string> {
    * The proven answer; 'silent' when nothing answered in time; 'refused' when nothing listens;
    * 'unproven' for an answer without a proof; 'foreign' for a proof that does not check out.
    */
+  /** The pid a failed proof reported (0.2.0 sends it only in its challenged answer, with a proof that has no port). */
+  let foreignPid: number | undefined;
   const check = async (h: { port: number; token: string }) => {
     const challenge = newChallenge();
     const r = await health(h.port, challenge);
+    foreignPid = undefined;
     if (r === null) return 'silent' as const;
     if (r === 'refused' || r === 'unproven') return r;
-    return proofMatches(h.token, challenge, h.port, r) ? r : ('foreign' as const);
+    if (proofMatches(h.token, challenge, h.port, r)) return r;
+    foreignPid = r.pid;
+    return 'foreign' as const;
   };
   const proven = async (h: { port: number; token: string }) => {
     const r = await check(h);
@@ -201,28 +207,39 @@ export async function ensureHub(opts: EnsureHubOptions = {}): Promise<string> {
       await sleep(Math.max(pollMs, 50));
       r = await check(hub);
     }
+    const unverified = (version: string) =>
+      opts.notice?.(
+        `AI Chat Center: an older AI Chat Center hub (version ${version.slice(0, 32)}) seems to still run on port ${hub.port}, ` +
+          'but it could not be verified, so it was not stopped. Restart the computer (or stop that process) ' +
+          'so that app messages are not sent through it: they would not be delivered.',
+      );
     if (typeof r !== 'string') {
       // Same or newer (another installed copy of the plugin): use it. Killing a newer hub would make two
       // installed versions keep replacing each other, rotating the token every time.
       if (!(compareVersions(r.version, VERSION) < 0)) return urlOf(hub);
-      // A proven hub of an older plugin version: stop it.
-      await stop(r.pid);
+      // A proven hub of an older plugin version: stop it, but only the process hub.json names. The pid it
+      // reports is its own view: in another pid namespace (a container with host networking and a shared
+      // home) that number names another process here (audit S5-M1).
+      if (hub.pid !== null && r.pid === hub.pid) await stop(hub.pid);
+      else unverified(r.version);
     } else if ((r === 'unproven' || r === 'foreign') && hub.pid !== null && isAlive(hub.pid)) {
-      // Audit R4-M2: a hub of ours older than the proof (0.1.0) keeps running, accepting messages that are
-      // never delivered. It is stopped only when it is certainly ours: hub.json's pid is alive, it says it
-      // is an older AI Chat Center with that same pid, and it accepts the token on disk. Anything less
-      // certain is never killed (a foreign process, a reused pid): the user is told instead.
+      // Audit R4-M2 / S5-M1: a hub of ours older than the proof (0.1.0, 0.2.0) keeps running, accepting
+      // messages that are never delivered. It is stopped only when it is certainly ours: hub.json's pid is
+      // alive; it says it is an older AI Chat Center and reports that same pid (0.1.0 in its health answer,
+      // 0.2.0 in its challenged one; a missing pid is never accepted); it refuses a random bearer (a real hub
+      // answers 401, so a server that accepts anything is foreign and never gets the token); and it accepts
+      // the token on disk. Anything less certain is never killed: the user is told instead.
+      const challengedPid = r === 'foreign' ? foreignPid : undefined;
       const id = await identify(hub.port);
       if (id && compareVersions(id.version, VERSION) < 0) {
-        const pidMatches = id.pid === undefined || id.pid === hub.pid;
-        if (pidMatches && (await tokenAccepted(hub.port, hub.token))) await stop(hub.pid);
-        else {
-          opts.notice?.(
-            `AI Chat Center: an older AI Chat Center hub (version ${id.version.slice(0, 32)}) seems to still run on port ${hub.port}, ` +
-              'but it could not be verified, so it was not stopped. Restart the computer (or stop that process) ' +
-              'so that app messages are not sent through it: they would not be delivered.',
-          );
-        }
+        const reported = id.pid ?? challengedPid;
+        const ours =
+          reported !== undefined &&
+          reported === hub.pid &&
+          !(await tokenAccepted(hub.port, crypto.randomBytes(32).toString('hex'))) &&
+          (await tokenAccepted(hub.port, hub.token));
+        if (ours) await stop(hub.pid);
+        else unverified(id.version);
       }
     }
   }
