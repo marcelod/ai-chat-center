@@ -147,6 +147,17 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
       >
         {loading && events.length === 0 && <p className="self-center text-sm text-muted">{t('ui.chat.loading')}</p>}
         {events.map(render)}
+        {/* Claude Code writes the AskUserQuestion entry to the transcript only after the tool returns: while the
+            hook waits for the app, the card comes from the hub's pending question. */}
+        {session.pendingQuestion &&
+          !events.some((e) => e.kind === 'question' && e.toolUseId === session.pendingQuestion!.toolUseId) &&
+          render({
+            kind: 'question',
+            id: `pending-${session.pendingQuestion.toolUseId}`,
+            ts: session.pendingQuestion.createdAt,
+            toolUseId: session.pendingQuestion.toolUseId,
+            questions: session.pendingQuestion.questions,
+          })}
         {queued.map((m) =>
           m.failed ? (
             <FailedBubble key={m.id} text={m.text} onRetry={() => onRetry?.(m.id)} />

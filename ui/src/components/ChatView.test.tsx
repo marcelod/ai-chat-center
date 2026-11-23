@@ -287,6 +287,31 @@ describe('ChatView', () => {
     });
     expect(screen.getByText('Claude is asking you a question — answer below')).toBeInTheDocument();
     expect(screen.getByText('waiting for your answer', { selector: '[data-state="waiting"]' })).toBeInTheDocument();
-    expect(screen.queryByText(/in the terminal/)).toBeNull();
+    // The card's own "Answer in the terminal" button is expected; no banner or status may send the user there.
+    expect(screen.queryByText(/waiting .*in the terminal/i)).toBeNull();
+  });
+
+  // Claude Code writes the AskUserQuestion entry to the transcript only after the tool returns, so while the
+  // hook waits the card must come from the hub's pendingQuestion.
+  it('shows the pending question card before the question reaches the transcript', () => {
+    setup({
+      session: session({
+        state: 'waiting',
+        waitingKind: 'question',
+        pendingQuestion: { toolUseId: 'tu1', createdAt: ts(5), questions: [{ question: 'Pick one?', options: [{ label: 'Alpha' }, { label: 'Beta' }] }] },
+      }),
+      events: [],
+    });
+    expect(screen.getByText('Pick one?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Alpha/ })).toBeInTheDocument();
+  });
+
+  it('shows the pending question once when the transcript already has it', () => {
+    const questions = [{ question: 'Pick one?', options: [{ label: 'Alpha' }, { label: 'Beta' }] }];
+    setup({
+      session: session({ state: 'waiting', waitingKind: 'question', pendingQuestion: { toolUseId: 'tu1', createdAt: ts(5), questions } }),
+      events: [{ kind: 'question', id: 'q1', ts: ts(5), toolUseId: 'tu1', questions }],
+    });
+    expect(screen.getAllByText('Pick one?')).toHaveLength(1);
   });
 });
