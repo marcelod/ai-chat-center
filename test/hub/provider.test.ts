@@ -9,6 +9,7 @@ import { register, getRegistration, markDisconnected } from '../../src/core/regi
 import { setWaiting } from '../../src/core/waiting.js';
 import { putPending, removePending } from '../../src/core/questions.js';
 import { setDisplayName } from '../../src/core/names.js';
+import { setEffort } from '../../src/core/meta.js';
 import { peek } from '../../src/core/inbox.js';
 import { paths } from '../../src/core/paths.js';
 import { tmpDir } from '../helpers/tmp.js';
@@ -497,4 +498,52 @@ describe('provider: queued messages with their text (audit R3-F5)', () => {
     expect(v.pendingAppMessageIds).toEqual([m1.id, m2.id]);
     expect(v.pendingAppMessages).toEqual([m1, m2].map(({ id, text, createdAt }) => ({ id, text, createdAt })));
   });
+  describe('session info', () => {
+    const modelLine = (uuid: string, model: string) =>
+      JSON.stringify({ type: 'assistant', uuid, timestamp: '2026-01-01T00:00:00Z', message: { role: 'assistant', model, content: [{ type: 'text', text: 'x' }] } }) + '\n';
+    const gitCwd = (head: string) => {
+      const g = tmpDir('acc-git-');
+      fs.mkdirSync(path.join(g, '.git'));
+      fs.writeFileSync(path.join(g, '.git', 'HEAD'), head);
+      return g;
+    };
+    it('fills branch, model and effort; none without data', async () => {
+      await reg();
+      const p = new ClaudeCodeProvider(async () => [live()]);
+      let v = (await p.listSessions()).connected[0];
+      expect(v.branch).toBeUndefined();
+      expect(v.model).toBeUndefined();
+      expect(v.effort).toBeUndefined();
+      const cwd = gitCwd('ref: refs/heads/feat\n');
+      await register({ sessionId: 's1', transcriptPath: transcript, cwd, pid: 1, version: VERSION, protocol: PROTOCOL });
+      fs.appendFileSync(transcript, modelLine('m1', 'claude-opus-5-5'));
+      await setEffort('s1', 'high');
+      v = (await new ClaudeCodeProvider(async () => [live({ cwd })]).listSessions()).connected[0];
+      expect(v).toMatchObject({ branch: 'feat', model: 'Opus 5.5', effort: 'high' });
+    });
+    it('model of a disconnected session is still shown', async () => {
+      await reg();
+      fs.appendFileSync(transcript, modelLine('m1', 'claude-sonnet-5-5'));
+      await markDisconnected('s1', 'off');
+      const v = (await new ClaudeCodeProvider(async () => []).listSessions()).connected[0];
+      expect(v.model).toBe('Sonnet 5.5');
+    });
+    it('poll emits sessions when branch, model or effort change', async () => {
+      const cwd = gitCwd('ref: refs/heads/a\n');
+      await register({ sessionId: 's1', transcriptPath: transcript, cwd, pid: 1, version: VERSION, protocol: PROTOCOL });
+      const p = new ClaudeCodeProvider(async () => [live({ cwd, status: 'busy' })]);
+      await p.poll();
+      expect((await p.poll()).map((c) => c.type)).toEqual([]);
+      fs.writeFileSync(path.join(cwd, '.git', 'HEAD'), 'ref: refs/heads/b\n');
+      expect((await p.poll()).map((c) => c.type)).toEqual(['sessions']);
+      await setEffort('s1', 'max');
+      expect((await p.poll()).map((c) => c.type)).toEqual(['sessions']);
+      fs.appendFileSync(transcript, modelLine('m1', 'claude-opus-5-5'));
+      expect((await p.poll()).map((c) => c.type)).toEqual(['events', 'sessions']);
+      expect((await p.poll()).map((c) => c.type)).toEqual([]);
+      fs.appendFileSync(transcript, modelLine('m2', 'claude-haiku-5-5'));
+      expect((await p.poll()).map((c) => c.type)).toContain('sessions');
+    });
+  });
+
 });

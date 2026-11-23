@@ -87,6 +87,8 @@ export class TranscriptParser {
   private queued: { text: string; at: number }[] = [];
   /** The last `!` command, for the output entry that follows it. */
   private lastShell: string | null = null;
+  /** `message.model` of the latest main-thread assistant entry (synthetic ones ignored). */
+  model: string | undefined;
 
   /** @param keys trusted marker keys of the session; when given, other app-message blocks are ignored. */
   constructor(private readonly keys?: string[]) {}
@@ -101,7 +103,11 @@ export class TranscriptParser {
     if (entry.type === 'attachment') return this.attachment(uuid, ts, entry.attachment);
     const message = isRecord(entry.message) ? entry.message : undefined;
     if (!message) return [];
-    if (entry.type === 'assistant') return this.assistant(uuid, ts, message.content);
+    if (entry.type === 'assistant') {
+      const model = message.model;
+      if (typeof model === 'string' && model && model !== '<synthetic>') this.model = model;
+      return this.assistant(uuid, ts, message.content);
+    }
     if (entry.type === 'user' && entry.isMeta !== true) {
       if (entry.isCompactSummary === true) return [{ kind: 'notice', id: uuid, ts, code: 'compacted' }];
       return this.user(uuid, ts, message.content, entry.toolUseResult);

@@ -349,3 +349,22 @@ describe('TranscriptParser: AskUserQuestion', () => {
     expect(evs[0]!.kind).toBe('actions');
   });
 });
+
+describe('TranscriptParser model', () => {
+  const asst = (uuid: string, model: unknown, extra: object = {}) => ({
+    type: 'assistant', uuid, timestamp: '2026-01-01T00:00:00Z', ...extra,
+    message: { role: 'assistant', model, content: [{ type: 'text', text: 'hi' }] },
+  });
+  it('tracks the latest model, ignoring synthetic, sidechain and non-string', () => {
+    const p = new TranscriptParser();
+    expect(p.model).toBeUndefined();
+    p.push(asst('a1', 'claude-opus-5-5'));
+    expect(p.model).toBe('claude-opus-5-5');
+    p.push(asst('a2', '<synthetic>'));
+    p.push(asst('a3', 5));
+    p.push(asst('a4', 'claude-haiku-5-5', { isSidechain: true }));
+    expect(p.model).toBe('claude-opus-5-5');
+    p.push(asst('a5', 'claude-sonnet-5-5'));
+    expect(p.model).toBe('claude-sonnet-5-5');
+  });
+});

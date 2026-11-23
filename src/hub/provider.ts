@@ -1,4 +1,6 @@
 import { getDisplayName } from '../core/names.js';
+import { readGitBranch } from '../core/gitBranch.js';
+import { getEffort, shortModel } from '../core/meta.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ChatEvent, LiveSession, ProviderChange, SessionView } from '../shared/types.js';
@@ -62,6 +64,7 @@ export class ClaudeCodeProvider implements Provider {
   private readers = new Map<string, Entry>(); // active sessions only
   private pending = new Map<string, ChatEvent[]>(); // read but not yet emitted by poll
   private lastEvents = new Map<string, ChatEvent | undefined>(); // disconnected sessions
+  private lastModels = new Map<string, string | undefined>(); // disconnected sessions
   private misses = new Map<string, { connectedAt: string; count: number }>();
   private liveCache: { at: number; value: LiveSession[] } | null = null;
   private lastGood: LiveSession[] | null = null;
@@ -123,6 +126,7 @@ export class ClaudeCodeProvider implements Provider {
     await tmp.readNew();
     const last = tmp.all().at(-1);
     this.lastEvents.set(sid, last);
+    this.lastModels.set(sid, tmp.model());
     return last;
   }
 
@@ -208,12 +212,15 @@ export class ClaudeCodeProvider implements Provider {
       if (!disconnected) activeIds.add(sid);
 
       let lastEvent: ChatEvent | undefined;
+      let rawModel: string | undefined;
       if (disconnected) {
         lastEvent = await this.lastEventOf(reg);
+        rawModel = this.lastModels.get(sid) ?? this.readers.get(sid)?.reader.model();
       } else {
         const e = this.entry(reg);
         if (!e.read) await this.refresh(sid, e);
         lastEvent = e.reader.all().at(-1);
+        rawModel = e.reader.model();
       }
 
       const waiting = disconnected ? null : await getWaiting(sid);
@@ -255,6 +262,11 @@ export class ClaudeCodeProvider implements Provider {
       const unsigned = disconnected ? 0 : await countUnsigned(sid);
       if (unsigned > 0) view.undeliveredUnsigned = unsigned;
       if (lastEvent) view.lastEvent = lastEvent;
+      const branch = await readGitBranch(cwd);
+      if (branch) view.branch = branch;
+      if (rawModel) view.model = shortModel(rawModel);
+      const effort = await getEffort(sid);
+      if (effort) view.effort = effort;
       connected.push(view);
     }
 
@@ -299,6 +311,7 @@ export class ClaudeCodeProvider implements Provider {
         const e = this.readers.get(sid)!;
         await this.refresh(sid, e);
         this.lastEvents.set(sid, e.reader.all().at(-1));
+        this.lastModels.set(sid, e.reader.model());
         this.readers.delete(sid);
       } else {
         this.pending.delete(sid);
@@ -308,7 +321,7 @@ export class ClaudeCodeProvider implements Provider {
       this.pending.delete(sid);
       if (events?.length) changes.push({ type: 'events', sessionId: sid, events });
     }
-    for (const m of [this.readers, this.pending, this.lastEvents, this.misses] as Map<string, unknown>[]) {
+    for (const m of [this.readers, this.pending, this.lastEvents, this.lastModels, this.misses] as Map<string, unknown>[]) {
       for (const sid of [...m.keys()]) if (!known.has(sid)) m.delete(sid);
     }
 
@@ -326,6 +339,9 @@ export class ClaudeCodeProvider implements Provider {
         s.pendingAppMessageIds,
         s.deliveryStalled ?? false,
         s.undeliveredUnsigned ?? 0,
+        s.branch ?? null,
+        s.model ?? null,
+        s.effort ?? null,
       ]),
     });
     if (signature !== this.lastSignature) {

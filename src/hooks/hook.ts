@@ -25,6 +25,7 @@ import { DIR_MODE, ensureDir } from '../core/fsAtomic.js';
 import { claudeConfigDir, codeStamp, getRegistration, isActive, markDisconnected, register, stampedByThisCode, updateRegistration } from '../core/registry.js';
 import { clearWaiting, setWaiting } from '../core/waiting.js';
 import { clearBusy, setBusy } from '../core/busy.js';
+import { setEffort } from '../core/meta.js';
 import { clearTurnOrigin, promptOrigin, setTurnOrigin } from '../core/turn.js';
 import { ensureHub } from './ensureHub.js';
 import { loadConfig, saveConfig } from '../core/config.js';
@@ -44,6 +45,7 @@ export type HookInput = {
   source?: string;
   notification_type?: string;
   message?: string;
+  effort?: { level?: unknown };
 };
 export interface HookContext {
   /** Returns the hub URL; `notice` receives lines for the user (an older hub that could not be stopped). */
@@ -194,6 +196,8 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
       // A turn starts (typed, or woken by a delivery): the waiter must not inject app messages until it ends.
       await setBusy(sid);
       await setTurnOrigin(sid, promptOrigin(input.prompt, reg.key));
+      const level = input.effort?.level;
+      if (typeof level === 'string') await setEffort(sid, level);
     }
     return answersResult ?? nothing;
   }

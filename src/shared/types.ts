@@ -52,6 +52,12 @@ export type SessionView = {
   /** The name Claude Code gives the session; present only when a custom display name replaces it. */
   originalName?: string;
   cwd: string;
+  /** Git branch of the session folder (short hash when detached); absent outside a repository. */
+  branch?: string;
+  /** Short model name of the last assistant reply ("Opus 5.5"); absent before the first reply. */
+  model?: string;
+  /** Reasoning effort level recorded at the last prompt; absent when Claude Code does not send it. */
+  effort?: string;
   state: 'busy' | 'idle' | 'waiting' | 'disconnected';
   waitingKind?: 'permission' | 'input' | 'question';
   /** An AskUserQuestion the app can answer; only for an active session. */

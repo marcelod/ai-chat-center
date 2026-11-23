@@ -35,6 +35,11 @@ export class TranscriptReader {
     return [...this.events.values()];
   }
 
+  /** Raw model id of the latest assistant reply, if any. */
+  model(): string | undefined {
+    return this.parser.model;
+  }
+
   private reset(): void {
     this.offset = 0;
     this.partial = [];

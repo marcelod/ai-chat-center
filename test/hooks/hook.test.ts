@@ -14,6 +14,7 @@ import { paths } from '../../src/core/paths.js';
 import { saveConfig, loadConfig } from '../../src/core/config.js';
 import { getTurnOrigin, setTurnOrigin } from '../../src/core/turn.js';
 import { ANSWERS_ON, ANSWERS_OFF, WINDOW_ON, WINDOW_OFF } from '../../src/hooks/hook.js';
+import { getEffort } from '../../src/core/meta.js';
 import { tmpDir } from '../helpers/tmp.js';
 
 const URL_ = 'http://127.0.0.1:7777/#token=t';
@@ -870,5 +871,30 @@ describe('answers command and turn origin', () => {
     await setTurnOrigin('s1', 'app');
     await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
     expect(await getTurnOrigin('s1')).toBeNull();
+  });
+});
+
+describe('prompt-submit effort', () => {
+  const active = async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42, version: VERSION, protocol: PROTOCOL });
+  };
+  it('records effort.level for an active session on each prompt', async () => {
+    await active();
+    await handleHook('prompt-submit', inp({ prompt: 'hi', effort: { level: 'high' } }), ctx());
+    expect(await getEffort('s1')).toBe('high');
+    await handleHook('prompt-submit', inp({ prompt: 'hi', effort: { level: 'low' } }), ctx());
+    expect(await getEffort('s1')).toBe('low');
+  });
+  it('without effort (older Claude Code), or a bad one: nothing recorded, nothing breaks', async () => {
+    await active();
+    expect(await handleHook('prompt-submit', inp({ prompt: 'hi' }), ctx())).toEqual({ exitCode: 0 });
+    for (const e of [{}, { level: 5 }, { level: 'X Y' }, null, 'high']) {
+      await handleHook('prompt-submit', inp({ prompt: 'hi', effort: e as never }), ctx());
+    }
+    expect(await getEffort('s1')).toBeNull();
+  });
+  it('does not record for a session that is not connected', async () => {
+    await handleHook('prompt-submit', inp({ prompt: 'hi', effort: { level: 'high' } }), ctx());
+    expect(await getEffort('s1')).toBeNull();
   });
 });

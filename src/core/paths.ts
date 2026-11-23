@@ -24,6 +24,8 @@ export interface Paths {
   questionsDir: (sid: string) => string;
   /** Custom display name chosen in the app (see names.ts). */
   namesFile: (sid: string) => string;
+  /** Per-session info recorded by the hooks: effort level (see meta.ts). */
+  metaFile: (sid: string) => string;
   /** Written by the hub while an app tab is open (see presence.ts). */
   presenceFile: string;
   logDir: string;
@@ -56,6 +58,7 @@ export function paths(): Paths {
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, 'delivered', `${sid}.json`)),
     questionsDir: (sid) => (assertSessionId(sid), path.join(home, 'questions', sid)),
     namesFile: (sid) => (assertSessionId(sid), path.join(home, 'names', `${sid}.json`)),
+    metaFile: (sid) => (assertSessionId(sid), path.join(home, 'meta', `${sid}.json`)),
     presenceFile: path.join(home, 'app-presence.json'),
     logDir: path.join(home, 'logs'),
   };
