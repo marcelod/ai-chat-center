@@ -95,7 +95,7 @@ describe('hub verification', () => {
     return o && o.proof instanceof Promise ? { ...o, proof: await o.proof } : o;
   };
   /** fetch stub: /api/health answers with `prove(challenge)`; records every request. */
-  const stub = (prove: (c: string) => unknown, status = 200) => {
+  const stub = (prove: (c: string) => unknown, status = 200, post: { status: number; body: unknown } = { status: 202, body: { id: 'm1' } }) => {
     const seen: { url: string; method: string }[] = [];
     vi.stubGlobal(
       'fetch',
@@ -104,7 +104,7 @@ describe('hub verification', () => {
         seen.push({ url, method: init?.method ?? 'GET' });
         const c = /challenge=([0-9a-f]+)/.exec(url)?.[1];
         if (url.startsWith('/api/health')) return new Response(JSON.stringify(await resolveProof(prove(c ?? ''))), { status });
-        return new Response(JSON.stringify({ id: 'm1' }), { status: 202 });
+        return new Response(JSON.stringify(post.body), { status: post.status });
       }),
     );
     return seen;
@@ -142,6 +142,15 @@ describe('hub verification', () => {
     expect(seen.some((r) => r.method === 'POST')).toBe(false);
     expect(lost).toBe(1);
     expect(api.hasToken()).toBe(false);
+  });
+  // Audit R5-M1: the app tells "restart this session" apart from "disconnected" by the 409's code.
+  it('a refused send carries the status and the code from the hub', async () => {
+    stub((c) => ({ ok: true, pid: 7, version: 'v', proof: proof(TOKEN, c, port(), 7, 'v') }), 200, {
+      status: 409,
+      body: { error: 'session runs an older version', code: 'session-older-version' },
+    });
+    const api = await load();
+    await expect(api.sendMessage('s1', 'hi')).rejects.toMatchObject({ status: 409, code: 'session-older-version' });
   });
   it('sendMessage POSTs once the hub proved itself', async () => {
     const seen = stub((c) => ({ ok: true, pid: 7, version: 'v', proof: proof(TOKEN, c, port(), 7, 'v') }));

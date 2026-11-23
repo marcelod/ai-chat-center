@@ -252,6 +252,10 @@ async function clearWaiting(sid) {
   await removeFile(paths().waitingFile(sid));
 }
 
+// src/core/version.ts
+var VERSION = "0.2.3";
+var PROTOCOL = 2;
+
 // src/core/registry.ts
 var SESSION_LOCK_WAIT_MS = 2e3;
 var locked = (sid, fn) => withLock(paths().sessionLock(sid), SESSION_LOCK_WAIT_MS, fn);
@@ -264,6 +268,8 @@ function claudeConfigDir() {
   const raw = process.env.CLAUDE_CONFIG_DIR;
   return path5.resolve(raw && raw.trim() ? raw : path5.join(os2.homedir(), ".claude"));
 }
+var codeStamp = () => ({ version: VERSION, protocol: PROTOCOL });
+var stampedByThisCode = (r) => r.version === VERSION && r.protocol === PROTOCOL;
 async function register(r) {
   return locked(r.sessionId, async () => {
     const prev = await getRegistration(r.sessionId);
@@ -271,6 +277,17 @@ async function register(r) {
     const full = { ...r, connectedAt: r.connectedAt ?? (/* @__PURE__ */ new Date()).toISOString() };
     await writeJsonAtomic(regFile(r.sessionId), full);
     return full;
+  });
+}
+async function updateRegistration(sid, patch, opts = {}) {
+  if (!await getRegistration(sid)) return null;
+  return locked(sid, async () => {
+    const r = await getRegistration(sid);
+    if (!r) return null;
+    if (opts.ifConnectedAt !== void 0 && (!isActive(r) || r.connectedAt !== opts.ifConnectedAt)) return null;
+    const next = { ...r, ...patch };
+    await writeJsonAtomic(regFile(sid), next);
+    return next;
   });
 }
 async function getRegistration(sid) {
@@ -296,9 +313,6 @@ import os3 from "node:os";
 import path6 from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-
-// src/core/version.ts
-var VERSION = "0.2.3";
 
 // src/core/healthProof.ts
 import crypto3 from "node:crypto";
@@ -546,6 +560,8 @@ var en_default = {
       disconnectedHint: "This session is disconnected. Type /cc in its terminal to reconnect.",
       send: "Send",
       sendDisconnected: "This session is disconnected",
+      sendOlderVersion: "This session runs an older version of AI Chat Center. Restart it (exit and `claude --resume`) to send messages from the app.",
+      sendNewerVersion: "This session runs a newer version of AI Chat Center than this app. Type /cc in that session to update the app, then send again.",
       sendFailed: "Could not send the message.",
       retry: "Retry"
     },
@@ -641,6 +657,8 @@ var pt_BR_default = {
       disconnectedHint: "Esta sess\xE3o est\xE1 desconectada. Digite /cc no terminal dela para reconectar.",
       send: "Enviar",
       sendDisconnected: "Esta sess\xE3o est\xE1 desconectada",
+      sendOlderVersion: "Esta sess\xE3o roda uma vers\xE3o mais antiga do AI Chat Center. Reinicie-a (saia e rode `claude --resume`) para enviar mensagens pelo app.",
+      sendNewerVersion: "Esta sess\xE3o roda uma vers\xE3o do AI Chat Center mais nova que a deste app. Digite /cc nessa sess\xE3o para atualizar o app e envie de novo.",
       sendFailed: "N\xE3o foi poss\xEDvel enviar a mensagem.",
       retry: "Tentar de novo"
     },
@@ -748,6 +766,7 @@ async function connect(input, resolve, ctx) {
     cwd: input.cwd,
     pid,
     configDir: claudeConfigDir(),
+    ...codeStamp(),
     // The key stays while the connection is active; a reactivation gets a new one.
     key: keep && prev.key ? prev.key : crypto5.randomBytes(16).toString("hex"),
     ...previousKeys.length ? { previousKeys } : {},
@@ -794,6 +813,7 @@ async function handleHook(event, input, ctx) {
     if (!reg) return nothing;
     if (cmd === "off") await markDisconnected(sid, "off");
     else if (isActive(reg)) {
+      if (!stampedByThisCode(reg)) await updateRegistration(sid, codeStamp(), { ifConnectedAt: reg.connectedAt });
       await clearWaiting(sid);
       await setBusy(sid);
     }

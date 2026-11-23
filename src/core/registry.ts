@@ -8,6 +8,7 @@ import { clearBusy } from './busy.js';
 import { clearWaiting } from './waiting.js';
 import { clearDelivered } from './delivered.js';
 import { withLock } from './lock.js';
+import { PROTOCOL, VERSION } from './version.js';
 
 /** How long a registration write waits for the per-session lock before proceeding anyway. */
 const SESSION_LOCK_WAIT_MS = 2000;
@@ -30,6 +31,10 @@ export type Registration = {
    * registrations written before 0.2.3: treated as the same.
    */
   configDir?: string;
+  /** The plugin version whose hook or waiter last wrote this registration (missing before 0.2.4). */
+  version?: string;
+  /** The message protocol of that code (see PROTOCOL; missing before 0.2.4). The hub sends only on its own. */
+  protocol?: number;
   disconnectedAt?: string;
   disconnectReason?: 'off' | 'clear' | 'exited';
 };
@@ -53,6 +58,12 @@ export function sameConfigDir(r: Registration, mine = claudeConfigDir()): boolea
   const a = path.resolve(r.configDir);
   return process.platform === 'win32' ? a.toLowerCase() === mine.toLowerCase() : a === mine;
 }
+
+/** What this code records about itself in a registration it writes. */
+export const codeStamp = (): { version: string; protocol: number } => ({ version: VERSION, protocol: PROTOCOL });
+
+/** True when the registration was last written by this very version and protocol. */
+export const stampedByThisCode = (r: Registration): boolean => r.version === VERSION && r.protocol === PROTOCOL;
 
 /** Every key whose blocks belong to this session (current last). */
 export const trustedKeys = (r: Registration): string[] => [...(r.previousKeys ?? []), ...(r.key ? [r.key] : [])];

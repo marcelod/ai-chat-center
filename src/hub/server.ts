@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import type { Provider } from './provider.js';
-import { SessionDisconnectedError } from './provider.js';
+import { SessionDisconnectedError, SessionProtocolError } from './provider.js';
 import type { ProviderChange } from '../shared/types.js';
 import { assertSessionId } from '../core/paths.js';
 import { loadConfig, saveConfig, type Lang } from '../core/config.js';
@@ -319,7 +319,10 @@ export async function createHub(
     } catch (e) {
       if (res.headersSent) return void res.end();
       if (e instanceof HttpError) return sendJson(res, e.status, { error: e.message });
-      if (e instanceof SessionDisconnectedError) return sendJson(res, 409, { error: 'session disconnected' });
+      if (e instanceof SessionDisconnectedError) return sendJson(res, 409, { error: 'session disconnected', code: 'session-disconnected' });
+      if (e instanceof SessionProtocolError) {
+        return sendJson(res, 409, { error: `session runs ${e.direction === 'older' ? 'an older' : 'a newer'} version`, code: `session-${e.direction}-version` });
+      }
       log(`request failed: ${(e as Error).stack ?? (e as Error).message}`.split(token).join('[redacted]'));
       sendJson(res, 500, { error: 'internal error' });
     }

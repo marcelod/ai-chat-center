@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ClaudeCodeProvider, SessionDisconnectedError } from '../../src/hub/provider.js';
+import { ClaudeCodeProvider, SessionDisconnectedError, SessionProtocolError } from '../../src/hub/provider.js';
+import { PROTOCOL, VERSION } from '../../src/core/version.js';
 import { listLiveSessions } from '../../src/hub/status.js';
 import type { LiveSession } from '../../src/shared/types.js';
 import { register, getRegistration } from '../../src/core/registry.js';
@@ -23,7 +24,7 @@ const live = (o: Partial<LiveSession> = {}): LiveSession => ({
   pid: 1, cwd: '/home/u/proj', kind: 'interactive', sessionId: 's1', name: 'nm', status: 'busy', ...o,
 });
 const reg = (sid = 's1') =>
-  register({ sessionId: sid, transcriptPath: transcript, cwd: '/home/u/proj', pid: 1 });
+  register({ sessionId: sid, transcriptPath: transcript, cwd: '/home/u/proj', pid: 1, version: VERSION, protocol: PROTOCOL });
 const line = (uuid: string, text: string) =>
   JSON.stringify({ type: 'assistant', uuid, timestamp: '2026-01-01T00:00:00Z', message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n';
 
@@ -183,6 +184,20 @@ describe('provider', () => {
     await markDisconnected('s1', 'off');
     await expect(p.send('s1', 'x')).rejects.toBeInstanceOf(SessionDisconnectedError);
     await expect(p.send('nope', 'x')).rejects.toBeInstanceOf(SessionDisconnectedError);
+  });
+  // Audit R5-M1: a session still running another version of the plugin (left open across `plugin update`)
+  // would drop every message signed in a format it does not check. The hub refuses instead: 409 + code.
+  it('send refuses a session whose registration has another protocol, or none: nothing is queued', async () => {
+    const p = new ClaudeCodeProvider(async () => [live()]);
+    for (const [protocol, direction] of [[undefined, 'older'], [PROTOCOL - 1, 'older'], [PROTOCOL + 1, 'newer']] as const) {
+      await register({ sessionId: 's1', transcriptPath: transcript, cwd: '/x', pid: 1, ...(protocol === undefined ? {} : { protocol }) });
+      const e = await p.send('s1', 'x').catch((err: unknown) => err);
+      expect(e).toBeInstanceOf(SessionProtocolError);
+      expect((e as SessionProtocolError).direction).toBe(direction);
+      expect(await peek('s1')).toEqual([]);
+    }
+    await reg();
+    expect((await p.send('s1', 'ok')).id).toBeTruthy();
   });
   it('send racing with disconnect removes its message', async () => {
     await reg();

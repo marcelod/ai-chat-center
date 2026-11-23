@@ -392,6 +392,10 @@ async function clearDelivered(sid) {
   await removeFile(paths().deliveredFile(sid));
 }
 
+// src/core/version.ts
+var VERSION = "0.2.3";
+var PROTOCOL = 2;
+
 // src/core/registry.ts
 var SESSION_LOCK_WAIT_MS = 2e3;
 var locked = (sid, fn) => withLock(paths().sessionLock(sid), SESSION_LOCK_WAIT_MS, fn);
@@ -842,6 +846,16 @@ var SessionDisconnectedError = class extends Error {
   }
   sessionId;
 };
+var SessionProtocolError = class extends Error {
+  constructor(sessionId, direction) {
+    super(`Session ${sessionId} runs a ${direction} version of AI Chat Center`);
+    this.sessionId = sessionId;
+    this.direction = direction;
+    this.name = "SessionProtocolError";
+  }
+  sessionId;
+  direction;
+};
 var LIVE_TTL_MS = 5e3;
 var STALE_BUSY_MS = 1e4;
 var GRACE_MS = 15e3;
@@ -1096,6 +1110,9 @@ var ClaudeCodeProvider = class {
   async send(sid, text) {
     const reg = await getRegistration(sid);
     if (!reg || !isActive(reg)) throw new SessionDisconnectedError(sid);
+    if (reg.protocol !== PROTOCOL) {
+      throw new SessionProtocolError(sid, typeof reg.protocol === "number" && reg.protocol > PROTOCOL ? "newer" : "older");
+    }
     const msg = await enqueue(sid, text);
     const again = await getRegistration(sid);
     if (!again || !isActive(again)) {
@@ -1126,9 +1143,6 @@ async function loadConfig() {
 async function saveConfig(c) {
   await writeJsonAtomic(paths().config, c);
 }
-
-// src/core/version.ts
-var VERSION = "0.2.3";
 
 // src/hub/server.ts
 var MAX_BODY = 64 * 1024;
@@ -1411,7 +1425,10 @@ data: ${JSON.stringify(c)}
     } catch (e) {
       if (res.headersSent) return void res.end();
       if (e instanceof HttpError) return sendJson(res, e.status, { error: e.message });
-      if (e instanceof SessionDisconnectedError) return sendJson(res, 409, { error: "session disconnected" });
+      if (e instanceof SessionDisconnectedError) return sendJson(res, 409, { error: "session disconnected", code: "session-disconnected" });
+      if (e instanceof SessionProtocolError) {
+        return sendJson(res, 409, { error: `session runs ${e.direction === "older" ? "an older" : "a newer"} version`, code: `session-${e.direction}-version` });
+      }
       log(`request failed: ${e.stack ?? e.message}`.split(token).join("[redacted]"));
       sendJson(res, 500, { error: "internal error" });
     }

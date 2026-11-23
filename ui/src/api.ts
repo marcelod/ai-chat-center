@@ -87,8 +87,21 @@ function dropToken(): void {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number) {
+  /** `code` from the hub's error body, e.g. `session-older-version` on a 409 (audit R5-M1). */
+  constructor(
+    public status: number,
+    public code?: string,
+  ) {
     super(`${status}`);
+  }
+}
+
+async function errorCode(res: Response): Promise<string | undefined> {
+  try {
+    const j = (await res.json()) as { code?: unknown };
+    return typeof j?.code === 'string' ? j.code : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -101,7 +114,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (res.status === 401) dropToken();
-  if (!res.ok) throw new ApiError(res.status);
+  if (!res.ok) throw new ApiError(res.status, await errorCode(res));
   return (await res.json()) as T;
 }
 

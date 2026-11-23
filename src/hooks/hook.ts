@@ -22,7 +22,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { assertSessionId, paths } from '../core/paths.js';
 import { DIR_MODE, ensureDir } from '../core/fsAtomic.js';
-import { claudeConfigDir, getRegistration, isActive, markDisconnected, register } from '../core/registry.js';
+import { claudeConfigDir, codeStamp, getRegistration, isActive, markDisconnected, register, stampedByThisCode, updateRegistration } from '../core/registry.js';
 import { clearWaiting, setWaiting } from '../core/waiting.js';
 import { clearBusy, setBusy } from '../core/busy.js';
 import { ensureHub } from './ensureHub.js';
@@ -91,6 +91,7 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
     cwd: input.cwd,
     pid,
     configDir: claudeConfigDir(),
+    ...codeStamp(),
     // The key stays while the connection is active; a reactivation gets a new one.
     key: keep && prev.key ? prev.key : crypto.randomBytes(16).toString('hex'),
     ...(previousKeys.length ? { previousKeys } : {}),
@@ -142,6 +143,8 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
     if (!reg) return nothing;
     if (cmd === 'off') await markDisconnected(sid, 'off');
     else if (isActive(reg)) {
+      // This session runs this code now (restarted after a plugin update): the hub may send to it again.
+      if (!stampedByThisCode(reg)) await updateRegistration(sid, codeStamp(), { ifConnectedAt: reg.connectedAt });
       await clearWaiting(sid);
       // A turn starts (typed, or woken by a delivery): the waiter must not inject app messages until it ends.
       await setBusy(sid);

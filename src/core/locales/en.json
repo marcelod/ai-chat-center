@@ -75,6 +75,8 @@
       "disconnectedHint": "This session is disconnected. Type /cc in its terminal to reconnect.",
       "send": "Send",
       "sendDisconnected": "This session is disconnected",
+      "sendOlderVersion": "This session runs an older version of AI Chat Center. Restart it (exit and `claude --resume`) to send messages from the app.",
+      "sendNewerVersion": "This session runs a newer version of AI Chat Center than this app. Type /cc in that session to update the app, then send again.",
       "sendFailed": "Could not send the message.",
       "retry": "Retry"
     },

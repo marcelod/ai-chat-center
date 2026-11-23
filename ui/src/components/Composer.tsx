@@ -3,7 +3,13 @@ import { useT } from '../i18n';
 import { SendIcon } from './icons';
 
 type Props = { name: string; disabled: boolean; onSend: (text: string) => Promise<void> };
-type Failure = { kind: 'disconnected' } | { kind: 'failed'; text: string };
+type Failure = { kind: 'disconnected' } | { kind: 'version'; direction: 'older' | 'newer' } | { kind: 'failed'; text: string };
+
+/** The session runs another version of the plugin (audit R5-M1): `session-older-version` / `session-newer-version`. */
+const versionOf = (e: unknown): 'older' | 'newer' | null => {
+  const c = (e as { code?: unknown } | null)?.code;
+  return c === 'session-older-version' ? 'older' : c === 'session-newer-version' ? 'newer' : null;
+};
 
 const statusOf = (e: unknown): number | undefined => {
   const s = (e as { status?: unknown } | null)?.status;
@@ -22,7 +28,8 @@ export function Composer({ name, disabled, onSend }: Props) {
     } catch (e) {
       if (statusOf(e) === 409) {
         setText((cur) => (cur === '' ? body : cur));
-        setFailure({ kind: 'disconnected' });
+        const direction = versionOf(e);
+        setFailure(direction ? { kind: 'version', direction } : { kind: 'disconnected' });
       } else {
         setFailure({ kind: 'failed', text: body });
       }
@@ -48,6 +55,11 @@ export function Composer({ name, disabled, onSend }: Props) {
       {failure?.kind === 'disconnected' && (
         <p role="alert" className="mb-2 text-sm text-danger">
           {t('ui.composer.sendDisconnected')}
+        </p>
+      )}
+      {failure?.kind === 'version' && (
+        <p role="alert" className="mb-2 text-sm text-danger">
+          {t(failure.direction === 'older' ? 'ui.composer.sendOlderVersion' : 'ui.composer.sendNewerVersion')}
         </p>
       )}
       {failure?.kind === 'failed' && (

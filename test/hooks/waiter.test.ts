@@ -11,6 +11,7 @@ import { enqueue, peek } from '../../src/core/inbox.js';
 import { signMessage } from '../../src/core/secret.js';
 import { unwrapMessages } from '../../src/core/protocol.js';
 import { paths } from '../../src/core/paths.js';
+import { PROTOCOL, VERSION } from '../../src/core/version.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const errno = (code: string) => Object.assign(new Error(code), { code });
@@ -194,6 +195,19 @@ describe('waiter', () => {
     await sleep(40);
     await markDisconnected('s1', 'exited');
     expect(await p).toEqual({ exitCode: 0, stderr: '' });
+  });
+  // Audit R5-M1: a session restarted after a plugin update (exit, `claude --resume`) runs the new code: its
+  // start waiter stamps the registration, so the hub accepts sends to it again. Any waiter does the same.
+  it('start on resume records the plugin version and protocol in the registration', async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 111 });
+    const p = wait('start', { source: 'resume' }, { lookup: async () => ({ ok: true, pid: process.pid }), deadlineMs: 200 });
+    await p;
+    expect(await getRegistration('s1')).toMatchObject({ pid: process.pid, version: VERSION, protocol: PROTOCOL });
+  });
+  it('any waiter re-stamps a registration written by another version (connection unchanged)', async () => {
+    const r0 = await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: process.pid, version: '0.0.1', protocol: 1 });
+    await wait('stop', {}, { deadlineMs: 100 });
+    expect(await getRegistration('s1')).toMatchObject({ version: VERSION, protocol: PROTOCOL, connectedAt: r0.connectedAt });
   });
   it('stale pid (resumed session in a new process): re-resolves once and keeps waiting', async () => {
     await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 111 });

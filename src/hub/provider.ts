@@ -8,6 +8,7 @@ import { getWaiting } from '../core/waiting.js';
 import { paths } from '../core/paths.js';
 import { TranscriptReader } from './transcript/reader.js';
 import { queryLiveSessions } from './status.js';
+import { PROTOCOL } from '../core/version.js';
 
 export type { LiveSession, SessionView, ProviderChange };
 
@@ -22,6 +23,21 @@ export class SessionDisconnectedError extends Error {
   constructor(public readonly sessionId: string) {
     super(`Session ${sessionId} is disconnected`);
     this.name = 'SessionDisconnectedError';
+  }
+}
+
+/**
+ * The session's registration carries another message protocol (or none, before 0.2.4): it runs another copy
+ * of the plugin (left open across `plugin update`), whose waiter would drop the message (audit R5-M1).
+ * `direction`: the session's code is older or newer than this hub.
+ */
+export class SessionProtocolError extends Error {
+  constructor(
+    public readonly sessionId: string,
+    public readonly direction: 'older' | 'newer',
+  ) {
+    super(`Session ${sessionId} runs a ${direction} version of AI Chat Center`);
+    this.name = 'SessionProtocolError';
   }
 }
 
@@ -309,6 +325,9 @@ export class ClaudeCodeProvider implements Provider {
   async send(sid: string, text: string): Promise<{ id: string }> {
     const reg = await getRegistration(sid);
     if (!reg || !isActive(reg)) throw new SessionDisconnectedError(sid);
+    if (reg.protocol !== PROTOCOL) {
+      throw new SessionProtocolError(sid, typeof reg.protocol === 'number' && reg.protocol > PROTOCOL ? 'newer' : 'older');
+    }
     const msg = await enqueue(sid, text);
     const again = await getRegistration(sid);
     if (!again || !isActive(again)) {

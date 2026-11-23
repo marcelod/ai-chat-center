@@ -6,7 +6,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { handleHook, isCcCommand, type HookInput } from '../../src/hooks/hook.js';
 import { ensureHub, checkHealth, hubSpawnOptions } from '../../src/hooks/ensureHub.js';
-import { VERSION } from '../../src/core/version.js';
+import { PROTOCOL, VERSION } from '../../src/core/version.js';
 import { register, getRegistration, markDisconnected } from '../../src/core/registry.js';
 import { isBusy, setBusy } from '../../src/core/busy.js';
 import { getWaiting } from '../../src/core/waiting.js';
@@ -92,6 +92,22 @@ describe('hook', () => {
   });
 
   // Audit S4-U3: the registration records the Claude config dir of the session.
+  // Audit R5-M1: the hub refuses sends to a session running another protocol; /cc stamps the registration.
+  it('/cc records the plugin version and the protocol in the registration', async () => {
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
+    expect(await getRegistration('s1')).toMatchObject({ version: VERSION, protocol: PROTOCOL });
+  });
+  it('a prompt in an active session stamped by another version re-stamps it; a current stamp is not rewritten', async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42, key: 'k', version: '0.0.1', protocol: 1 });
+    await handleHook('prompt-submit', inp({ prompt: 'hello' }), ctx());
+    const r = (await getRegistration('s1'))!;
+    expect(r).toMatchObject({ version: VERSION, protocol: PROTOCOL, key: 'k', pid: 42 });
+    const file = path.join(paths().sessionsDir, 's1.json');
+    const before = fs.statSync(file).mtimeMs;
+    await new Promise((res) => setTimeout(res, 20));
+    await handleHook('prompt-submit', inp({ prompt: 'again' }), ctx());
+    expect(fs.statSync(file).mtimeMs).toBe(before);
+  });
   it('/cc records the Claude config dir (CLAUDE_CONFIG_DIR, else ~/.claude)', async () => {
     const prev = process.env.CLAUDE_CONFIG_DIR;
     try {

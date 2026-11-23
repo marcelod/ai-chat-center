@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { assertSessionId, paths } from '../core/paths.js';
-import { getRegistration, isActive, listRegistrations, markDisconnected, sameConfigDir, updateRegistration } from '../core/registry.js';
+import { codeStamp, getRegistration, isActive, listRegistrations, markDisconnected, sameConfigDir, stampedByThisCode, updateRegistration } from '../core/registry.js';
 import { clearBusy, clearBusyIfOlder, isBusy } from '../core/busy.js';
 import { lookupClaudePid, type PidLookup } from './claudePid.js';
 import { drain, sweepClaimed } from '../core/inbox.js';
@@ -177,7 +177,7 @@ async function sessionSwitch(
   }
   if (refresh) {
     const tp = typeof input.transcript_path === 'string' && input.transcript_path ? { transcriptPath: input.transcript_path } : {};
-    await updateRegistration(sid, { pid, ...tp }, { ifConnectedAt: own.connectedAt });
+    await updateRegistration(sid, { pid, ...tp, ...codeStamp() }, { ifConnectedAt: own.connectedAt });
   }
 }
 
@@ -241,6 +241,14 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
 
   const first = await activeReg(sid);
   if (!first) return NOTHING;
+  if (!stampedByThisCode(first)) {
+    // The session runs this code (restarted after a plugin update): the hub may send to it again (R5-M1).
+    try {
+      await updateRegistration(sid, codeStamp(), { ifConnectedAt: first.connectedAt });
+    } catch (e) {
+      logError(e);
+    }
+  }
   if (event === 'stop') {
     // The turn has ended: before the lock, so a waiter that loses the lock still unblocks the holder. Only
     // a marker older than this process: the next turn may already have started and set its own.
@@ -254,7 +262,7 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
 
   /** Persists a pid found by a later lookup, unless the connection changed meanwhile. */
   const adopt = async (found: number) => {
-    await updateRegistration(sid, { pid: found }, { ifConnectedAt: first.connectedAt });
+    await updateRegistration(sid, { pid: found, ...codeStamp() }, { ifConnectedAt: first.connectedAt });
   };
   let pid = first.pid ?? null;
   if (pid === null && lookups === 0) {

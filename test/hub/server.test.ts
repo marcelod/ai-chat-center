@@ -6,7 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { createHub } from '../../src/hub/server.js';
-import { SessionDisconnectedError, type Provider } from '../../src/hub/provider.js';
+import { SessionDisconnectedError, SessionProtocolError, type Provider } from '../../src/hub/provider.js';
 import type { ProviderChange } from '../../src/shared/types.js';
 import { VERSION } from '../../src/core/version.js';
 
@@ -184,6 +184,16 @@ describe('api', () => {
     const u = await start(fakeProvider({ send: async (sid) => { throw new SessionDisconnectedError(sid); } }));
     const r = await req(u, '/api/sessions/s1/messages', { method: 'POST', headers: json, body: JSON.stringify({ text: 'x' }) });
     expect(r.status).toBe(409);
+    expect(JSON.parse(r.body)).toEqual({ error: 'session disconnected', code: 'session-disconnected' });
+  });
+  // Audit R5-M1: the app tells "restart this session" apart from "disconnected".
+  it('posting to a session of another protocol returns 409 with its code', async () => {
+    for (const direction of ['older', 'newer'] as const) {
+      const u = await start(fakeProvider({ send: async (sid) => { throw new SessionProtocolError(sid, direction); } }));
+      const r = await req(u, '/api/sessions/s1/messages', { method: 'POST', headers: json, body: JSON.stringify({ text: 'x' }) });
+      expect(r.status).toBe(409);
+      expect(JSON.parse(r.body)).toEqual({ error: `session runs ${direction === 'older' ? 'an older' : 'a newer'} version`, code: `session-${direction}-version` });
+    }
   });
   it('other errors return generic 500', async () => {
     const u = await start(fakeProvider({ send: async () => { throw new Error('secret detail ' + TOKEN); } }));

@@ -193,6 +193,27 @@ describe('ChatView', () => {
     expect(screen.getByTestId('typing')).toBeInTheDocument();
   });
 
+  // Audit R5-M1: a session still running another version of the plugin: the hub refuses; say how to fix it.
+  it('409 for a session of an older or newer version says to restart it, and restores the text', async () => {
+    const user = userEvent.setup();
+    const onSend = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error('409'), { status: 409, code: 'session-older-version' }))
+      .mockRejectedValueOnce(Object.assign(new Error('409'), { status: 409, code: 'session-newer-version' }));
+    setup({ onSend });
+    const box = screen.getByPlaceholderText('Message billing-api…');
+    await user.type(box, 'hello{Enter}');
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe(
+      'This session runs an older version of AI Chat Center. Restart it (exit and `claude --resume`) to send messages from the app.',
+    );
+    expect(screen.queryByText('This session is disconnected')).not.toBeInTheDocument();
+    expect(box).toHaveValue('hello');
+    await user.keyboard('{Enter}');
+    expect((await screen.findByRole('alert')).textContent).toBe('This session runs a newer version of AI Chat Center than this app. Type /cc in that session to update the app, then send again.');
+    expect(box).toHaveValue('hello');
+  });
+
   it('409 does not overwrite text typed since', async () => {
     const user = userEvent.setup();
     let reject: (e: unknown) => void = () => {};
