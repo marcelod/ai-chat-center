@@ -472,7 +472,7 @@ async function recordDelivered(sid, ids) {
 }
 
 // src/core/version.ts
-var VERSION = "0.3.2";
+var VERSION = "0.4.0";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -586,6 +586,8 @@ function isCcCommand(prompt) {
   if (arg === "off") return "off";
   if (arg === "answers on") return "answers-on";
   if (arg === "answers off") return "answers-off";
+  if (arg === "window on") return "window-on";
+  if (arg === "window off") return "window-off";
   return "unknown";
 }
 

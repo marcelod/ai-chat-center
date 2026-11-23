@@ -729,6 +729,83 @@ describe('answers command and turn origin', () => {
     expect(out(await handleHook('prompt-submit', inp({ prompt: '/cc window on' }), none)).systemMessage).toMatch(/Nenhum Chrome, Chromium ou Edge encontrado/);
   });
 
+  describe('/cc with the openWindow flag', () => {
+    const HUB = 'http://127.0.0.1:7777/#token=tok-secret';
+    const CODE = 'ab12'.repeat(16);
+    const spawned: { cmd: string; args: string[] }[] = [];
+    const fetched: string[] = [];
+    const winCtx = (o: { browser?: string | null; status?: number } = {}) => ({
+      ensureHub: async () => HUB,
+      resolvePid: async (): Promise<number | null> => 42,
+      findBrowser: () => (o.browser === undefined ? '/usr/bin/chromium' : o.browser),
+      fetch: (async (url: string) => {
+        fetched.push(url);
+        return new Response(JSON.stringify({ code: CODE }), { status: o.status ?? 200 });
+      }) as never,
+      spawn: ((cmd: string, args: string[]) => {
+        spawned.push({ cmd, args });
+        return { unref() {}, on() { return this; } };
+      }) as never,
+    });
+    beforeEach(() => {
+      spawned.length = 0;
+      fetched.length = 0;
+    });
+    const hookLog = () => {
+      try {
+        return fs.readFileSync(path.join(paths().logDir, 'hook.log'), 'utf8');
+      } catch {
+        return '';
+      }
+    };
+
+    it('flag off: /cc opens no window', async () => {
+      const r = await handleHook('prompt-submit', inp({ prompt: '/cc' }), winCtx());
+      expect(out(r).hookSpecificOutput.additionalContext).toContain('AI Chat Center: connected');
+      expect(fetched).toHaveLength(0);
+      expect(spawned).toHaveLength(0);
+    });
+
+    it('flag on: /cc opens the app window at #pair=<code>, never with the token, and still shows the link', async () => {
+      await saveConfig({ openWindow: true });
+      const r = await handleHook('prompt-submit', inp({ prompt: '/ai-chat-center:cc' }), winCtx());
+      expect(out(r).systemMessage).toBe(`AI Chat Center is ready: ${HUB}`);
+      expect(fetched).toEqual(['http://127.0.0.1:7777/api/pair-code']);
+      expect(spawned).toEqual([{ cmd: '/usr/bin/chromium', args: [`--app=http://127.0.0.1:7777/#pair=${CODE}`, '--new-window'] }]);
+      expect(JSON.stringify(spawned)).not.toContain('tok-secret');
+      expect(out(r).hookSpecificOutput.additionalContext).not.toContain('tok-secret');
+      expect(hookLog()).not.toContain('tok-secret');
+    });
+
+    it('flag on, no browser: no window, no pair code, same reply', async () => {
+      await saveConfig({ openWindow: true });
+      const r = await handleHook('prompt-submit', inp({ prompt: '/cc' }), winCtx({ browser: null }));
+      expect(out(r).hookSpecificOutput.additionalContext).toContain('AI Chat Center: connected');
+      expect(fetched).toHaveLength(0);
+      expect(spawned).toHaveLength(0);
+    });
+
+    it('flag on, hub refuses the pair code: /cc still connects, the failure goes to hook.log only', async () => {
+      await saveConfig({ openWindow: true });
+      const r = await handleHook('prompt-submit', inp({ prompt: '/cc' }), winCtx({ status: 401 }));
+      expect(r.exitCode).toBe(0);
+      expect(out(r).systemMessage).toBe(`AI Chat Center is ready: ${HUB}`);
+      expect(out(r).hookSpecificOutput.additionalContext).toContain('AI Chat Center: connected');
+      expect(out(r).hookSpecificOutput.additionalContext).not.toMatch(/window|401/i);
+      expect(spawned).toHaveLength(0);
+      expect(hookLog()).toMatch(/app window.*401/);
+      expect(hookLog()).not.toContain('tok-secret');
+    });
+
+    it('flag on, hub failed to start: no window attempt', async () => {
+      await saveConfig({ openWindow: true });
+      const c = { ...winCtx(), ensureHub: async () => { throw new Error('boom'); } };
+      await handleHook('prompt-submit', inp({ prompt: '/cc' }), c);
+      expect(fetched).toHaveLength(0);
+      expect(spawned).toHaveLength(0);
+    });
+  });
+
   it('/cc window on|off in an active session records the typed turn like answers', async () => {
     await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
     await setTurnOrigin('s1', 'app');

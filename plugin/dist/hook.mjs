@@ -2,8 +2,8 @@ import { createRequire as __acc_createRequire } from 'node:module';
 const require = __acc_createRequire(import.meta.url);
 
 // src/hooks/hook.ts
-import fs5 from "node:fs";
-import path7 from "node:path";
+import fs6 from "node:fs";
+import path8 from "node:path";
 import crypto5 from "node:crypto";
 
 // src/core/paths.ts
@@ -257,7 +257,7 @@ async function clearWaiting(sid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.3.2";
+var VERSION = "0.4.0";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -508,7 +508,7 @@ var LANGS = ["en", "pt-BR"];
 async function loadConfig() {
   const c = await readJson(paths().config);
   const language = LANGS.includes(c?.language) ? c.language : "en";
-  return { language, answersFromApp: c?.answersFromApp === true };
+  return { language, answersFromApp: c?.answersFromApp === true, openWindow: c?.openWindow === true };
 }
 async function saveConfig(patch) {
   const next = { ...await loadConfig(), ...patch };
@@ -521,9 +521,12 @@ var en_default = {
   hook: {
     ready: "AI Chat Center is ready: {url}",
     hubFailed: "AI Chat Center: the hub failed to start. See {log}",
-    unknownArg: "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on or /ai-chat-center:cc answers off.",
+    unknownArg: "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on or /ai-chat-center:cc window off.",
     answersOn: "AI Chat Center: you can now answer multiple-choice questions from the app, including confirmations. To turn off: /ai-chat-center:cc answers off",
-    answersOff: "AI Chat Center: multiple-choice questions are answered only in the terminal again."
+    answersOff: "AI Chat Center: multiple-choice questions are answered only in the terminal again.",
+    windowOn: "AI Chat Center: the app will open in its own window when you connect. To turn off: /ai-chat-center:cc window off",
+    windowOff: "AI Chat Center: the app will no longer open in its own window.",
+    windowNoBrowser: "No Chrome, Chromium or Edge found: the link is still shown."
   },
   ui: {
     rename: {
@@ -641,9 +644,12 @@ var pt_BR_default = {
   hook: {
     ready: "AI Chat Center pronto: {url}",
     hubFailed: "AI Chat Center: o hub n\xE3o iniciou. Veja {log}",
-    unknownArg: "AI Chat Center: argumento desconhecido. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on ou /ai-chat-center:cc answers off.",
+    unknownArg: "AI Chat Center: argumento desconhecido. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on ou /ai-chat-center:cc window off.",
     answersOn: "AI Chat Center: agora voc\xEA pode responder pelo app as perguntas de m\xFAltipla escolha, inclusive confirma\xE7\xF5es. Para desligar: /ai-chat-center:cc answers off",
-    answersOff: "AI Chat Center: perguntas de m\xFAltipla escolha voltam a ser respondidas s\xF3 no terminal."
+    answersOff: "AI Chat Center: perguntas de m\xFAltipla escolha voltam a ser respondidas s\xF3 no terminal.",
+    windowOn: "AI Chat Center: o app vai abrir em janela pr\xF3pria ao conectar. Para desligar: /ai-chat-center:cc window off",
+    windowOff: "AI Chat Center: o app n\xE3o abre mais em janela pr\xF3pria.",
+    windowNoBrowser: "Nenhum Chrome, Chromium ou Edge encontrado: o link continua sendo mostrado."
   },
   ui: {
     rename: {
@@ -782,6 +788,8 @@ function isCcCommand(prompt) {
   if (arg === "off") return "off";
   if (arg === "answers on") return "answers-on";
   if (arg === "answers off") return "answers-off";
+  if (arg === "window on") return "window-on";
+  if (arg === "window off") return "window-off";
   return "unknown";
 }
 
@@ -818,9 +826,88 @@ async function resolveClaudePid(sessionId, opts = {}) {
   return r.ok ? r.pid : null;
 }
 
+// src/hooks/openWindow.ts
+import fs5 from "node:fs";
+import path7 from "node:path";
+import { spawn as nodeSpawn } from "node:child_process";
+var LINUX_NAMES = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge", "microsoft-edge-stable"];
+var MAC_APPS = [
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+];
+var WIN_EXES = [
+  ["Google", "Chrome", "Application", "chrome.exe"],
+  ["Microsoft", "Edge", "Application", "msedge.exe"]
+];
+var WIN_BASES = ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"];
+function findBrowser(env = process.env, platform = process.platform, exists = fs5.existsSync) {
+  const ok = (p) => {
+    try {
+      return exists(p);
+    } catch {
+      return false;
+    }
+  };
+  let candidates;
+  if (platform === "darwin") candidates = MAC_APPS;
+  else if (platform === "win32") {
+    const bases = WIN_BASES.map((k) => env[k]).filter((b) => !!b && path7.win32.isAbsolute(b));
+    candidates = WIN_EXES.flatMap((exe) => bases.map((b) => path7.win32.join(b, ...exe)));
+  } else {
+    const dirs = (env.PATH ?? "").split(path7.posix.delimiter).filter((d) => path7.posix.isAbsolute(d));
+    candidates = LINUX_NAMES.flatMap((n) => dirs.map((d) => path7.posix.join(d, n)));
+  }
+  return candidates.find(ok) ?? null;
+}
+function openAppWindow(browser, url, deps = {}) {
+  const spawn2 = deps.spawn ?? nodeSpawn;
+  const platform = deps.platform ?? process.platform;
+  try {
+    const child = spawn2(browser, [`--app=${url}`, "--new-window"], {
+      detached: true,
+      stdio: "ignore",
+      shell: false,
+      ...platform === "win32" ? { windowsHide: true } : {}
+    });
+    child.on?.("error", () => {
+    });
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+var CODE_RE = /^[0-9a-f]{64}$/;
+async function launchAppWindow(hubUrl, deps = {}) {
+  const browser = (deps.findBrowser ?? (() => findBrowser()))();
+  if (!browser) return false;
+  const u = new URL(hubUrl);
+  const token = new URLSearchParams(u.hash.slice(1)).get("token");
+  if (u.protocol !== "http:" || u.hostname !== "127.0.0.1" || !token) throw new Error("app window: unexpected hub url");
+  const doFetch = deps.fetch ?? fetch;
+  const res = await doFetch(`${u.origin}/api/pair-code`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(deps.timeoutMs ?? 2e3)
+  });
+  if (!res.ok) throw new Error(`app window: pair-code answered ${res.status}`);
+  let code2;
+  try {
+    code2 = (await res.json())?.code;
+  } catch {
+    throw new Error("app window: pair-code answer is not JSON");
+  }
+  if (typeof code2 !== "string" || !CODE_RE.test(code2)) throw new Error("app window: pair-code answer has no valid code");
+  if (!openAppWindow(browser, `${u.origin}/#pair=${code2}`, deps)) throw new Error(`app window: could not start ${browser}`);
+  return true;
+}
+
 // src/hooks/hook.ts
 var MAX_PREVIOUS_KEYS = 20;
-var UNKNOWN_ARG = "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on or /ai-chat-center:cc answers off.";
+var UNKNOWN_ARG = "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on or /ai-chat-center:cc window off.";
+var WINDOW_ON = "AI Chat Center: opening the app in its own window is ON";
+var WINDOW_OFF = "AI Chat Center: opening the app in its own window is OFF";
 var ANSWERS_ON = "AI Chat Center: answering questions from the app is ON";
 var ANSWERS_OFF = "AI Chat Center: answering questions from the app is OFF";
 var CONNECTED = "AI Chat Center: connected";
@@ -835,7 +922,7 @@ var output = (context, systemMessage) => ({
 async function tightenHome() {
   try {
     await ensureDir(paths().home);
-    await fs5.promises.chmod(paths().home, DIR_MODE);
+    await fs6.promises.chmod(paths().home, DIR_MODE);
   } catch {
   }
 }
@@ -862,8 +949,8 @@ async function connect(input, resolve, ctx) {
   await clearBusy(sid);
   await clearWaiting(sid);
   await clearTurnOrigin(sid);
-  await fs5.promises.rm(paths().questionsDir(sid), { recursive: true, force: true });
-  const { language } = await loadConfig();
+  await fs6.promises.rm(paths().questionsDir(sid), { recursive: true, force: true });
+  const { language, openWindow } = await loadConfig();
   let status;
   let shown;
   const notices = [];
@@ -872,17 +959,30 @@ async function connect(input, resolve, ctx) {
     logError(m);
   };
   try {
-    shown = t(language, "hook.ready", { url: await ctx.ensureHub(notice) });
+    const url = await ctx.ensureHub(notice);
+    shown = t(language, "hook.ready", { url });
     status = CONNECTED;
+    if (openWindow) await openWindowQuietly(url, ctx);
   } catch (e) {
     logError(e);
-    const log = path7.join(paths().logDir, "hook.log");
+    const log = path8.join(paths().logDir, "hook.log");
     status = `AI Chat Center: the hub failed to start. See ${log}`;
     shown = t(language, "hook.hubFailed", { log });
   }
   const lines = [status, `AI Chat Center key: ${reg.key}`, ...notices];
   if (pid === null) lines.push(PID_UNKNOWN);
   return output(lines.join("\n"), [shown, ...notices].join("\n"));
+}
+async function openWindowQuietly(url, ctx) {
+  try {
+    await launchAppWindow(url, {
+      findBrowser: ctx.findBrowser ?? (() => findBrowser()),
+      ...ctx.fetch ? { fetch: ctx.fetch } : {},
+      ...ctx.spawn ? { spawn: ctx.spawn } : {}
+    });
+  } catch (e) {
+    logError(e instanceof Error ? e.message : String(e));
+  }
 }
 async function handleHook(event, input, ctx) {
   const nothing = { exitCode: 0 };
@@ -896,9 +996,16 @@ async function handleHook(event, input, ctx) {
   if (event === "prompt-submit") {
     const cmd = isCcCommand(input.prompt);
     if (cmd === "unknown") return output(UNKNOWN_ARG, t((await loadConfig()).language, "hook.unknownArg"));
-    const answers = cmd === "answers-on" || cmd === "answers-off";
     let answersResult;
-    if (answers) {
+    if (cmd === "window-on" || cmd === "window-off") {
+      const on = cmd === "window-on";
+      const { language } = await saveConfig({ openWindow: on });
+      const find = ctx.findBrowser ?? (() => findBrowser());
+      const note = on && find() === null ? `
+${t(language, "hook.windowNoBrowser")}` : "";
+      answersResult = output(on ? WINDOW_ON : WINDOW_OFF, t(language, on ? "hook.windowOn" : "hook.windowOff") + note);
+    }
+    if (cmd === "answers-on" || cmd === "answers-off") {
       const on = cmd === "answers-on";
       const { language } = await saveConfig({ answersFromApp: on });
       answersResult = output(on ? ANSWERS_ON : ANSWERS_OFF, t(language, on ? "hook.answersOn" : "hook.answersOff"));
@@ -933,9 +1040,9 @@ async function readStdin() {
 function logError(e) {
   try {
     const dir = paths().logDir;
-    fs5.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
-    fs5.appendFileSync(
-      path7.join(dir, "hook.log"),
+    fs6.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+    fs6.appendFileSync(
+      path8.join(dir, "hook.log"),
       `${(/* @__PURE__ */ new Date()).toISOString()} ${e instanceof Error ? e.stack ?? e.message : String(e)}
 `
     );

@@ -5,7 +5,7 @@ const require = __acc_createRequire(import.meta.url);
 import fs10 from "node:fs/promises";
 import fsSync from "node:fs";
 import path9 from "node:path";
-import crypto7 from "node:crypto";
+import crypto8 from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 // src/core/paths.ts
@@ -415,7 +415,7 @@ async function clearDelivered(sid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.3.2";
+var VERSION = "0.4.0";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -605,6 +605,8 @@ function isCcCommand(prompt) {
   if (arg === "off") return "off";
   if (arg === "answers on") return "answers-on";
   if (arg === "answers off") return "answers-off";
+  if (arg === "window on") return "window-on";
+  if (arg === "window off") return "window-off";
   return "unknown";
 }
 
@@ -779,7 +781,7 @@ var TranscriptParser = class {
       const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(content)?.[1]?.trim();
       const cc = isCcCommand(args ? `${cmd} ${args}` : cmd);
       if (cc === "on" || cc === "off") return [{ kind: "notice", id: uuid, ts, code: cc === "on" ? "connected" : "disconnected" }];
-      if (cc === "unknown" || cc === "answers-on" || cc === "answers-off") return [];
+      if (cc === "unknown" || cc === "answers-on" || cc === "answers-off" || cc === "window-on" || cc === "window-off") return [];
     }
     const shellIn = tag(content, "bash-input");
     if (shellIn !== void 0) {
@@ -1272,14 +1274,14 @@ var ClaudeCodeProvider = class {
 import http from "node:http";
 import fs9 from "node:fs/promises";
 import path8 from "node:path";
-import crypto6 from "node:crypto";
+import crypto7 from "node:crypto";
 
 // src/core/config.ts
 var LANGS = ["en", "pt-BR"];
 async function loadConfig() {
   const c = await readJson(paths().config);
   const language = LANGS.includes(c?.language) ? c.language : "en";
-  return { language, answersFromApp: c?.answersFromApp === true };
+  return { language, answersFromApp: c?.answersFromApp === true, openWindow: c?.openWindow === true };
 }
 async function saveConfig(patch) {
   const next = { ...await loadConfig(), ...patch };
@@ -1290,6 +1292,40 @@ async function saveConfig(patch) {
 // src/core/presence.ts
 async function writePresence(clients) {
   await writeJsonAtomic(paths().presenceFile, { clients, pid: process.pid, at: Date.now() });
+}
+
+// src/hub/pairing.ts
+import crypto6 from "node:crypto";
+var PAIR_TTL_MS = 6e4;
+var MAX_PENDING = 5;
+var CODE_RE = /^[0-9a-f]{64}$/;
+function createPairing(now = Date.now) {
+  const pending = /* @__PURE__ */ new Map();
+  const prune2 = () => {
+    const t = now();
+    for (const [c, exp] of pending) if (exp <= t) pending.delete(c);
+  };
+  return {
+    issue() {
+      prune2();
+      while (pending.size >= MAX_PENDING) pending.delete(pending.keys().next().value);
+      const code2 = crypto6.randomBytes(32).toString("hex");
+      pending.set(code2, now() + PAIR_TTL_MS);
+      return code2;
+    },
+    redeem(code2) {
+      prune2();
+      if (typeof code2 !== "string" || !CODE_RE.test(code2)) return false;
+      const given = Buffer.from(code2);
+      let match = null;
+      for (const c of pending.keys()) {
+        if (crypto6.timingSafeEqual(given, Buffer.from(c))) match = c;
+      }
+      if (match === null) return false;
+      pending.delete(match);
+      return true;
+    }
+  };
 }
 
 // src/hub/server.ts
@@ -1329,7 +1365,7 @@ function tokenOk(given, expected) {
   const a = Buffer.from(given);
   const b = Buffer.from(expected);
   if (a.length !== b.length) return false;
-  return crypto6.timingSafeEqual(a, b);
+  return crypto7.timingSafeEqual(a, b);
 }
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -1374,6 +1410,7 @@ async function createHub(opts) {
   const log = opts.log ?? (() => {
   });
   let port = opts.port;
+  const pairing = createPairing();
   const clients = /* @__PURE__ */ new Set();
   let pollTimer = null;
   let heartbeat = null;
@@ -1506,6 +1543,12 @@ data: ${JSON.stringify(c)}
       const proof = healthProof(token, challenge, port, process.pid, VERSION);
       return sendJson(res, 200, { ok: true, version: VERSION, pid: process.pid, proof });
     }
+    if (p === "/api/pair" && method === "POST") {
+      const body = await readJsonBody(req);
+      const code2 = body && typeof body === "object" && !Array.isArray(body) ? body.code : void 0;
+      if (typeof code2 !== "string" || !pairing.redeem(code2)) throw new HttpError(400, "invalid code");
+      return sendJson(res, 200, { token });
+    }
     const bearer = /^Bearer (.+)$/.exec(String(req.headers.authorization ?? ""))?.[1];
     const given = p === "/api/stream" ? bearer ?? url.searchParams.get("token") : bearer;
     if (!tokenOk(given, token)) return sendJson(res, 401, { error: "unauthorized" });
@@ -1521,6 +1564,10 @@ data: ${JSON.stringify(c)}
         if (clients.size === 0) stopTimers();
       });
       return;
+    }
+    if (p === "/api/pair-code" && method === "POST") {
+      req.resume();
+      return sendJson(res, 200, { code: pairing.issue() });
     }
     if (p === "/api/sessions" && method === "GET") return sendJson(res, 200, await provider.listSessions());
     if (p === "/api/config" && method === "GET") return sendJson(res, 200, await loadConfig());
@@ -1690,14 +1737,14 @@ async function prune(log) {
 async function rotateToken() {
   const file = paths().token;
   await ensureDir(path9.dirname(file));
-  const t = crypto7.randomBytes(32).toString("hex");
+  const t = crypto8.randomBytes(32).toString("hex");
   await writeFileAtomic600(file, t);
   await fs10.chmod(file, 384).catch(() => {
   });
   return t;
 }
 async function writeFileAtomic600(file, data) {
-  const tmp = `${file}.${process.pid}.${crypto7.randomUUID()}.tmp`;
+  const tmp = `${file}.${process.pid}.${crypto8.randomUUID()}.tmp`;
   try {
     await fs10.writeFile(tmp, data, { mode: 384 });
     await withFsRetry(() => fs10.rename(tmp, file));

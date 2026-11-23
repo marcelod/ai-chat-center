@@ -32,11 +32,21 @@ Clean up: stop the driver (`kill %1`), stop the hub (delete `$AI_CHAT_CENTER_HOM
 
 Record the result (Claude Code version, model, verdict) in [e2e-results.md](e2e-results.md).
 
-## 3. Windows
+## 3. App window (manual, Linux)
+
+For any release that changes `/cc window on|off`, the pairing code or the browser launch, check once on Linux with Chrome or Chromium installed (same isolated `AI_CHAT_CENTER_HOME`/`AI_CHAT_CENTER_PORT` as above):
+
+- `/ai-chat-center:cc window on` confirms the setting and does not say that no browser was found.
+- `/cc` connects, shows the link as usual and opens a new `--app` window (no tabs, no address bar) that loads the app without asking for the link.
+- While the window is open, `ps -eo args | grep -- --app=` shows `#pair=<code>`, never `#token=`; opening that same `#pair=` URL again (or after 60 seconds) does not log in.
+- `/ai-chat-center:cc window off`, then `/cc`: no window opens.
+- With the flag on, on a machine or container with no compatible browser, `/cc` still connects and only shows the link; `logs/hook.log` holds no token.
+
+## 4. Windows
 
 Run [windows-checklist.md](windows-checklist.md) once on a Windows machine for any release that changes the hooks, the hub start or the waiter.
 
-## 4. Tag
+## 5. Tag
 
 Bump the version (see "Releasing" in the README) for every release that changes the hub API, such as the question endpoint: a running hub of an older version is replaced only when the version differs, and an older hub without the endpoint would answer the app's question POSTs with 404.
 

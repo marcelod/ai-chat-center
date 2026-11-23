@@ -33,6 +33,7 @@ import { isCcCommand } from '../core/ccCommand.js';
 
 export { isCcCommand };
 import { resolveClaudePid } from './claudePid.js';
+import { findBrowser, launchAppWindow } from './openWindow.js';
 
 export type HookEvent = 'prompt-submit' | 'notification';
 export type HookInput = {
@@ -49,8 +50,11 @@ export interface HookContext {
   ensureHub: (notice?: (msg: string) => void) => Promise<string>;
   /** Resolves the claude process pid of a session, or null. Default: resolveClaudePid. */
   resolvePid?: (sessionId: string) => Promise<number | null>;
-  /** Path of a Chrome, Chromium or Edge binary, or null. */
+  /** Path of a Chrome, Chromium or Edge binary, or null. Default: findBrowser (src/hooks/openWindow.ts). */
   findBrowser?: () => string | null;
+  /** For tests: the pair-code request and the browser launch. Default: global fetch, child_process.spawn. */
+  fetch?: typeof fetch;
+  spawn?: typeof import('node:child_process').spawn;
 }
 export interface HookResult {
   stdout?: string;
@@ -110,7 +114,7 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
   await clearTurnOrigin(sid);
   // A question left by a hook killed without cleanup would keep the session waiting in the app.
   await fs.promises.rm(paths().questionsDir(sid), { recursive: true, force: true });
-  const { language } = await loadConfig();
+  const { language, openWindow } = await loadConfig();
   // The token URL is shown to the user only (systemMessage). The model gets the key and a status
   // line: the token must not end up in the model context or be repeated in its reply.
   let status: string;
@@ -121,8 +125,10 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
     logError(m);
   };
   try {
-    shown = t(language, 'hook.ready', { url: await ctx.ensureHub(notice) });
+    const url = await ctx.ensureHub(notice);
+    shown = t(language, 'hook.ready', { url });
     status = CONNECTED;
+    if (openWindow) await openWindowQuietly(url, ctx);
   } catch (e) {
     // Keep the registration: the hub will show the session once it is up.
     logError(e);
@@ -133,6 +139,20 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
   const lines = [status, `AI Chat Center key: ${reg.key}`, ...notices];
   if (pid === null) lines.push(PID_UNKNOWN);
   return output(lines.join('\n'), [shown, ...notices].join('\n'));
+}
+
+/** Opens the app window (spec 2026-11-23-app-window); never fails or delays the /cc reply beyond a short timeout. */
+async function openWindowQuietly(url: string, ctx: HookContext): Promise<void> {
+  try {
+    await launchAppWindow(url, {
+      findBrowser: ctx.findBrowser ?? (() => findBrowser()),
+      ...(ctx.fetch ? { fetch: ctx.fetch } : {}),
+      ...(ctx.spawn ? { spawn: ctx.spawn } : {}),
+    });
+  } catch (e) {
+    // Messages from launchAppWindow never carry the token; log the message only (no stack, no url).
+    logError(e instanceof Error ? e.message : String(e));
+  }
 }
 
 export async function handleHook(event: HookEvent, input: HookInput, ctx: HookContext): Promise<HookResult> {
@@ -152,8 +172,7 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
     if (cmd === 'window-on' || cmd === 'window-off') {
       const on = cmd === 'window-on';
       const { language } = await saveConfig({ openWindow: on });
-      // Task 3: default to the real findBrowser (src/hooks/browser.ts) instead of this stub.
-      const find = ctx.findBrowser ?? (() => null);
+      const find = ctx.findBrowser ?? (() => findBrowser());
       const note = on && find() === null ? `\n${t(language, 'hook.windowNoBrowser')}` : '';
       answersResult = output(on ? WINDOW_ON : WINDOW_OFF, t(language, on ? 'hook.windowOn' : 'hook.windowOff') + note);
     }
