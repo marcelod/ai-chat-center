@@ -10,6 +10,8 @@
   "UserPromptSubmit": [{ "hooks": [
     { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "prompt-submit"] },
     { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/waiter.mjs", "prompt"], "asyncRewake": true, "timeout": 86400 } ] }],
+  "PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [
+    { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/ask.mjs", "pre-tool"], "timeout": 86400, "statusMessage": "AI Chat Center: answer in the app (Esc to cancel)" } ] }],
   "Notification": [{ "matcher": "permission_prompt|elicitation_dialog|elicitation_url_dialog|agent_needs_input", "hooks": [
     { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs", "notification"] } ] }]
 }}

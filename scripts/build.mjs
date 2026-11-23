@@ -15,6 +15,7 @@ await fs.mkdir(dist, { recursive: true });
 await build({
   entryPoints: {
     hook: path.join(root, 'src/bin/hook.ts'),
+    ask: path.join(root, 'src/bin/ask.ts'),
     waiter: path.join(root, 'src/bin/waiter.ts'),
     hub: path.join(root, 'src/bin/hub.ts'),
   },

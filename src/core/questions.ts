@@ -67,6 +67,11 @@ export async function removePending(sid: string, toolUseId: string): Promise<voi
   await removeFile(answerFile(sid, toolUseId));
 }
 
+/** Deletes only the answer file (an invalid answer), so the question stays pending for a new one. */
+export async function removeAnswer(sid: string, toolUseId: string): Promise<void> {
+  await removeFile(answerFile(sid, toolUseId));
+}
+
 export type AnswerFile = { answers: Record<string, string> } | { release: true };
 
 /** Creates the answer file exclusively, so of two concurrent answers exactly one wins. Needs a pending question. */

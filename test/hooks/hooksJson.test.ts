@@ -8,7 +8,7 @@ type Hook = { type: string; command: string; args?: string[]; shell?: string; as
 type Group = { matcher?: string; hooks: Hook[] };
 const cfg = JSON.parse(fs.readFileSync('plugin/hooks/hooks.json', 'utf8')) as { hooks: Record<string, Group[]> };
 const all = Object.values(cfg.hooks).flat().flatMap((g) => g.hooks);
-const SCRIPT = /^\$\{CLAUDE_PLUGIN_ROOT\}\/dist\/(hook|waiter)\.mjs$/;
+const SCRIPT = /^\$\{CLAUDE_PLUGIN_ROOT\}\/dist\/(hook|waiter|ask)\.mjs$/;
 const event = (h: Hook) => h.args?.[1];
 
 /** What Claude Code does with an exec-form hook: substitute the placeholder, spawn `command` with `args`, no shell. */
@@ -82,6 +82,17 @@ describe('hooks.json', () => {
 
   it('Notification runs the hook bundle', () => {
     expect(cfg.hooks.Notification.flatMap((g) => g.hooks).map((h) => h.args)).toEqual([['${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs', 'notification']]);
+  });
+
+  // AskUserQuestion answered from the app: a synchronous PreToolUse hook that may wait up to 24 h.
+  it('PreToolUse runs `ask pre-tool` on AskUserQuestion, synchronously, with a 24 h timeout', () => {
+    expect(cfg.hooks.PreToolUse.map((g) => g.matcher)).toEqual(['AskUserQuestion']);
+    const hooks = cfg.hooks.PreToolUse.flatMap((g) => g.hooks);
+    expect(hooks).toHaveLength(1);
+    expect(hooks[0].args).toEqual(['${CLAUDE_PLUGIN_ROOT}/dist/ask.mjs', 'pre-tool']);
+    expect(hooks[0].timeout).toBe(86400);
+    expect(hooks[0].async).toBeUndefined();
+    expect(hooks[0].asyncRewake).toBeUndefined();
   });
 
   it('there is no synchronous session-start hook any more', () => {
