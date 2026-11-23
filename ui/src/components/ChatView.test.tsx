@@ -40,6 +40,7 @@ function setup(
     events: ChatEvent[];
     pending: PendingMessage[];
     onSend: (text: string) => Promise<void>;
+    onRename: (name: string) => Promise<void>;
   }> = {},
 ) {
   const onSend = props.onSend ?? vi.fn(async () => {});
@@ -51,6 +52,7 @@ function setup(
         pending={p.pending ?? []}
         loading={false}
         onSend={onSend}
+        onRename={p.onRename}
         onBack={() => {}}
       />
     </LangProvider>
@@ -313,5 +315,60 @@ describe('ChatView', () => {
       events: [{ kind: 'question', id: 'q1', ts: ts(5), toolUseId: 'tu1', questions }],
     });
     expect(screen.getAllByText('Pick one?')).toHaveLength(1);
+  });
+
+  describe('rename', () => {
+    it('opens an input from the pencil and saves on Enter', async () => {
+      const onRename = vi.fn(async () => {});
+      setup({ onRename });
+      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      const input = screen.getByRole('textbox', { name: 'Rename session' });
+      expect(input).toHaveValue('billing-api');
+      expect(input).toHaveFocus();
+      await userEvent.clear(input);
+      await userEvent.type(input, 'Novo{Enter}');
+      expect(onRename).toHaveBeenCalledWith('Novo');
+    });
+
+    it('Escape cancels without saving', async () => {
+      const onRename = vi.fn(async () => {});
+      setup({ onRename });
+      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      await userEvent.type(screen.getByRole('textbox', { name: 'Rename session' }), 'x{Escape}');
+      expect(onRename).not.toHaveBeenCalled();
+      expect(screen.queryByRole('textbox', { name: 'Rename session' })).not.toBeInTheDocument();
+    });
+
+    it('saves an empty name as "" to restore the original', async () => {
+      const onRename = vi.fn(async () => {});
+      setup({ onRename });
+      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      await userEvent.clear(screen.getByRole('textbox', { name: 'Rename session' }));
+      await userEvent.keyboard('{Enter}');
+      expect(onRename).toHaveBeenCalledWith('');
+    });
+
+    it('shows an error and keeps the input when saving fails', async () => {
+      const onRename = vi.fn(async () => {
+        throw new Error('boom');
+      });
+      setup({ onRename });
+      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      await userEvent.type(screen.getByRole('textbox', { name: 'Rename session' }), 'x{Enter}');
+      expect(await screen.findByText("Couldn't rename")).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: 'Rename session' })).toBeInTheDocument();
+    });
+
+    it('limits the length and shows the original name as a title', () => {
+      setup({ session: session({ name: 'Custom', originalName: 'billing-api' }) });
+      expect(screen.getByRole('heading', { name: 'Custom' })).toHaveAttribute('title', 'billing-api');
+    });
+
+    it('opens by clicking the name', async () => {
+      setup({ onRename: vi.fn(async () => {}) });
+      await userEvent.click(screen.getByRole('heading', { name: 'billing-api' }));
+      const input = screen.getByRole('textbox', { name: 'Rename session' });
+      expect(input).toHaveAttribute('maxlength', '80');
+    });
   });
 });

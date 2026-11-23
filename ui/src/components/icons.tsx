@@ -83,3 +83,9 @@ export const SendIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" />
   </svg>
 );
+export const PencilIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z" />
+    <path d="m13.5 6.5 4 4" />
+  </svg>
+);

@@ -7,6 +7,10 @@
     "answersOff": "AI Chat Center: multiple-choice questions are answered only in the terminal again."
   },
   "ui": {
+    "rename": {
+      "label": "Rename session",
+      "failed": "Couldn't rename"
+    },
     "title": "AI Chat Center",
     "search": "Search by name or folder",
     "selectConversation": "Select a conversation",

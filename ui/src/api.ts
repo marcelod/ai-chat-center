@@ -185,6 +185,8 @@ export async function answerQuestion(sid: string, toolUseId: string, answers: Re
 export async function releaseQuestion(sid: string, toolUseId: string): Promise<void> {
   await request<unknown>(questionPath(sid, toolUseId), { method: 'POST', body: JSON.stringify({ release: true }) });
 }
+export const renameSession = (sid: string, name: string) =>
+  request<{ name: string }>(`/api/sessions/${encodeURIComponent(sid)}/name`, { method: 'PUT', body: JSON.stringify({ name }) });
 export const getConfig = () => request<UiConfig>('/api/config');
 export const setConfig = (c: Pick<UiConfig, 'language'>) =>
   request<UiConfig>('/api/config', { method: 'PUT', body: JSON.stringify(c) });

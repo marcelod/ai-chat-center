@@ -70,6 +70,9 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
             answersFromApp={answersFromApp}
             onAnswer={(id, answers) => api.answerQuestion(selected.sessionId, id, answers)}
             onRelease={(id) => api.releaseQuestion(selected.sessionId, id)}
+            onRename={async (name) => {
+              await api.renameSession(selected.sessionId, name);
+            }}
             onBack={() => select(null)}
           />
         ) : (

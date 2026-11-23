@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { ChatEvent, SessionView } from '@shared/types';
 import { formatTime, initials } from '../format';
 import { useLang, useT } from '../i18n';
@@ -6,7 +6,7 @@ import type { PendingMessage } from '../useLiveSessions';
 import { ActionsGroup } from './ActionsGroup';
 import { QuestionCard } from './QuestionCard';
 import { Composer } from './Composer';
-import { BackIcon, WarningIcon } from './icons';
+import { BackIcon, PencilIcon, WarningIcon } from './icons';
 import { AssistantBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
 
 type Props = {
@@ -19,6 +19,7 @@ type Props = {
   answersFromApp?: boolean;
   onAnswer?: (toolUseId: string, answers: Record<string, string>) => Promise<void>;
   onRelease?: (toolUseId: string) => Promise<void>;
+  onRename?: (name: string) => Promise<void>;
   onBack: () => void;
 };
 
@@ -67,7 +68,98 @@ function Typing() {
   );
 }
 
-export function ChatView({ session, events, pending, loading, onSend, onRetry, onBack, answersFromApp = false, onAnswer, onRelease }: Props) {
+function SessionTitle({ session, onRename }: { session: SessionView; onRename?: (name: string) => Promise<void> }) {
+  const t = useT();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState('');
+  const [failed, setFailed] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const done = useRef(false);
+
+  const open = () => {
+    if (!onRename) return;
+    done.current = false;
+    setValue(session.name);
+    setFailed(false);
+    setEditing(true);
+  };
+  useLayoutEffect(() => {
+    if (editing) {
+      input.current?.focus();
+      input.current?.select();
+    }
+  }, [editing]);
+
+  const save = async () => {
+    if (done.current) return;
+    done.current = true;
+    try {
+      await onRename?.(value.trim());
+      setEditing(false);
+    } catch {
+      done.current = false;
+      setFailed(true);
+    }
+  };
+  const cancel = () => {
+    done.current = true;
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="min-w-0">
+        <input
+          ref={input}
+          value={value}
+          maxLength={80}
+          aria-label={t('ui.rename.label')}
+          aria-invalid={failed || undefined}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={() => void save()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void save();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              cancel();
+            }
+          }}
+          className="h-11 w-full min-w-0 rounded-lg border border-line bg-field px-2 text-base font-semibold text-text"
+        />
+        {failed && (
+          <p role="alert" className="text-xs text-waiting-text">
+            {t('ui.rename.failed')}
+          </p>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="flex min-w-0 items-center gap-1">
+      <h2
+        title={session.originalName}
+        onClick={open}
+        className={`truncate text-base font-semibold ${onRename ? 'cursor-text' : ''}`}
+      >
+        {session.name}
+      </h2>
+      {onRename && (
+        <button
+          type="button"
+          aria-label={t('ui.rename.label')}
+          onClick={open}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted hover:bg-field"
+        >
+          <PencilIcon width={16} height={16} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function ChatView({ session, events, pending, loading, onSend, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -132,7 +224,7 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
           {initials(session.name)}
         </div>
         <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold">{session.name}</h2>
+          <SessionTitle session={session} onRename={onRename} />
           <p className="truncate font-mono text-xs text-muted">{session.cwd}</p>
         </div>
         <StatusPill state={state} asking={session.waitingKind === 'question'} />

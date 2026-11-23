@@ -7,6 +7,10 @@
     "answersOff": "AI Chat Center: perguntas de múltipla escolha voltam a ser respondidas só no terminal."
   },
   "ui": {
+    "rename": {
+      "label": "Renomear sessão",
+      "failed": "Não foi possível renomear"
+    },
     "title": "AI Chat Center",
     "search": "Buscar por nome ou pasta",
     "selectConversation": "Selecione uma conversa",
