@@ -10,6 +10,7 @@ import { assertSessionId } from '../core/paths.js';
 import { loadConfig, saveConfig, type Lang } from '../core/config.js';
 import { writePresence } from '../core/presence.js';
 import { assertToolUseId, getPending, validAnswers, writeAnswer, type AnswerFile } from '../core/questions.js';
+import { setDisplayName, validDisplayName } from '../core/names.js';
 import { getRegistration, isActive } from '../core/registry.js';
 import { VERSION } from '../core/version.js';
 import { CHALLENGE_RE, healthProof } from '../core/healthProof.js';
@@ -277,7 +278,7 @@ export async function createHub(
       await saveConfig({ language: body.language as Lang });
       return sendJson(res, 200, { language: body.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|questions\/([^/]+))$/.exec(p);
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid: string;
       try {
@@ -327,6 +328,17 @@ export async function createHub(
         if (r === 'not-found') throw new HttpError(404, 'no such pending question');
         if (r === 'conflict') throw new HttpError(409, 'already answered');
         return sendJson(res, 202, { ok: true });
+      }
+      if (m[2] === 'name' && method === 'PUT') {
+        const body = (await readJsonBody(req)) as { name?: unknown } | null;
+        const name = body && typeof body === 'object' && !Array.isArray(body) ? validDisplayName(body.name) : null;
+        if (name === null) throw new HttpError(400, 'invalid name');
+        const reg = await getRegistration(sid);
+        if (!reg) throw new HttpError(404, 'no such session');
+        await setDisplayName(sid, name);
+        let shown = name;
+        if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path.basename(reg.cwd);
+        return sendJson(res, 200, { name: shown });
       }
       if (m[2] === 'events' && method === 'GET') return sendJson(res, 200, await provider.events(sid));
       if (m[2] === 'messages' && method === 'POST') {

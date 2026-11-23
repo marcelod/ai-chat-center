@@ -8,6 +8,7 @@ import type { LiveSession } from '../../src/shared/types.js';
 import { register, getRegistration, markDisconnected } from '../../src/core/registry.js';
 import { setWaiting } from '../../src/core/waiting.js';
 import { putPending, removePending } from '../../src/core/questions.js';
+import { setDisplayName } from '../../src/core/names.js';
 import { peek } from '../../src/core/inbox.js';
 import { paths } from '../../src/core/paths.js';
 import { tmpDir } from '../helpers/tmp.js';
@@ -40,6 +41,26 @@ describe('provider', () => {
     await reg();
     const p = new ClaudeCodeProvider(async () => [live({ name: '' })]);
     expect((await p.listSessions()).connected[0].name).toBe('proj');
+  });
+  it('uses the custom display name and exposes originalName; it survives a new register', async () => {
+    await reg();
+    await setDisplayName('s1', 'Mine');
+    const p = new ClaudeCodeProvider(async () => [live()]);
+    expect((await p.listSessions()).connected[0]).toMatchObject({ name: 'Mine', originalName: 'nm' });
+    await reg();
+    expect((await p.listSessions()).connected[0]).toMatchObject({ name: 'Mine', originalName: 'nm' });
+    await setDisplayName('s1', '');
+    const v = (await p.listSessions()).connected[0];
+    expect(v.name).toBe('nm');
+    expect('originalName' in v).toBe(false);
+  });
+  it('poll emits sessions when the display name changes', async () => {
+    await reg();
+    const p = new ClaudeCodeProvider(async () => [live({ status: 'busy' })]);
+    await p.poll();
+    expect((await p.poll()).map((c) => c.type)).toEqual([]);
+    await setDisplayName('s1', 'Mine');
+    expect((await p.poll()).map((c) => c.type)).toEqual(['sessions']);
   });
   it('exited only after grace period and 3 consecutive misses', async () => {
     await reg();

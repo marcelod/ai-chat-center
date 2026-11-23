@@ -49,6 +49,8 @@ export type LiveSession = {
 export type SessionView = {
   sessionId: string;
   name: string;
+  /** The name Claude Code gives the session; present only when a custom display name replaces it. */
+  originalName?: string;
   cwd: string;
   state: 'busy' | 'idle' | 'waiting' | 'disconnected';
   waitingKind?: 'permission' | 'input' | 'question';

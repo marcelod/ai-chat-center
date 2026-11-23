@@ -1,3 +1,4 @@
+import { getDisplayName } from '../core/names.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ChatEvent, LiveSession, ProviderChange, SessionView } from '../shared/types.js';
@@ -236,15 +237,18 @@ export class ClaudeCodeProvider implements Provider {
       if (!disconnected && live.ok && l?.status === 'idle') await this.dropStaleBusy(sid);
       const cwd = l?.cwd ?? reg.cwd;
       const queued = disconnected ? [] : await peek(sid);
+      const originalName = l?.name || path.basename(cwd);
+      const custom = await getDisplayName(sid);
       const view: SessionView & { _sort: number } = {
         sessionId: sid,
-        name: l?.name || path.basename(cwd),
+        name: custom ?? originalName,
         cwd,
         state,
         pendingAppMessageIds: queued.map((m) => m.id),
         pendingAppMessages: queued.map(({ id, text, createdAt }) => ({ id, text, createdAt })),
         _sort: Date.parse(reg.connectedAt) || 0,
       };
+      if (custom) view.originalName = originalName;
       if (waitingKind) view.waitingKind = waitingKind;
       if (pendingQuestion) view.pendingQuestion = pendingQuestion;
       if (state === 'idle' && (await this.deliveryStalled(sid, queued))) view.deliveryStalled = true;
@@ -317,6 +321,7 @@ export class ClaudeCodeProvider implements Provider {
         s.waitingKind ?? null,
         s.pendingQuestion?.toolUseId ?? null,
         s.name,
+        s.originalName ?? null,
         s.lastEvent?.id ?? null,
         s.pendingAppMessageIds,
         s.deliveryStalled ?? false,

@@ -22,6 +22,8 @@ export interface Paths {
   deliveredFile: (sid: string) => string;
   /** Pending AskUserQuestion questions and their answers (see questions.ts). */
   questionsDir: (sid: string) => string;
+  /** Custom display name chosen in the app (see names.ts). */
+  namesFile: (sid: string) => string;
   /** Written by the hub while an app tab is open (see presence.ts). */
   presenceFile: string;
   logDir: string;
@@ -53,6 +55,7 @@ export function paths(): Paths {
     turnFile: (sid) => (assertSessionId(sid), path.join(home, 'turns', `${sid}.json`)),
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, 'delivered', `${sid}.json`)),
     questionsDir: (sid) => (assertSessionId(sid), path.join(home, 'questions', sid)),
+    namesFile: (sid) => (assertSessionId(sid), path.join(home, 'names', `${sid}.json`)),
     presenceFile: path.join(home, 'app-presence.json'),
     logDir: path.join(home, 'logs'),
   };

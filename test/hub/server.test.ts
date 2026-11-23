@@ -13,6 +13,7 @@ import { tmpDir } from '../helpers/tmp.js';
 import { saveConfig, loadConfig } from '../../src/core/config.js';
 import { putPending, readAnswer } from '../../src/core/questions.js';
 import { paths } from '../../src/core/paths.js';
+import { getDisplayName } from '../../src/core/names.js';
 import { register, markDisconnected } from '../../src/core/registry.js';
 
 const TOKEN = 'a'.repeat(64);
@@ -497,5 +498,42 @@ describe('server errors after listen', () => {
     } finally {
       await h.close();
     }
+  });
+});
+
+describe('name endpoint', () => {
+  const put = (u: URL, body: unknown, sid = 's1', headers: Record<string, string> = json) =>
+    req(u, `/api/sessions/${sid}/name`, { method: 'PUT', headers, body: typeof body === 'string' ? body : JSON.stringify(body) });
+  beforeEach(async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
+  });
+  it('200 sets the name and returns the displayed one; "" clears', async () => {
+    const u = await start(fakeProvider());
+    const r = await put(u, { name: 'Mine' });
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.body)).toEqual({ name: 'Mine' });
+    expect(await getDisplayName('s1')).toBe('Mine');
+    const c = await put(u, { name: '' });
+    expect(c.status).toBe(200);
+    expect(JSON.parse(c.body)).toEqual({ name: 'n' });
+    expect(await getDisplayName('s1')).toBeNull();
+  });
+  it('400 for invalid body or name', async () => {
+    const u = await start(fakeProvider());
+    for (const b of ['not json', '[]', 'null', {}, { name: 5 }, { name: ' a' }, { name: 'a'.repeat(81) }]) {
+      expect((await put(u, b)).status).toBe(400);
+    }
+    expect(await getDisplayName('s1')).toBeNull();
+  });
+  it('404 for a session without registration or an invalid id', async () => {
+    const u = await start(fakeProvider());
+    expect((await put(u, { name: 'x' }, 'nope')).status).toBe(404);
+    expect((await put(u, { name: 'x' }, '..%2Fx')).status).toBe(404);
+  });
+  it('401 without token and 403 for a foreign Origin', async () => {
+    const u = await start(fakeProvider());
+    expect((await put(u, { name: 'x' }, 's1', { 'content-type': 'application/json' })).status).toBe(401);
+    expect((await put(u, { name: 'x' }, 's1', { ...json, origin: 'http://evil.com' })).status).toBe(403);
+    expect(await getDisplayName('s1')).toBeNull();
   });
 });
