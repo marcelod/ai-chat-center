@@ -69,6 +69,14 @@ describe('ChatView', () => {
     expect(screen.getByTitle('Model')).toHaveTextContent('Opus 5.5');
     expect(screen.getByTitle('Reasoning level')).toHaveTextContent('🧠 high');
   });
+  it('header info parts have aria-labels, are truncatable and wrap under the cwd on narrow screens', () => {
+    setup({ session: session({ branch: 'feat/x', model: 'Opus 5.5', effort: 'high' }) });
+    expect(screen.getByLabelText('Branch: feat/x')).toHaveClass('truncate', 'min-w-0');
+    expect(screen.getByLabelText('Model: Opus 5.5')).toHaveClass('truncate');
+    expect(screen.getByLabelText('Reasoning level: high')).toHaveClass('truncate');
+    const box = screen.getByTestId('session-info');
+    expect(box).toHaveClass('flex-col', 'md:flex-row', 'overflow-hidden');
+  });
   it('header with only the cwd shows no extra parts', () => {
     setup();
     expect(screen.getByText('/home/me/billing-api')).toBeInTheDocument();

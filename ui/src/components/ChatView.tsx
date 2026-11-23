@@ -31,6 +31,18 @@ const NOTICE_KEY = {
   compacted: 'ui.chat.compacted',
 } as const;
 
+function InfoPart({ label, value, glyph, cls }: { label: string; value: string; glyph?: string; cls: string }) {
+  return (
+    <span title={label} aria-label={`${label}: ${value}`} className={`min-w-0 truncate ${cls}`}>
+      <span aria-hidden="true" className="hidden md:inline">
+        {'· '}
+      </span>
+      {glyph && <span aria-hidden="true">{glyph}</span>}
+      {value}
+    </span>
+  );
+}
+
 function StatusPill({ state, asking }: { state: SessionView['state']; asking: boolean }) {
   const t = useT();
   const label = asking ? t('ui.question.waiting') : t(`ui.status.${state}`);
@@ -261,24 +273,18 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
             onRename={onRename}
             onRenamed={(n) => setOverride({ base: session.name, name: n })}
           />
-          <p className="flex min-w-0 items-baseline gap-1.5 font-mono text-xs text-muted">
-            <span className="min-w-0 truncate">{session.cwd}</span>
-            {session.branch && (
-              <span title={t('ui.chat.branch')} className="max-w-[40%] shrink-0 truncate">
-                · ⎇ {session.branch}
+          <div data-testid="session-info" className="flex min-w-0 flex-col overflow-hidden font-mono text-xs text-muted md:flex-row md:items-baseline md:gap-1.5">
+            <span className="min-w-0 truncate md:min-w-[6ch]">{session.cwd}</span>
+            {(session.branch || session.model || session.effort) && (
+              <span className="flex min-w-0 gap-x-2 md:shrink-0 md:gap-x-1.5">
+                {session.branch && (
+                  <InfoPart label={t('ui.chat.branch')} value={session.branch} glyph="⎇ " cls="max-w-[14rem]" />
+                )}
+                {session.model && <InfoPart label={t('ui.chat.model')} value={session.model} cls="max-w-[9rem]" />}
+                {session.effort && <InfoPart label={t('ui.chat.effort')} value={session.effort} glyph="🧠 " cls="max-w-[7rem]" />}
               </span>
             )}
-            {session.model && (
-              <span title={t('ui.chat.model')} className="shrink-0">
-                · {session.model}
-              </span>
-            )}
-            {session.effort && (
-              <span title={t('ui.chat.effort')} className="shrink-0">
-                · 🧠 {session.effort}
-              </span>
-            )}
-          </p>
+          </div>
         </div>
         <StatusPill state={state} asking={session.waitingKind === 'question'} />
       </header>
