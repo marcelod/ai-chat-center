@@ -24,6 +24,15 @@ export type ChatEvent =
     }
   | { kind: 'assistant'; id: string; ts: string; text: string }
   | { kind: 'actions'; id: string; ts: string; items: ToolAction[] }
+  | {
+      kind: 'question';
+      id: string;
+      ts: string;
+      toolUseId: string;
+      questions: Question[];
+      answers?: Record<string, string>;
+      answerText?: string;
+    }
   | { kind: 'notice'; id: string; ts: string; code: 'connected' | 'disconnected' | 'compacted' };
 
 export type LiveSession = {

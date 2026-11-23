@@ -31,6 +31,8 @@ function eventPreview(e: ChatEvent | undefined, t: T): string {
       return e.text;
     case 'actions':
       return e.items[e.items.length - 1]?.summary ?? '';
+    case 'question':
+      return e.questions[0]?.question ?? '';
     case 'notice':
       return t(`ui.notice.${e.code}`);
   }

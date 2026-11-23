@@ -1,8 +1,10 @@
 import { unwrapMessages } from '../../core/protocol.js';
 import { isCcCommand } from '../../core/ccCommand.js';
+import { parseQuestions } from '../../core/questions.js';
 import type { ChatEvent, ToolAction } from '../../shared/types.js';
 
 type ActionsEvent = Extract<ChatEvent, { kind: 'actions' }>;
+type QuestionEvent = Extract<ChatEvent, { kind: 'question' }>;
 
 const RESULT_MAX = 2000;
 /** An older Claude Code also wrote a queued prompt as a user entry when it ran: shown once. */
@@ -80,6 +82,7 @@ function withIndex<T extends { id: string }>(events: T[], uuid: string): T[] {
 export class TranscriptParser {
   private open: ActionsEvent | null = null;
   private byToolUse = new Map<string, ActionsEvent>();
+  private questions = new Map<string, QuestionEvent>();
   /** Queued prompts already shown, to skip a later identical user entry. */
   private queued: { text: string; at: number }[] = [];
   /** The last `!` command, for the output entry that follows it. */
@@ -101,7 +104,7 @@ export class TranscriptParser {
     if (entry.type === 'assistant') return this.assistant(uuid, ts, message.content);
     if (entry.type === 'user' && entry.isMeta !== true) {
       if (entry.isCompactSummary === true) return [{ kind: 'notice', id: uuid, ts, code: 'compacted' }];
-      return this.user(uuid, ts, message.content);
+      return this.user(uuid, ts, message.content, entry.toolUseResult);
     }
     return [];
   }
@@ -148,6 +151,14 @@ export class TranscriptParser {
         }
       } else if (block.type === 'tool_use' && typeof block.id === 'string') {
         const name = typeof block.name === 'string' ? block.name : '';
+        const questions = name === 'AskUserQuestion' ? parseQuestions(block.input) : null;
+        if (questions) {
+          this.open = null; // a question closes the group, like text
+          const q: QuestionEvent = { kind: 'question', id: uuid, ts, toolUseId: block.id, questions };
+          this.questions.set(block.id, q);
+          created.push(q);
+          continue;
+        }
         const action: ToolAction = { toolUseId: block.id, name, summary: summarize(name, block.input) };
         if (!this.open) {
           this.open = { kind: 'actions', id: uuid, ts, items: [] };
@@ -163,9 +174,9 @@ export class TranscriptParser {
     return [...updated, ...created].map((e) => (e.kind === 'actions' ? snapshot(e) : e));
   }
 
-  private user(uuid: string, ts: string, content: unknown): ChatEvent[] {
+  private user(uuid: string, ts: string, content: unknown, toolUseResult?: unknown): ChatEvent[] {
     if (Array.isArray(content)) {
-      const out: ChatEvent[] = this.toolResults(content);
+      const out: ChatEvent[] = this.toolResults(content, toolUseResult);
       const parts = promptParts(content);
       const text = unwrapPrompt(parts.text);
       const images = parts.images;
@@ -230,10 +241,19 @@ export class TranscriptParser {
     return [{ kind: 'user', id: uuid, ts, text, origin: 'terminal' }];
   }
 
-  private toolResults(blocks: unknown[]): ChatEvent[] {
-    const out = new Map<string, ActionsEvent>();
+  private toolResults(blocks: unknown[], toolUseResult?: unknown): ChatEvent[] {
+    const out = new Map<string, ChatEvent>();
     for (const block of blocks) {
       if (!isRecord(block) || block.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
+      const q = this.questions.get(block.tool_use_id);
+      if (q) {
+        const a = isRecord(toolUseResult) && isRecord(toolUseResult.answers) ? toolUseResult.answers : undefined;
+        if (a && Object.values(a).every((v) => typeof v === 'string')) q.answers = { ...(a as Record<string, string>) };
+        else q.answerText = truncate(resultText(block.content), RESULT_MAX);
+        this.questions.delete(block.tool_use_id);
+        out.set(q.id, { ...q });
+        continue;
+      }
       const ev = this.byToolUse.get(block.tool_use_id);
       const item = ev?.items.find((i) => i.toolUseId === block.tool_use_id);
       if (!ev || !item) continue;

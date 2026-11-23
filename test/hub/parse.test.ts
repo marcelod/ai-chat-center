@@ -278,3 +278,47 @@ describe('TranscriptParser: wrappers and queued dedupe', () => {
     expect(texts([user('u1', '2026-03-01T10:00:00Z', 'is <VirtualHost *:80> right?')])).toEqual(['is <VirtualHost *:80> right?']);
   });
 });
+
+describe('TranscriptParser: AskUserQuestion', () => {
+  const input = { questions: [{ question: 'Which?', header: 'H', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] };
+  const asst = (uuid: string, content: unknown[]) => ({ type: 'assistant', uuid, timestamp: 't', message: { content } });
+  const ask = (id: string, inp: unknown = input) => ({ type: 'tool_use', id, name: 'AskUserQuestion', input: inp });
+  const bash = (id: string) => ({ type: 'tool_use', id, name: 'Bash', input: { command: 'ls' } });
+  const result = (id: string, content: unknown, extra: Record<string, unknown> = {}) => ({
+    type: 'user', uuid: 'r', timestamp: 't', ...extra,
+    message: { content: [{ type: 'tool_result', tool_use_id: id, content }] },
+  });
+
+  it('becomes its own question event and closes the open actions group', () => {
+    const p = new TranscriptParser();
+    p.push(asst('a1', [bash('t1')]));
+    const evs = p.push(asst('a2', [ask('q1')]));
+    expect(evs).toHaveLength(1);
+    expect(evs[0]).toMatchObject({ kind: 'question', id: 'a2', toolUseId: 'q1', questions: input.questions });
+    const next = p.push(asst('a3', [bash('t2')]));
+    expect(next[0]).toMatchObject({ kind: 'actions', id: 'a3' });
+  });
+
+  it('fills answers from toolUseResult and re-emits with the same id', () => {
+    const p = new TranscriptParser();
+    p.push(asst('a2', [ask('q1')]));
+    const evs = p.push(result('q1', 'ok', { toolUseResult: { answers: { 'Which?': 'A' } } }));
+    expect(evs).toHaveLength(1);
+    expect(evs[0]).toMatchObject({ kind: 'question', id: 'a2', answers: { 'Which?': 'A' } });
+  });
+
+  it('falls back to answerText, truncated', () => {
+    const p = new TranscriptParser();
+    p.push(asst('a2', [ask('q1')]));
+    const evs = p.push(result('q1', 'z'.repeat(3000), { toolUseResult: 'nope' }));
+    const ev = evs[0]!;
+    expect(ev.kind === 'question' && ev.answerText).toHaveLength(2000);
+    expect(ev.kind === 'question' && ev.answers).toBeUndefined();
+  });
+
+  it('malformed questions stay an action item', () => {
+    const p = new TranscriptParser();
+    const evs = p.push(asst('a2', [ask('q1', { questions: 'x' })]));
+    expect(evs[0]!.kind).toBe('actions');
+  });
+});
