@@ -139,6 +139,23 @@ describe('runAsk: waits for the app', () => {
     expect(await getWaiting(SID)).toBeNull();
   });
 
+  it('an answer present after /cc off is not returned as allow (registration checked first)', async () => {
+    const run = runAsk(inp(), opts({ pollMs: 300 }));
+    await pendingSeen();
+    await markDisconnected(SID, 'off');
+    await writeAnswer(SID, ID, { answers: { [Q]: 'Blue' } });
+    expect(await run).toBeNull();
+    expect(await getPending(SID)).toBeNull();
+  });
+
+  it('records the hook pid in the pending question', async () => {
+    const run = runAsk(inp(), opts());
+    await pendingSeen();
+    expect((await getPending(SID))!.pid).toBe(process.pid);
+    await writeAnswer(SID, ID, { release: true });
+    await run;
+  });
+
   it('a new connection (connectedAt changed) returns no decision', async () => {
     const run = runAsk(inp(), opts());
     await pendingSeen();

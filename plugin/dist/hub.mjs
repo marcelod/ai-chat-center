@@ -520,9 +520,18 @@ async function getPending(sid) {
   for (const n of names) {
     if (!n.endsWith(".json") || n.endsWith(".answer.json")) continue;
     const p = await readJson(path6.join(paths().questionsDir(sid), n));
+    if (p && typeof p.pid === "number" && !isAlive(p.pid)) {
+      if (typeof p.toolUseId === "string" && `${p.toolUseId}.json` === n) await removePending(sid, p.toolUseId);
+      else await removeFile(path6.join(paths().questionsDir(sid), n));
+      continue;
+    }
     if (p && typeof p.createdAt === "string" && (!best || p.createdAt > best.createdAt)) best = p;
   }
   return best;
+}
+async function removePending(sid, toolUseId) {
+  await removeFile(pendingFile(sid, toolUseId));
+  await removeFile(answerFile(sid, toolUseId));
 }
 async function writeAnswer(sid, toolUseId, a) {
   if (await readJson(pendingFile(sid, toolUseId)) === null) return "not-found";
@@ -787,7 +796,11 @@ var TranscriptParser = class {
       const q = this.questions.get(block.tool_use_id);
       if (q) {
         const a = isRecord(toolUseResult) && isRecord(toolUseResult.answers) ? toolUseResult.answers : void 0;
-        if (a && Object.values(a).every((v) => typeof v === "string")) q.answers = { ...a };
+        const values = a ? Object.values(a) : [];
+        if (block.is_error === true) {
+          q.error = true;
+          q.answerText = truncate(resultText(block.content), RESULT_MAX);
+        } else if (a && values.length > 0 && values.every((v) => typeof v === "string")) q.answers = { ...a };
         else q.answerText = truncate(resultText(block.content), RESULT_MAX);
         this.questions.delete(block.tool_use_id);
         out.set(q.id, { ...q });
@@ -1525,6 +1538,8 @@ data: ${JSON.stringify(c)}
         const hasRelease = Object.hasOwn(body, "release");
         const hasAnswers = Object.hasOwn(body, "answers");
         if (hasRelease === hasAnswers) throw new HttpError(400, "invalid body");
+        const reg = await getRegistration(sid);
+        if (!reg || !isActive(reg)) throw new HttpError(404, "no such pending question");
         const pending = await getPending(sid);
         let answer;
         if (hasRelease) {

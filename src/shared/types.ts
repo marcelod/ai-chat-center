@@ -32,6 +32,8 @@ export type ChatEvent =
       questions: Question[];
       answers?: Record<string, string>;
       answerText?: string;
+      /** The tool result was an error (interrupted, rejected): the question was not answered. */
+      error?: true;
     }
   | { kind: 'notice'; id: string; ts: string; code: 'connected' | 'disconnected' | 'compacted' };
 
@@ -68,7 +70,8 @@ export type SessionView = {
 export type QuestionOption = { label: string; description?: string };
 export type Question = { question: string; header?: string; options: QuestionOption[]; multiSelect?: boolean };
 /** An AskUserQuestion waiting for an answer from the app (see core/questions.ts). */
-export type PendingQuestion = { toolUseId: string; questions: Question[]; createdAt: string };
+/** `pid`: the hook process waiting for the answer; a question whose process is dead is stale (see getPending). */
+export type PendingQuestion = { toolUseId: string; questions: Question[]; createdAt: string; pid?: number };
 
 export type ProviderChange =
   | { type: 'events'; sessionId: string; events: ChatEvent[] }

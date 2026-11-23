@@ -316,6 +316,26 @@ describe('TranscriptParser: AskUserQuestion', () => {
     expect(ev.kind === 'question' && ev.answers).toBeUndefined();
   });
 
+  it('an empty answers object is not an answer: falls back to answerText', () => {
+    const p = new TranscriptParser();
+    p.push(asst('a2', [ask('q1')]));
+    const ev = p.push(result('q1', 'text', { toolUseResult: { answers: {} } }))[0]!;
+    expect(ev.kind === 'question' && ev.answers).toBeUndefined();
+    expect(ev.kind === 'question' && ev.answerText).toBe('text');
+  });
+
+  it('an is_error result marks the question as not answered', () => {
+    const p = new TranscriptParser();
+    p.push(asst('a2', [ask('q1')]));
+    const evs = p.push({
+      type: 'user', uuid: 'r', timestamp: 't', toolUseResult: { answers: { 'Which?': 'A' } },
+      message: { content: [{ type: 'tool_result', tool_use_id: 'q1', content: 'Interrupted', is_error: true }] },
+    });
+    const ev = evs[0]!;
+    expect(ev).toMatchObject({ kind: 'question', id: 'a2', error: true });
+    expect(ev.kind === 'question' && ev.answers).toBeUndefined();
+  });
+
   it('malformed questions stay an action item', () => {
     const p = new TranscriptParser();
     const evs = p.push(asst('a2', [ask('q1', { questions: 'x' })]));

@@ -9,7 +9,7 @@ import { ensureHub, checkHealth, hubSpawnOptions } from '../../src/hooks/ensureH
 import { PROTOCOL, VERSION } from '../../src/core/version.js';
 import { register, getRegistration, markDisconnected } from '../../src/core/registry.js';
 import { isBusy, setBusy } from '../../src/core/busy.js';
-import { getWaiting } from '../../src/core/waiting.js';
+import { getWaiting, setWaiting } from '../../src/core/waiting.js';
 import { paths } from '../../src/core/paths.js';
 import { saveConfig, loadConfig } from '../../src/core/config.js';
 import { getTurnOrigin, setTurnOrigin } from '../../src/core/turn.js';
@@ -713,6 +713,27 @@ describe('answers command and turn origin', () => {
     await handleHook('prompt-submit', inp({ prompt: block(key) }), ctx());
     await handleHook('prompt-submit', inp({ prompt: 'oi' }), ctx());
     expect(await getTurnOrigin('s1')).toBe('terminal');
+  });
+
+  it('/cc answers on|off in an active session still records the typed turn (busy, waiting cleared, origin terminal)', async () => {
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
+    await setTurnOrigin('s1', 'app');
+    await setWaiting('s1', 'input');
+    expect(await getWaiting('s1')).not.toBeNull();
+    const r = await handleHook('prompt-submit', inp({ prompt: '/cc answers on' }), ctx());
+    expect(out(r).hookSpecificOutput.additionalContext).toContain(ANSWERS_ON);
+    expect((await loadConfig()).answersFromApp).toBe(true);
+    expect(await getTurnOrigin('s1')).toBe('terminal');
+    expect(await isBusy('s1')).toBe(true);
+    expect(await getWaiting('s1')).toBeNull();
+  });
+
+  it('/cc removes the pending questions of the session (left by a killed hook)', async () => {
+    const dir = paths().questionsDir('s1');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tu1.json'), JSON.stringify({ toolUseId: 'tu1', questions: [], createdAt: '2026-01-01T00:00:00.000Z' }));
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
+    expect(fs.existsSync(dir)).toBe(false);
   });
 
   it('/cc clears the turn origin', async () => {

@@ -13,6 +13,7 @@ import { tmpDir } from '../helpers/tmp.js';
 import { saveConfig, loadConfig } from '../../src/core/config.js';
 import { putPending, readAnswer } from '../../src/core/questions.js';
 import { paths } from '../../src/core/paths.js';
+import { register, markDisconnected } from '../../src/core/registry.js';
 
 const TOKEN = 'a'.repeat(64);
 let home: string;
@@ -250,6 +251,9 @@ describe('answers endpoint', () => {
   const post = (u: URL, id: string, body: unknown, sid = 's1') =>
     req(u, `/api/sessions/${sid}/questions/${id}`, { method: 'POST', headers: json, body: JSON.stringify(body) });
   const seed = (id = 'tu1') => putPending('s1', { toolUseId: id, questions: [Q], createdAt: '2026-01-01T00:00:00.000Z' });
+  beforeEach(async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
+  });
 
   it('requires auth and a valid Origin', async () => {
     const u = await start(fakeProvider());
@@ -300,6 +304,18 @@ describe('answers endpoint', () => {
     await seed('other');
     expect((await post(u, 'tu1', { release: true })).status).toBe(404);
     expect((await post(u, 'tu1', { release: true }, '..%2Fx')).status).toBe(404);
+  });
+  it('404 when the session is not registered or no longer active (a stale pending question)', async () => {
+    const u = await start(fakeProvider());
+    await saveConfig({ answersFromApp: true });
+    await seed();
+    await markDisconnected('s1', 'off');
+    expect((await post(u, 'tu1', { answers: { 'Which?': 'A' } })).status).toBe(404);
+    expect((await post(u, 'tu1', { release: true })).status).toBe(404);
+    await putPending('s2', { toolUseId: 'tu1', questions: [Q], createdAt: '2026-01-01T00:00:00.000Z' });
+    expect((await post(u, 'tu1', { release: true }, 's2')).status).toBe(404);
+    expect(await readAnswer('s1', 'tu1')).toBeNull();
+    expect(await readAnswer('s2', 'tu1')).toBeNull();
   });
   it('PUT /api/config ignores answersFromApp in the body', async () => {
     const u = await start(fakeProvider());

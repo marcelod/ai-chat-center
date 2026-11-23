@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { rmSync } from 'node:fs';
 import path from 'node:path';
 import { paths } from './paths.js';
+import { isAlive } from './lock.js';
 import { ensureDir, FILE_MODE, readJson, removeFile, writeJsonAtomic } from './fsAtomic.js';
 import type { PendingQuestion, Question } from '../shared/types.js';
 
@@ -46,7 +47,10 @@ export async function putPending(sid: string, q: PendingQuestion): Promise<void>
   await writeJsonAtomic(pendingFile(sid, q.toolUseId), q);
 }
 
-/** The most recent pending question of a session, or null. */
+/**
+ * The most recent pending question of a session, or null. A question whose hook process is dead (killed
+ * without running its cleanup: TerminateProcess on Windows, SIGKILL, a crash) is deleted and skipped.
+ */
 export async function getPending(sid: string): Promise<PendingQuestion | null> {
   let names: string[];
   try {
@@ -58,6 +62,11 @@ export async function getPending(sid: string): Promise<PendingQuestion | null> {
   for (const n of names) {
     if (!n.endsWith('.json') || n.endsWith('.answer.json')) continue;
     const p = await readJson<PendingQuestion>(path.join(paths().questionsDir(sid), n));
+    if (p && typeof p.pid === 'number' && !isAlive(p.pid)) {
+      if (typeof p.toolUseId === 'string' && `${p.toolUseId}.json` === n) await removePending(sid, p.toolUseId);
+      else await removeFile(path.join(paths().questionsDir(sid), n));
+      continue;
+    }
     if (p && typeof p.createdAt === 'string' && (!best || p.createdAt > best.createdAt)) best = p;
   }
   return best;

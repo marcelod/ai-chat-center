@@ -559,6 +559,7 @@ var en_default = {
       send: "Send",
       alreadyAnswered: "Already answered",
       answered: "Answered",
+      notAnswered: "Not answered",
       banner: "Claude is asking you a question \u2014 answer below",
       statusAria: "Status: waiting for your answer",
       waiting: "waiting for your answer",
@@ -671,6 +672,7 @@ var pt_BR_default = {
       send: "Enviar",
       alreadyAnswered: "J\xE1 respondida",
       answered: "Respondida",
+      notAnswered: "N\xE3o respondida",
       banner: "O Claude est\xE1 fazendo uma pergunta \u2014 responda abaixo",
       statusAria: "Status: aguardando sua resposta",
       waiting: "aguardando sua resposta",
@@ -845,6 +847,7 @@ async function connect(input, resolve, ctx) {
   await clearBusy(sid);
   await clearWaiting(sid);
   await clearTurnOrigin(sid);
+  await fs5.promises.rm(paths().questionsDir(sid), { recursive: true, force: true });
   const { language } = await loadConfig();
   let status;
   let shown;
@@ -878,14 +881,16 @@ async function handleHook(event, input, ctx) {
   if (event === "prompt-submit") {
     const cmd = isCcCommand(input.prompt);
     if (cmd === "unknown") return output(UNKNOWN_ARG, t((await loadConfig()).language, "hook.unknownArg"));
-    if (cmd === "answers-on" || cmd === "answers-off") {
+    const answers = cmd === "answers-on" || cmd === "answers-off";
+    let answersResult;
+    if (answers) {
       const on = cmd === "answers-on";
       const { language } = await saveConfig({ answersFromApp: on });
-      return output(on ? ANSWERS_ON : ANSWERS_OFF, t(language, on ? "hook.answersOn" : "hook.answersOff"));
+      answersResult = output(on ? ANSWERS_ON : ANSWERS_OFF, t(language, on ? "hook.answersOn" : "hook.answersOff"));
     }
     if (cmd === "on") return connect(input, resolve, ctx);
     const reg = await getRegistration(sid);
-    if (!reg) return nothing;
+    if (!reg) return answersResult ?? nothing;
     if (cmd === "off") await markDisconnected(sid, "off");
     else if (isActive(reg)) {
       if (!stampedByThisCode(reg)) await updateRegistration(sid, codeStamp(), { ifConnectedAt: reg.connectedAt });
@@ -893,7 +898,7 @@ async function handleHook(event, input, ctx) {
       await setBusy(sid);
       await setTurnOrigin(sid, promptOrigin(input.prompt, reg.key));
     }
-    return nothing;
+    return answersResult ?? nothing;
   }
   if (event === "notification") {
     const reg = await getRegistration(sid);

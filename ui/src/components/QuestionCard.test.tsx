@@ -119,6 +119,24 @@ describe('QuestionCard', () => {
     expect(screen.getByText('User answered: Blue')).toBeInTheDocument();
   });
 
+  it('an error result (interrupted, rejected) shows "Not answered", read-only, never "Answered"', () => {
+    setup(ev({ error: true, answerText: 'Interrupted' }), { pending: true });
+    expect(screen.getByText('Not answered')).toBeInTheDocument();
+    expect(screen.queryByText('Answered')).toBeNull();
+    expect(screen.getByText(Q1)).toBeInTheDocument();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('the not-answered state is translated (pt-BR)', () => {
+    render(
+      <LangProvider lang="pt-BR">
+        <QuestionCard event={ev({ error: true })} pending={false} answersFromApp onAnswer={async () => {}} onRelease={async () => {}} />
+      </LangProvider>,
+    );
+    expect(screen.getByText('Não respondida')).toBeInTheDocument();
+    expect(screen.queryByText('Respondida')).toBeNull();
+  });
+
   it('a failing release shows the send-failed text instead of rejecting', async () => {
     const onRelease = vi.fn(async () => {
       throw new ApiError(500);

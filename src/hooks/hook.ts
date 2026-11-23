@@ -104,6 +104,8 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
   await clearBusy(sid);
   await clearWaiting(sid);
   await clearTurnOrigin(sid);
+  // A question left by a hook killed without cleanup would keep the session waiting in the app.
+  await fs.promises.rm(paths().questionsDir(sid), { recursive: true, force: true });
   const { language } = await loadConfig();
   // The token URL is shown to the user only (systemMessage). The model gets the key and a status
   // line: the token must not end up in the model context or be repeated in its reply.
@@ -142,14 +144,17 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
   if (event === 'prompt-submit') {
     const cmd = isCcCommand(input.prompt);
     if (cmd === 'unknown') return output(UNKNOWN_ARG, t((await loadConfig()).language, 'hook.unknownArg'));
-    if (cmd === 'answers-on' || cmd === 'answers-off') {
+    const answers = cmd === 'answers-on' || cmd === 'answers-off';
+    let answersResult: HookResult | undefined;
+    if (answers) {
       const on = cmd === 'answers-on';
       const { language } = await saveConfig({ answersFromApp: on });
-      return output(on ? ANSWERS_ON : ANSWERS_OFF, t(language, on ? 'hook.answersOn' : 'hook.answersOff'));
+      answersResult = output(on ? ANSWERS_ON : ANSWERS_OFF, t(language, on ? 'hook.answersOn' : 'hook.answersOff'));
     }
     if (cmd === 'on') return connect(input, resolve, ctx);
+    // `/cc answers on|off` is a typed turn too: it gets the same bookkeeping as any other prompt.
     const reg = await getRegistration(sid);
-    if (!reg) return nothing;
+    if (!reg) return answersResult ?? nothing;
     if (cmd === 'off') await markDisconnected(sid, 'off');
     else if (isActive(reg)) {
       // This session runs this code now (restarted after a plugin update): the hub may send to it again.
@@ -159,7 +164,7 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
       await setBusy(sid);
       await setTurnOrigin(sid, promptOrigin(input.prompt, reg.key));
     }
-    return nothing;
+    return answersResult ?? nothing;
   }
 
   if (event === 'notification') {

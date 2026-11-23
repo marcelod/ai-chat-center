@@ -249,10 +249,13 @@ async function ask(input, opts) {
   const mine = { sid, id, waiting: false };
   active = mine;
   try {
-    await putPending(sid, { toolUseId: id, questions, createdAt: new Date(start).toISOString() });
+    await putPending(sid, { toolUseId: id, questions, createdAt: new Date(start).toISOString(), pid: process.pid });
     mine.waiting = true;
     await setWaiting(sid, "question");
     for (; ; ) {
+      const r = await getRegistration(sid);
+      if (!r || !isActive(r) || r.connectedAt !== reg.connectedAt) return null;
+      if (parentPid != null && !isAlive2(parentPid)) return null;
       const a = await readAnswer(sid, id);
       if (a && "release" in a && a.release === true) {
         released = true;
@@ -274,9 +277,6 @@ async function ask(input, opts) {
         }
         await removeAnswer(sid, id);
       }
-      const r = await getRegistration(sid);
-      if (!r || !isActive(r) || r.connectedAt !== reg.connectedAt) return null;
-      if (parentPid != null && !isAlive2(parentPid)) return null;
       if (Date.now() - start >= deadlineMs) return null;
       await sleep(pollMs);
     }

@@ -248,7 +248,12 @@ export class TranscriptParser {
       const q = this.questions.get(block.tool_use_id);
       if (q) {
         const a = isRecord(toolUseResult) && isRecord(toolUseResult.answers) ? toolUseResult.answers : undefined;
-        if (a && Object.values(a).every((v) => typeof v === 'string')) q.answers = { ...(a as Record<string, string>) };
+        const values = a ? Object.values(a) : [];
+        if (block.is_error === true) {
+          // Interrupted or rejected: not an answer.
+          q.error = true;
+          q.answerText = truncate(resultText(block.content), RESULT_MAX);
+        } else if (a && values.length > 0 && values.every((v) => typeof v === 'string')) q.answers = { ...(a as Record<string, string>) };
         else q.answerText = truncate(resultText(block.content), RESULT_MAX);
         this.questions.delete(block.tool_use_id);
         out.set(q.id, { ...q });

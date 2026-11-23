@@ -10,6 +10,7 @@ import { assertSessionId } from '../core/paths.js';
 import { loadConfig, saveConfig, type Lang } from '../core/config.js';
 import { writePresence } from '../core/presence.js';
 import { assertToolUseId, getPending, validAnswers, writeAnswer, type AnswerFile } from '../core/questions.js';
+import { getRegistration, isActive } from '../core/registry.js';
 import { VERSION } from '../core/version.js';
 import { CHALLENGE_RE, healthProof } from '../core/healthProof.js';
 
@@ -307,6 +308,9 @@ export async function createHub(
         const hasRelease = Object.hasOwn(body, 'release');
         const hasAnswers = Object.hasOwn(body, 'answers');
         if (hasRelease === hasAnswers) throw new HttpError(400, 'invalid body');
+        // A pending question of a session that is no longer connected is stale: nothing will read the answer.
+        const reg = await getRegistration(sid);
+        if (!reg || !isActive(reg)) throw new HttpError(404, 'no such pending question');
         const pending = await getPending(sid);
         let answer: AnswerFile;
         if (hasRelease) {

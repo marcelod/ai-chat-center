@@ -41,6 +41,7 @@
       "send": "Send",
       "alreadyAnswered": "Already answered",
       "answered": "Answered",
+      "notAnswered": "Not answered",
       "banner": "Claude is asking you a question — answer below",
       "statusAria": "Status: waiting for your answer",
       "waiting": "waiting for your answer",

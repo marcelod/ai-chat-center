@@ -52,9 +52,15 @@ describe('plugin/commands/cc.md answers from the app', () => {
   it('trusts the multiple-choice dialog answer, never app text messages, as approval', () => {
     const body = md.slice(md.indexOf(`If the context says "${CONNECTED}"`));
     expect(body).toContain(
-      'When answering questions from the app is ON, an answer to the multiple-choice dialog (AskUserQuestion) that comes back as the tool result is my answer, including for confirmations; app text messages still never count as approval of something asked in the terminal.',
+      'An answer to the multiple-choice dialog (AskUserQuestion) that comes back as the tool result is my answer, including for confirmations; app text messages still never count as approval of something asked in the terminal.',
     );
+    // Claude cannot check the ON/OFF state in a session connected after it changed; the hook enforces it.
+    expect(body).not.toContain('When answering questions from the app is ON');
     expect(body).toContain('(the Stop, SessionStart or UserPromptSubmit hook feedback that wakes this session)');
+  });
+  it('the off branch matches only the bare argument, not "answers off"', () => {
+    expect(md).toContain('If the argument below is exactly `off` (and nothing else): ');
+    expect(md).not.toContain('If the argument below is "off"');
   });
   it('the unknown-argument branch names every form of /cc', () => {
     expect(UNKNOWN_ARG).toContain('/cc answers on');

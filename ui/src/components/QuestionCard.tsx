@@ -48,6 +48,18 @@ export function QuestionCard({ event, pending, answersFromApp, onAnswer, onRelea
   const { questions } = event;
   const answered = event.answers !== undefined || event.answerText !== undefined;
 
+  if (event.error) {
+    return (
+      <Shell header={t('ui.question.notAnswered')}>
+        {questions.map((q) => (
+          <div key={q.question}>
+            <p className="text-sm font-semibold">{q.question}</p>
+          </div>
+        ))}
+      </Shell>
+    );
+  }
+
   if (answered) {
     return (
       <Shell header={t('ui.question.answered')}>

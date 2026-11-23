@@ -85,10 +85,14 @@ async function ask(input: AskInput, opts: AskOptions): Promise<string | null> {
   const mine = { sid, id, waiting: false };
   active = mine;
   try {
-    await putPending(sid, { toolUseId: id, questions, createdAt: new Date(start).toISOString() });
+    await putPending(sid, { toolUseId: id, questions, createdAt: new Date(start).toISOString(), pid: process.pid });
     mine.waiting = true;
     await setWaiting(sid, 'question');
     for (;;) {
+      // Checked before the answer: an answer written after /cc off or a reconnection must not be used.
+      const r = await getRegistration(sid);
+      if (!r || !isActive(r) || r.connectedAt !== reg.connectedAt) return null;
+      if (parentPid != null && !isAlive(parentPid)) return null;
       // null is also a file still being written: not yet.
       const a = await readAnswer(sid, id);
       if (a && 'release' in a && a.release === true) {
@@ -111,9 +115,6 @@ async function ask(input: AskInput, opts: AskOptions): Promise<string | null> {
         }
         await removeAnswer(sid, id);
       }
-      const r = await getRegistration(sid);
-      if (!r || !isActive(r) || r.connectedAt !== reg.connectedAt) return null;
-      if (parentPid != null && !isAlive(parentPid)) return null;
       if (Date.now() - start >= deadlineMs) return null;
       await sleep(pollMs);
     }

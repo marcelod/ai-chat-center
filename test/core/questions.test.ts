@@ -4,6 +4,9 @@ import {
   writeAnswer, readAnswer, validAnswers,
 } from '../../src/core/questions.js';
 import { tmpDir } from '../helpers/tmp.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { paths } from '../../src/core/paths.js';
 
 beforeEach(() => {
   process.env.AI_CHAT_CENTER_HOME = tmpDir('acc-');
@@ -76,6 +79,17 @@ describe('pending and answers', () => {
     await putPending('s1', pending('a', '2026-01-01T00:00:00.000Z'));
     const r = await Promise.all([writeAnswer('s1', 'a', { release: true }), writeAnswer('s1', 'a', { answers: {} })]);
     expect(r.sort()).toEqual(['conflict', 'ok']);
+  });
+
+  it('getPending skips and deletes a question whose hook process is dead (killed without cleanup)', async () => {
+    const dead = 2 ** 30; // beyond any pid_max: kill(pid, 0) fails with ESRCH
+    await putPending('s1', { ...pending('a', '2026-01-01T00:00:00.000Z'), pid: process.pid });
+    await putPending('s1', { ...pending('b', '2026-01-01T00:00:05.000Z'), pid: dead });
+    await writeAnswer('s1', 'b', { release: true });
+    expect((await getPending('s1'))!.toolUseId).toBe('a');
+    expect(fs.existsSync(path.join(paths().questionsDir('s1'), 'b.json'))).toBe(false);
+    expect(fs.existsSync(path.join(paths().questionsDir('s1'), 'b.answer.json'))).toBe(false);
+    expect(fs.existsSync(path.join(paths().questionsDir('s1'), 'a.json'))).toBe(true);
   });
 
   it('getPending ignores answer files', async () => {
