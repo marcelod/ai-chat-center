@@ -520,8 +520,8 @@ var en_default = {
   hook: {
     ready: "AI Chat Center is ready: {url}",
     hubFailed: "AI Chat Center: the hub failed to start. See {log}",
-    unknownArg: "AI Chat Center: unknown argument. Use /cc, /cc off, /cc answers on or /cc answers off.",
-    answersOn: "AI Chat Center: you can now answer multiple-choice questions from the app, including confirmations. To turn off: /cc answers off",
+    unknownArg: "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on or /ai-chat-center:cc answers off.",
+    answersOn: "AI Chat Center: you can now answer multiple-choice questions from the app, including confirmations. To turn off: /ai-chat-center:cc answers off",
     answersOff: "AI Chat Center: multiple-choice questions are answered only in the terminal again."
   },
   ui: {
@@ -563,7 +563,7 @@ var en_default = {
       banner: "Claude is asking you a question \u2014 answer below",
       statusAria: "Status: waiting for your answer",
       waiting: "waiting for your answer",
-      enableHint: "To answer here, type /cc answers on in the terminal"
+      enableHint: "To answer here, type /ai-chat-center:cc answers on in the terminal"
     },
     status: {
       busy: "working\u2026",
@@ -633,8 +633,8 @@ var pt_BR_default = {
   hook: {
     ready: "AI Chat Center pronto: {url}",
     hubFailed: "AI Chat Center: o hub n\xE3o iniciou. Veja {log}",
-    unknownArg: "AI Chat Center: argumento desconhecido. Use /cc, /cc off, /cc answers on ou /cc answers off.",
-    answersOn: "AI Chat Center: agora voc\xEA pode responder pelo app as perguntas de m\xFAltipla escolha, inclusive confirma\xE7\xF5es. Para desligar: /cc answers off",
+    unknownArg: "AI Chat Center: argumento desconhecido. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on ou /ai-chat-center:cc answers off.",
+    answersOn: "AI Chat Center: agora voc\xEA pode responder pelo app as perguntas de m\xFAltipla escolha, inclusive confirma\xE7\xF5es. Para desligar: /ai-chat-center:cc answers off",
     answersOff: "AI Chat Center: perguntas de m\xFAltipla escolha voltam a ser respondidas s\xF3 no terminal."
   },
   ui: {
@@ -676,7 +676,7 @@ var pt_BR_default = {
       banner: "O Claude est\xE1 fazendo uma pergunta \u2014 responda abaixo",
       statusAria: "Status: aguardando sua resposta",
       waiting: "aguardando sua resposta",
-      enableHint: "Para responder por aqui, digite /cc answers on no terminal"
+      enableHint: "Para responder por aqui, digite /ai-chat-center:cc answers on no terminal"
     },
     status: {
       busy: "trabalhando\u2026",
@@ -805,7 +805,7 @@ async function resolveClaudePid(sessionId, opts = {}) {
 
 // src/hooks/hook.ts
 var MAX_PREVIOUS_KEYS = 20;
-var UNKNOWN_ARG = "AI Chat Center: unknown argument. Use /cc, /cc off, /cc answers on or /cc answers off.";
+var UNKNOWN_ARG = "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on or /ai-chat-center:cc answers off.";
 var ANSWERS_ON = "AI Chat Center: answering questions from the app is ON";
 var ANSWERS_OFF = "AI Chat Center: answering questions from the app is OFF";
 var CONNECTED = "AI Chat Center: connected";

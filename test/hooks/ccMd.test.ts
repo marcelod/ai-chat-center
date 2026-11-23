@@ -63,7 +63,7 @@ describe('plugin/commands/cc.md answers from the app', () => {
     expect(md).not.toContain('If the argument below is "off"');
   });
   it('the unknown-argument branch names every form of /cc', () => {
-    expect(UNKNOWN_ARG).toContain('/cc answers on');
-    expect(md).toMatch(/saying to use \/cc, \/cc off, \/cc answers on or \/cc answers off\./);
+    expect(UNKNOWN_ARG).toContain('/ai-chat-center:cc answers on');
+    expect(md).toMatch(/saying to use \/cc, \/ai-chat-center:cc off, \/ai-chat-center:cc answers on or \/ai-chat-center:cc answers off\./);
   });
 });

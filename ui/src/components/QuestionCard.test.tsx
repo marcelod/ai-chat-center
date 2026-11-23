@@ -100,12 +100,12 @@ describe('QuestionCard', () => {
     setup(ev(), { pending: false, answersFromApp: false });
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.getByText('Answer in the terminal')).toBeInTheDocument();
-    expect(screen.getByText(/\/cc answers on/)).toBeInTheDocument();
+    expect(screen.getByText(/\/ai-chat-center:cc answers on/)).toBeInTheDocument();
   });
 
   it('terminal with answers from the app on has no hint', () => {
     setup(ev(), { pending: false, answersFromApp: true });
-    expect(screen.queryByText(/\/cc answers on/)).toBeNull();
+    expect(screen.queryByText(/\/ai-chat-center:cc answers on/)).toBeNull();
   });
 
   it('answered: shows the answer, read-only', () => {

@@ -90,8 +90,8 @@ describe('hook', () => {
     const f = await handleHook('prompt-submit', inp({ prompt: '/cc' }), { ...ctx(), ensureHub: async () => { throw new Error('x'); } });
     expect(out(f).systemMessage).toBe(`AI Chat Center: o hub não iniciou. Veja ${path.join(paths().logDir, 'hook.log')}`);
     const u = await handleHook('prompt-submit', inp({ prompt: '/cc foo' }), ctx());
-    expect(out(u).systemMessage).toBe('AI Chat Center: argumento desconhecido. Use /cc, /cc off, /cc answers on ou /cc answers off.');
-    expect(out(u).hookSpecificOutput.additionalContext).toBe('AI Chat Center: unknown argument. Use /cc, /cc off, /cc answers on or /cc answers off.');
+    expect(out(u).systemMessage).toBe('AI Chat Center: argumento desconhecido. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on ou /ai-chat-center:cc answers off.');
+    expect(out(u).hookSpecificOutput.additionalContext).toBe('AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on or /ai-chat-center:cc answers off.');
   });
 
   // Audit S4-U3: the registration records the Claude config dir of the session.
@@ -149,7 +149,7 @@ describe('hook', () => {
   });
 
   it('/cc with an unknown argument changes nothing', async () => {
-    const msg = 'AI Chat Center: unknown argument. Use /cc, /cc off, /cc answers on or /cc answers off.';
+    const msg = 'AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on or /ai-chat-center:cc answers off.';
     const r = await handleHook('prompt-submit', inp({ prompt: '/cc foo' }), ctx());
     expect(out(r).hookSpecificOutput.additionalContext).toBe(msg);
     expect(fs.readdirSync(paths().home)).toEqual([]);

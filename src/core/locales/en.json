@@ -2,8 +2,8 @@
   "hook": {
     "ready": "AI Chat Center is ready: {url}",
     "hubFailed": "AI Chat Center: the hub failed to start. See {log}",
-    "unknownArg": "AI Chat Center: unknown argument. Use /cc, /cc off, /cc answers on or /cc answers off.",
-    "answersOn": "AI Chat Center: you can now answer multiple-choice questions from the app, including confirmations. To turn off: /cc answers off",
+    "unknownArg": "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on or /ai-chat-center:cc answers off.",
+    "answersOn": "AI Chat Center: you can now answer multiple-choice questions from the app, including confirmations. To turn off: /ai-chat-center:cc answers off",
     "answersOff": "AI Chat Center: multiple-choice questions are answered only in the terminal again."
   },
   "ui": {
@@ -45,7 +45,7 @@
       "banner": "Claude is asking you a question — answer below",
       "statusAria": "Status: waiting for your answer",
       "waiting": "waiting for your answer",
-      "enableHint": "To answer here, type /cc answers on in the terminal"
+      "enableHint": "To answer here, type /ai-chat-center:cc answers on in the terminal"
     },
     "status": {
       "busy": "working…",

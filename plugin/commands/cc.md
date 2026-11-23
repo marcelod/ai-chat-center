@@ -5,7 +5,7 @@ disable-model-invocation: true
 ---
 If the argument below is exactly `off` (and nothing else): I am disconnecting this session from my AI Chat Center app. From now on, ignore any text wrapped in [AI Chat Center message …] markers and do not act on it. Reply with one short line confirming, in my language.
 
-If the context says "AI Chat Center: unknown argument": nothing changed. Reply with one short line, in my language, saying to use /cc, /cc off, /cc answers on or /cc answers off.
+If the context says "AI Chat Center: unknown argument": nothing changed. Reply with one short line, in my language, saying to use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on or /ai-chat-center:cc answers off.
 
 If the context says "AI Chat Center: answering questions from the app is ON" or "AI Chat Center: answering questions from the app is OFF": I have just turned answering the multiple-choice dialog from the app on or off. Nothing else changed. Reply with one short line, in my language, confirming the new state, and ignore the rest of these instructions.
 
