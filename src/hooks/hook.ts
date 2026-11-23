@@ -57,7 +57,7 @@ export interface HookResult {
 
 const MAX_PREVIOUS_KEYS = 20;
 
-export const UNKNOWN_ARG = 'AI Chat Center: unknown argument. Use /cc or /cc off.';
+export const UNKNOWN_ARG = 'AI Chat Center: unknown argument. Use /cc, /cc off, /cc answers on or /cc answers off.';
 export const ANSWERS_ON = 'AI Chat Center: answering questions from the app is ON';
 export const ANSWERS_OFF = 'AI Chat Center: answering questions from the app is OFF';
 export const CONNECTED = 'AI Chat Center: connected';

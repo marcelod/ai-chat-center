@@ -2,9 +2,9 @@ import { createRequire as __acc_createRequire } from 'node:module';
 const require = __acc_createRequire(import.meta.url);
 
 // src/hub/main.ts
-import fs9 from "node:fs/promises";
+import fs10 from "node:fs/promises";
 import fsSync from "node:fs";
-import path8 from "node:path";
+import path9 from "node:path";
 import crypto7 from "node:crypto";
 import { fileURLToPath } from "node:url";
 
@@ -31,7 +31,10 @@ function paths() {
     waiterLock: (sid) => (assertSessionId(sid), path.join(home, "waiters", `${sid}.lock`)),
     waitingFile: (sid) => (assertSessionId(sid), path.join(home, "waiting", `${sid}.json`)),
     busyFile: (sid) => (assertSessionId(sid), path.join(home, "busy", sid)),
+    turnFile: (sid) => (assertSessionId(sid), path.join(home, "turns", `${sid}.json`)),
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
+    questionsDir: (sid) => (assertSessionId(sid), path.join(home, "questions", sid)),
+    presenceFile: path.join(home, "app-presence.json"),
     logDir: path.join(home, "logs")
   };
 }
@@ -93,8 +96,8 @@ function proofMatches(token, challenge, port, answer) {
 }
 
 // src/hub/provider.ts
-import fs7 from "node:fs/promises";
-import path6 from "node:path";
+import fs8 from "node:fs/promises";
+import path7 from "node:path";
 
 // src/core/registry.ts
 import fs6 from "node:fs/promises";
@@ -473,6 +476,79 @@ async function pruneRegistrations(maxAgeMs, now = Date.now()) {
   return pruned;
 }
 
+// src/core/questions.ts
+import fs7 from "node:fs/promises";
+import path6 from "node:path";
+var TOOL_USE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+function assertToolUseId(id) {
+  if (typeof id !== "string" || !TOOL_USE_ID_RE.test(id)) {
+    throw new Error(`Invalid tool use id: ${JSON.stringify(id)}`);
+  }
+}
+var isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+var nonEmpty = (v) => typeof v === "string" && v.length > 0;
+function parseQuestions(input) {
+  if (!isObj(input) || !Array.isArray(input.questions)) return null;
+  const raw = input.questions;
+  if (raw.length < 1 || raw.length > 4) return null;
+  const out = [];
+  for (const q of raw) {
+    if (!isObj(q) || !nonEmpty(q.question) || !Array.isArray(q.options)) return null;
+    if (q.options.length < 2 || q.options.length > 4) return null;
+    const options = [];
+    for (const o of q.options) {
+      if (!isObj(o) || !nonEmpty(o.label)) return null;
+      options.push(typeof o.description === "string" ? { label: o.label, description: o.description } : { label: o.label });
+    }
+    const question = { question: q.question, options };
+    if (typeof q.header === "string") question.header = q.header;
+    if (typeof q.multiSelect === "boolean") question.multiSelect = q.multiSelect;
+    out.push(question);
+  }
+  return out;
+}
+var pendingFile = (sid, id) => (assertToolUseId(id), path6.join(paths().questionsDir(sid), `${id}.json`));
+var answerFile = (sid, id) => (assertToolUseId(id), path6.join(paths().questionsDir(sid), `${id}.answer.json`));
+async function getPending(sid) {
+  let names;
+  try {
+    names = await fs7.readdir(paths().questionsDir(sid));
+  } catch {
+    return null;
+  }
+  let best = null;
+  for (const n of names) {
+    if (!n.endsWith(".json") || n.endsWith(".answer.json")) continue;
+    const p = await readJson(path6.join(paths().questionsDir(sid), n));
+    if (p && typeof p.createdAt === "string" && (!best || p.createdAt > best.createdAt)) best = p;
+  }
+  return best;
+}
+async function writeAnswer(sid, toolUseId, a) {
+  if (await readJson(pendingFile(sid, toolUseId)) === null) return "not-found";
+  await ensureDir(paths().questionsDir(sid));
+  try {
+    await fs7.writeFile(answerFile(sid, toolUseId), JSON.stringify(a, null, 2), { encoding: "utf8", flag: "wx", mode: FILE_MODE });
+    return "ok";
+  } catch (e) {
+    if (e.code === "EEXIST") return "conflict";
+    throw e;
+  }
+}
+function validAnswers(questions, answers) {
+  if (!isObj(answers)) return null;
+  const keys = Object.keys(answers);
+  const want = questions.map((q) => q.question);
+  if (keys.length !== want.length || !want.every((k) => Object.hasOwn(answers, k))) return null;
+  const out = {};
+  for (const k of want) {
+    const v = answers[k];
+    if (typeof v !== "string" || v.length < 1 || v.length > 2e3 || v !== v.trim()) return null;
+    out[k] = v;
+  }
+  return out;
+}
+
 // src/hub/transcript/reader.ts
 import { open } from "node:fs/promises";
 import { StringDecoder } from "node:string_decoder";
@@ -497,7 +573,11 @@ function isCcCommand(prompt) {
   const m = CC_RE.exec(prompt);
   if (!m) return null;
   if (m[1] === void 0) return "on";
-  return m[1].toLowerCase() === "off" ? "off" : "unknown";
+  const arg = m[1].toLowerCase().split(/\s+/).join(" ");
+  if (arg === "off") return "off";
+  if (arg === "answers on") return "answers-on";
+  if (arg === "answers off") return "answers-off";
+  return "unknown";
 }
 
 // src/hub/transcript/parse.ts
@@ -554,6 +634,7 @@ var TranscriptParser = class {
   keys;
   open = null;
   byToolUse = /* @__PURE__ */ new Map();
+  questions = /* @__PURE__ */ new Map();
   /** Queued prompts already shown, to skip a later identical user entry. */
   queued = [];
   /** The last `!` command, for the output entry that follows it. */
@@ -571,7 +652,7 @@ var TranscriptParser = class {
     if (entry.type === "assistant") return this.assistant(uuid, ts, message.content);
     if (entry.type === "user" && entry.isMeta !== true) {
       if (entry.isCompactSummary === true) return [{ kind: "notice", id: uuid, ts, code: "compacted" }];
-      return this.user(uuid, ts, message.content);
+      return this.user(uuid, ts, message.content, entry.toolUseResult);
     }
     return [];
   }
@@ -615,6 +696,14 @@ var TranscriptParser = class {
         }
       } else if (block.type === "tool_use" && typeof block.id === "string") {
         const name = typeof block.name === "string" ? block.name : "";
+        const questions = name === "AskUserQuestion" ? parseQuestions(block.input) : null;
+        if (questions) {
+          this.open = null;
+          const q = { kind: "question", id: uuid, ts, toolUseId: block.id, questions };
+          this.questions.set(block.id, q);
+          created.push(q);
+          continue;
+        }
         const action = { toolUseId: block.id, name, summary: summarize(name, block.input) };
         if (!this.open) {
           this.open = { kind: "actions", id: uuid, ts, items: [] };
@@ -629,9 +718,9 @@ var TranscriptParser = class {
     if (created.length > 1) created.forEach((e, i) => e.id = `${uuid}#${i}`);
     return [...updated, ...created].map((e) => e.kind === "actions" ? snapshot(e) : e);
   }
-  user(uuid, ts, content) {
+  user(uuid, ts, content, toolUseResult) {
     if (Array.isArray(content)) {
-      const out = this.toolResults(content);
+      const out = this.toolResults(content, toolUseResult);
       const parts = promptParts(content);
       const text2 = unwrapPrompt(parts.text);
       const images = parts.images;
@@ -662,7 +751,7 @@ var TranscriptParser = class {
       const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(content)?.[1]?.trim();
       const cc = isCcCommand(args ? `${cmd} ${args}` : cmd);
       if (cc === "on" || cc === "off") return [{ kind: "notice", id: uuid, ts, code: cc === "on" ? "connected" : "disconnected" }];
-      if (cc === "unknown") return [];
+      if (cc === "unknown" || cc === "answers-on" || cc === "answers-off") return [];
     }
     const shellIn = tag(content, "bash-input");
     if (shellIn !== void 0) {
@@ -691,10 +780,19 @@ var TranscriptParser = class {
     this.open = null;
     return [{ kind: "user", id: uuid, ts, text, origin: "terminal" }];
   }
-  toolResults(blocks) {
+  toolResults(blocks, toolUseResult) {
     const out = /* @__PURE__ */ new Map();
     for (const block of blocks) {
       if (!isRecord(block) || block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
+      const q = this.questions.get(block.tool_use_id);
+      if (q) {
+        const a = isRecord(toolUseResult) && isRecord(toolUseResult.answers) ? toolUseResult.answers : void 0;
+        if (a && Object.values(a).every((v) => typeof v === "string")) q.answers = { ...a };
+        else q.answerText = truncate(resultText(block.content), RESULT_MAX);
+        this.questions.delete(block.tool_use_id);
+        out.set(q.id, { ...q });
+        continue;
+      }
       const ev = this.byToolUse.get(block.tool_use_id);
       const item = ev?.items.find((i) => i.toolUseId === block.tool_use_id);
       if (!ev || !item) continue;
@@ -710,8 +808,8 @@ var TranscriptParser = class {
 // src/hub/transcript/reader.ts
 var CHUNK = 64 * 1024;
 var TranscriptReader = class {
-  constructor(path9, keys) {
-    this.path = path9;
+  constructor(path10, keys) {
+    this.path = path10;
     this.keys = keys;
     this.parser = new TranscriptParser(keys);
   }
@@ -948,7 +1046,7 @@ var ClaudeCodeProvider = class {
     const oldest = Math.min(...queued.map((m) => Date.parse(m.createdAt)).filter((n) => !Number.isNaN(n)));
     if (!Number.isFinite(oldest) || this.now() - oldest < STALLED_AFTER_MS) return false;
     try {
-      return this.now() - (await fs7.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
+      return this.now() - (await fs8.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
     } catch {
       return true;
     }
@@ -1009,6 +1107,7 @@ var ClaudeCodeProvider = class {
         lastEvent = e.reader.all().at(-1);
       }
       const waiting = disconnected ? null : await getWaiting(sid);
+      const pendingQuestion = disconnected ? null : await getPending(sid);
       let state;
       let waitingKind;
       if (disconnected) state = "disconnected";
@@ -1019,12 +1118,16 @@ var ClaudeCodeProvider = class {
         state = "waiting";
         waitingKind = waiting.kind;
       } else state = l?.status ?? "idle";
+      if (pendingQuestion) {
+        state = "waiting";
+        waitingKind = "question";
+      }
       if (!disconnected && live.ok && l?.status === "idle") await this.dropStaleBusy(sid);
       const cwd = l?.cwd ?? reg.cwd;
       const queued = disconnected ? [] : await peek(sid);
       const view = {
         sessionId: sid,
-        name: l?.name || path6.basename(cwd),
+        name: l?.name || path7.basename(cwd),
         cwd,
         state,
         pendingAppMessageIds: queued.map((m) => m.id),
@@ -1032,6 +1135,7 @@ var ClaudeCodeProvider = class {
         _sort: Date.parse(reg.connectedAt) || 0
       };
       if (waitingKind) view.waitingKind = waitingKind;
+      if (pendingQuestion) view.pendingQuestion = pendingQuestion;
       if (state === "idle" && await this.deliveryStalled(sid, queued)) view.deliveryStalled = true;
       const unsigned = disconnected ? 0 : await countUnsigned(sid);
       if (unsigned > 0) view.undeliveredUnsigned = unsigned;
@@ -1094,6 +1198,7 @@ var ClaudeCodeProvider = class {
         s.sessionId,
         s.state,
         s.waitingKind ?? null,
+        s.pendingQuestion?.toolUseId ?? null,
         s.name,
         s.lastEvent?.id ?? null,
         s.pendingAppMessageIds,
@@ -1118,7 +1223,7 @@ var ClaudeCodeProvider = class {
     if (!again || !isActive(again)) {
       const dir = paths().inboxDir(sid);
       try {
-        for (const n of await fs7.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs7.rm(path6.join(dir, n), { force: true });
+        for (const n of await fs8.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs8.rm(path7.join(dir, n), { force: true });
       } catch {
       }
       throw new SessionDisconnectedError(sid);
@@ -1129,8 +1234,8 @@ var ClaudeCodeProvider = class {
 
 // src/hub/server.ts
 import http from "node:http";
-import fs8 from "node:fs/promises";
-import path7 from "node:path";
+import fs9 from "node:fs/promises";
+import path8 from "node:path";
 import crypto6 from "node:crypto";
 
 // src/core/config.ts
@@ -1138,10 +1243,17 @@ var LANGS = ["en", "pt-BR"];
 async function loadConfig() {
   const c = await readJson(paths().config);
   const language = LANGS.includes(c?.language) ? c.language : "en";
-  return { language };
+  return { language, answersFromApp: c?.answersFromApp === true };
 }
-async function saveConfig(c) {
-  await writeJsonAtomic(paths().config, c);
+async function saveConfig(patch) {
+  const next = { ...await loadConfig(), ...patch };
+  await writeJsonAtomic(paths().config, next);
+  return next;
+}
+
+// src/core/presence.ts
+async function writePresence(clients) {
+  await writeJsonAtomic(paths().presenceFile, { clients, pid: process.pid, at: Date.now() });
 }
 
 // src/hub/server.ts
@@ -1230,6 +1342,9 @@ async function createHub(opts) {
   let pollTimer = null;
   let heartbeat = null;
   let closed = false;
+  const publishPresence = () => {
+    writePresence(clients.size).catch((e) => log(`presence write failed: ${e.message}`));
+  };
   const fanOut = (c) => {
     const frame = `event: ${c.type}
 data: ${JSON.stringify(c)}
@@ -1282,6 +1397,7 @@ data: ${JSON.stringify(c)}
     schedulePoll(++pollGen);
     heartbeat = setInterval(() => {
       for (const r of clients) r.write(": heartbeat\n\n");
+      publishPresence();
     }, HEARTBEAT_MS);
   };
   const stopTimers = () => {
@@ -1303,15 +1419,15 @@ data: ${JSON.stringify(c)}
       return sendJson(res, 404, { error: "not found" });
     }
     if (rel.includes("\0")) return sendJson(res, 404, { error: "not found" });
-    const root = path7.resolve(staticDir);
-    const target = path7.resolve(root, "." + path7.sep + rel);
-    if (target !== root && !target.startsWith(root + path7.sep)) return sendJson(res, 404, { error: "not found" });
+    const root = path8.resolve(staticDir);
+    const target = path8.resolve(root, "." + path8.sep + rel);
+    if (target !== root && !target.startsWith(root + path8.sep)) return sendJson(res, 404, { error: "not found" });
     const send = async (file) => {
       try {
-        const st = await fs8.stat(file);
+        const st = await fs9.stat(file);
         if (!st.isFile()) return false;
-        const data = await fs8.readFile(file);
-        const ext = path7.extname(file).toLowerCase();
+        const data = await fs9.readFile(file);
+        const ext = path8.extname(file).toLowerCase();
         const type = MIME[ext] ?? "application/octet-stream";
         const headers = { "Content-Type": type, "Content-Length": data.length };
         if (ext === ".html") headers["Content-Security-Policy"] = CSP;
@@ -1324,12 +1440,12 @@ data: ${JSON.stringify(c)}
     };
     let rootExists = true;
     try {
-      rootExists = (await fs8.stat(root)).isDirectory();
+      rootExists = (await fs9.stat(root)).isDirectory();
     } catch {
       rootExists = false;
     }
     const accepts = String(req.headers.accept ?? "").includes("text/html");
-    const spaEligible = req.method === "GET" && accepts && path7.extname(pathname) === "";
+    const spaEligible = req.method === "GET" && accepts && path8.extname(pathname) === "";
     const isRoot = pathname === "/";
     if (!rootExists) {
       if (isRoot || spaEligible) {
@@ -1340,7 +1456,7 @@ data: ${JSON.stringify(c)}
     }
     if (target !== root && await send(target)) return;
     if (isRoot || spaEligible) {
-      if (await send(path7.join(root, "index.html"))) return;
+      if (await send(path8.join(root, "index.html"))) return;
     }
     sendJson(res, 404, { error: "not found" });
   };
@@ -1362,8 +1478,10 @@ data: ${JSON.stringify(c)}
       res.write("retry: 3000\n\n");
       clients.add(res);
       startTimers();
+      publishPresence();
       res.on("close", () => {
         clients.delete(res);
+        if (!closed) publishPresence();
         if (clients.size === 0) stopTimers();
       });
       return;
@@ -1376,7 +1494,7 @@ data: ${JSON.stringify(c)}
       await saveConfig({ language: body.language });
       return sendJson(res, 200, { language: body.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages)$/.exec(p);
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid;
       try {
@@ -1388,6 +1506,41 @@ data: ${JSON.stringify(c)}
         assertSessionId(sid);
       } catch {
         throw new HttpError(404, "not found");
+      }
+      if (m[3] !== void 0 && method === "POST") {
+        let toolUseId;
+        try {
+          toolUseId = decodeURIComponent(m[3]);
+          assertToolUseId(toolUseId);
+        } catch {
+          req.resume();
+          throw new HttpError(400, "invalid tool use id");
+        }
+        if (!(await loadConfig()).answersFromApp) {
+          req.resume();
+          throw new HttpError(403, "answers from the app are off");
+        }
+        const body = await readJsonBody(req);
+        if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "invalid body");
+        const hasRelease = Object.hasOwn(body, "release");
+        const hasAnswers = Object.hasOwn(body, "answers");
+        if (hasRelease === hasAnswers) throw new HttpError(400, "invalid body");
+        const pending = await getPending(sid);
+        let answer;
+        if (hasRelease) {
+          if (body.release !== true) throw new HttpError(400, "invalid body");
+          if (!pending || pending.toolUseId !== toolUseId) throw new HttpError(404, "no such pending question");
+          answer = { release: true };
+        } else {
+          if (!pending || pending.toolUseId !== toolUseId) throw new HttpError(404, "no such pending question");
+          const answers = validAnswers(pending.questions, body.answers);
+          if (!answers) throw new HttpError(400, "invalid answers");
+          answer = { answers };
+        }
+        const r = await writeAnswer(sid, toolUseId, answer);
+        if (r === "not-found") throw new HttpError(404, "no such pending question");
+        if (r === "conflict") throw new HttpError(409, "already answered");
+        return sendJson(res, 202, { ok: true });
       }
       if (m[2] === "events" && method === "GET") return sendJson(res, 200, await provider.events(sid));
       if (m[2] === "messages" && method === "POST") {
@@ -1451,8 +1604,11 @@ data: ${JSON.stringify(c)}
       stopTimers();
       for (const r of clients) r.end();
       clients.clear();
-      server.close(() => resolve());
-      server.closeAllConnections();
+      writePresence(0).catch(() => {
+      }).finally(() => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      });
     })
   };
 }
@@ -1469,7 +1625,7 @@ async function holdsHub(r, now = Date.now()) {
   if (r.pid !== null) return isAlive(r.pid);
   let last = Date.parse(r.connectedAt) || 0;
   try {
-    last = Math.max(last, (await fs9.stat(r.transcriptPath)).mtimeMs);
+    last = Math.max(last, (await fs10.stat(r.transcriptPath)).mtimeMs);
   } catch {
   }
   return now - last < UNKNOWN_PID_HOLD_MS;
@@ -1484,20 +1640,20 @@ async function prune(log) {
 }
 async function rotateToken() {
   const file = paths().token;
-  await ensureDir(path8.dirname(file));
+  await ensureDir(path9.dirname(file));
   const t = crypto7.randomBytes(32).toString("hex");
   await writeFileAtomic600(file, t);
-  await fs9.chmod(file, 384).catch(() => {
+  await fs10.chmod(file, 384).catch(() => {
   });
   return t;
 }
 async function writeFileAtomic600(file, data) {
   const tmp = `${file}.${process.pid}.${crypto7.randomUUID()}.tmp`;
   try {
-    await fs9.writeFile(tmp, data, { mode: 384 });
-    await withFsRetry(() => fs9.rename(tmp, file));
+    await fs10.writeFile(tmp, data, { mode: 384 });
+    await withFsRetry(() => fs10.rename(tmp, file));
   } catch (e) {
-    await fs9.rm(tmp, { force: true });
+    await fs10.rm(tmp, { force: true });
     throw e;
   }
 }
@@ -1507,7 +1663,7 @@ async function liveHubExists(self) {
   if (self && info.port === self.port) return false;
   let token;
   try {
-    token = (await fs9.readFile(paths().token, "utf8")).trim();
+    token = (await fs10.readFile(paths().token, "utf8")).trim();
   } catch {
     return false;
   }
@@ -1540,7 +1696,7 @@ async function acquireHubLock(lock) {
 async function startHub(opts = {}) {
   const logDir = paths().logDir;
   await ensureDir(logDir);
-  const logFile = path8.join(logDir, "hub.log");
+  const logFile = path9.join(logDir, "hub.log");
   let secret = "";
   const log = (msg) => {
     try {
@@ -1555,7 +1711,7 @@ async function startHub(opts = {}) {
     return null;
   };
   if (await liveHubExists()) return deferred("before the lock");
-  const lock = path8.join(paths().home, "hub.lock");
+  const lock = path9.join(paths().home, "hub.lock");
   const locked2 = await acquireHubLock(lock);
   let hub;
   try {
@@ -1564,7 +1720,7 @@ async function startHub(opts = {}) {
     secret = token;
     const base = pickPort();
     const tries = base === 0 ? 1 : 11;
-    const staticDir = path8.join(path8.dirname(fileURLToPath(import.meta.url)), "ui");
+    const staticDir = path9.join(path9.dirname(fileURLToPath(import.meta.url)), "ui");
     const provider = opts.listLive ? new ClaudeCodeProvider(opts.listLive) : new ClaudeCodeProvider();
     let lastErr;
     for (let i = 0; i < tries && !hub; i++) {
@@ -1655,7 +1811,7 @@ async function startHub(opts = {}) {
         clearInterval(ownTimer);
         await started.close();
         const cur = await readJson(paths().hubJson);
-        if (cur?.pid === process.pid && cur?.port === port) await fs9.rm(paths().hubJson, { force: true });
+        if (cur?.pid === process.pid && cur?.port === port) await fs10.rm(paths().hubJson, { force: true });
         log("hub stopped");
       }
     };

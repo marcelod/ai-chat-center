@@ -28,7 +28,10 @@ function paths() {
     waiterLock: (sid) => (assertSessionId(sid), path.join(home, "waiters", `${sid}.lock`)),
     waitingFile: (sid) => (assertSessionId(sid), path.join(home, "waiting", `${sid}.json`)),
     busyFile: (sid) => (assertSessionId(sid), path.join(home, "busy", sid)),
+    turnFile: (sid) => (assertSessionId(sid), path.join(home, "turns", `${sid}.json`)),
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
+    questionsDir: (sid) => (assertSessionId(sid), path.join(home, "questions", sid)),
+    presenceFile: path.join(home, "app-presence.json"),
     logDir: path.join(home, "logs")
   };
 }
@@ -578,7 +581,11 @@ function isCcCommand(prompt) {
   const m = CC_RE.exec(prompt);
   if (!m) return null;
   if (m[1] === void 0) return "on";
-  return m[1].toLowerCase() === "off" ? "off" : "unknown";
+  const arg = m[1].toLowerCase().split(/\s+/).join(" ");
+  if (arg === "off") return "off";
+  if (arg === "answers on") return "answers-on";
+  if (arg === "answers off") return "answers-off";
+  return "unknown";
 }
 
 // src/hub/status.ts

@@ -29,7 +29,10 @@ function paths() {
     waiterLock: (sid) => (assertSessionId(sid), path.join(home, "waiters", `${sid}.lock`)),
     waitingFile: (sid) => (assertSessionId(sid), path.join(home, "waiting", `${sid}.json`)),
     busyFile: (sid) => (assertSessionId(sid), path.join(home, "busy", sid)),
+    turnFile: (sid) => (assertSessionId(sid), path.join(home, "turns", `${sid}.json`)),
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
+    questionsDir: (sid) => (assertSessionId(sid), path.join(home, "questions", sid)),
+    presenceFile: path.join(home, "app-presence.json"),
     logDir: path.join(home, "logs")
   };
 }
@@ -305,6 +308,31 @@ async function markDisconnected(sid, reason) {
   await clearBusy(sid);
 }
 
+// src/core/protocol.ts
+var unescapeBody = (t2) => t2.replace(/\[(\\*)\\\/AI Chat Center message\]/g, "[$1/AI Chat Center message]");
+function unwrapMessages(text, keys) {
+  const trusted = keys === void 0 ? null : new Set((Array.isArray(keys) ? keys : [keys]).filter(Boolean));
+  const re = /\[AI Chat Center message id=([^\]\s]+)(?: key=([^\]\s]+))?\]\n([\s\S]*?)\n\[\/AI Chat Center message\]/g;
+  const out = [];
+  for (const m of text.matchAll(re)) {
+    if (trusted && trusted.size > 0 && !(m[2] && trusted.has(m[2]))) continue;
+    out.push({ id: m[1], text: unescapeBody(m[3]) });
+  }
+  return out;
+}
+
+// src/core/turn.ts
+async function setTurnOrigin(sid, origin) {
+  await writeJsonAtomic(paths().turnFile(sid), { origin, at: (/* @__PURE__ */ new Date()).toISOString() });
+}
+async function clearTurnOrigin(sid) {
+  await removeFile(paths().turnFile(sid));
+}
+function promptOrigin(prompt, key) {
+  if (typeof prompt !== "string" || !key) return "terminal";
+  return unwrapMessages(prompt, key).length > 0 ? "app" : "terminal";
+}
+
 // src/hooks/ensureHub.ts
 import crypto4 from "node:crypto";
 import fs4 from "node:fs";
@@ -479,7 +507,12 @@ var LANGS = ["en", "pt-BR"];
 async function loadConfig() {
   const c = await readJson(paths().config);
   const language = LANGS.includes(c?.language) ? c.language : "en";
-  return { language };
+  return { language, answersFromApp: c?.answersFromApp === true };
+}
+async function saveConfig(patch) {
+  const next = { ...await loadConfig(), ...patch };
+  await writeJsonAtomic(paths().config, next);
+  return next;
 }
 
 // src/core/locales/en.json
@@ -487,7 +520,9 @@ var en_default = {
   hook: {
     ready: "AI Chat Center is ready: {url}",
     hubFailed: "AI Chat Center: the hub failed to start. See {log}",
-    unknownArg: "AI Chat Center: unknown argument. Use /cc or /cc off."
+    unknownArg: "AI Chat Center: unknown argument. Use /cc, /cc off, /cc answers on or /cc answers off.",
+    answersOn: "AI Chat Center: you can now answer multiple-choice questions from the app, including confirmations. To turn off: /cc answers off",
+    answersOff: "AI Chat Center: multiple-choice questions are answered only in the terminal again."
   },
   ui: {
     title: "AI Chat Center",
@@ -516,6 +551,18 @@ var en_default = {
       connected: "Connected",
       disconnected: "Disconnected",
       compacted: "Conversation compacted"
+    },
+    question: {
+      answerInTerminal: "Answer in the terminal",
+      answerInTerminalNotice: "Answer in the terminal",
+      other: "Other answer",
+      send: "Send",
+      alreadyAnswered: "Already answered",
+      answered: "Answered",
+      banner: "Claude is asking you a question \u2014 answer below",
+      statusAria: "Status: waiting for your answer",
+      waiting: "waiting for your answer",
+      enableHint: "To answer here, type /cc answers on in the terminal"
     },
     status: {
       busy: "working\u2026",
@@ -555,6 +602,7 @@ var en_default = {
     },
     composer: {
       placeholder: "Message {name}\u2026",
+      answerPlaceholder: "Answer the question above",
       disconnectedPlaceholder: "Session disconnected",
       hint: "Enter sends \xB7 Shift+Enter adds a line \xB7 while Claude is busy, messages are queued",
       disconnectedHint: "This session is disconnected. Type /cc in its terminal to reconnect.",
@@ -584,7 +632,9 @@ var pt_BR_default = {
   hook: {
     ready: "AI Chat Center pronto: {url}",
     hubFailed: "AI Chat Center: o hub n\xE3o iniciou. Veja {log}",
-    unknownArg: "AI Chat Center: argumento desconhecido. Use /cc ou /cc off."
+    unknownArg: "AI Chat Center: argumento desconhecido. Use /cc, /cc off, /cc answers on ou /cc answers off.",
+    answersOn: "AI Chat Center: agora voc\xEA pode responder pelo app as perguntas de m\xFAltipla escolha, inclusive confirma\xE7\xF5es. Para desligar: /cc answers off",
+    answersOff: "AI Chat Center: perguntas de m\xFAltipla escolha voltam a ser respondidas s\xF3 no terminal."
   },
   ui: {
     title: "AI Chat Center",
@@ -613,6 +663,18 @@ var pt_BR_default = {
       connected: "Conectada",
       disconnected: "Desconectada",
       compacted: "Conversa compactada"
+    },
+    question: {
+      answerInTerminal: "Responder no terminal",
+      answerInTerminalNotice: "Responda no terminal",
+      other: "Outra resposta",
+      send: "Enviar",
+      alreadyAnswered: "J\xE1 respondida",
+      answered: "Respondida",
+      banner: "O Claude est\xE1 fazendo uma pergunta \u2014 responda abaixo",
+      statusAria: "Status: aguardando sua resposta",
+      waiting: "aguardando sua resposta",
+      enableHint: "Para responder por aqui, digite /cc answers on no terminal"
     },
     status: {
       busy: "trabalhando\u2026",
@@ -652,6 +714,7 @@ var pt_BR_default = {
     },
     composer: {
       placeholder: "Mensagem para {name}\u2026",
+      answerPlaceholder: "Responda a pergunta acima",
       disconnectedPlaceholder: "Sess\xE3o desconectada",
       hint: "Enter envia \xB7 Shift+Enter quebra a linha \xB7 enquanto o Claude trabalha, as mensagens ficam na fila",
       disconnectedHint: "Esta sess\xE3o est\xE1 desconectada. Digite /cc no terminal dela para reconectar.",
@@ -698,7 +761,11 @@ function isCcCommand(prompt) {
   const m = CC_RE.exec(prompt);
   if (!m) return null;
   if (m[1] === void 0) return "on";
-  return m[1].toLowerCase() === "off" ? "off" : "unknown";
+  const arg = m[1].toLowerCase().split(/\s+/).join(" ");
+  if (arg === "off") return "off";
+  if (arg === "answers on") return "answers-on";
+  if (arg === "answers off") return "answers-off";
+  return "unknown";
 }
 
 // src/core/claudeAgents.ts
@@ -736,7 +803,9 @@ async function resolveClaudePid(sessionId, opts = {}) {
 
 // src/hooks/hook.ts
 var MAX_PREVIOUS_KEYS = 20;
-var UNKNOWN_ARG = "AI Chat Center: unknown argument. Use /cc or /cc off.";
+var UNKNOWN_ARG = "AI Chat Center: unknown argument. Use /cc, /cc off, /cc answers on or /cc answers off.";
+var ANSWERS_ON = "AI Chat Center: answering questions from the app is ON";
+var ANSWERS_OFF = "AI Chat Center: answering questions from the app is OFF";
 var CONNECTED = "AI Chat Center: connected";
 var PID_UNKNOWN = "AI Chat Center: could not identify the Claude process; closing the terminal will be detected by the hub.";
 var output = (context, systemMessage) => ({
@@ -775,6 +844,7 @@ async function connect(input, resolve, ctx) {
   });
   await clearBusy(sid);
   await clearWaiting(sid);
+  await clearTurnOrigin(sid);
   const { language } = await loadConfig();
   let status;
   let shown;
@@ -808,6 +878,11 @@ async function handleHook(event, input, ctx) {
   if (event === "prompt-submit") {
     const cmd = isCcCommand(input.prompt);
     if (cmd === "unknown") return output(UNKNOWN_ARG, t((await loadConfig()).language, "hook.unknownArg"));
+    if (cmd === "answers-on" || cmd === "answers-off") {
+      const on = cmd === "answers-on";
+      const { language } = await saveConfig({ answersFromApp: on });
+      return output(on ? ANSWERS_ON : ANSWERS_OFF, t(language, on ? "hook.answersOn" : "hook.answersOff"));
+    }
     if (cmd === "on") return connect(input, resolve, ctx);
     const reg = await getRegistration(sid);
     if (!reg) return nothing;
@@ -816,6 +891,7 @@ async function handleHook(event, input, ctx) {
       if (!stampedByThisCode(reg)) await updateRegistration(sid, codeStamp(), { ifConnectedAt: reg.connectedAt });
       await clearWaiting(sid);
       await setBusy(sid);
+      await setTurnOrigin(sid, promptOrigin(input.prompt, reg.key));
     }
     return nothing;
   }

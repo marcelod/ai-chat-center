@@ -401,3 +401,54 @@ The registration was edited to `"version": "0.2.3", "protocol": 1`, as a session
 ### Cleanup
 
 The driver was stopped, which closed the terminal; `claude` exited and no waiter of that session was left. The hub was stopped after checking that its command line contained `hub.mjs` (`hub stopped`). No `drive-session` or `claude --plugin-dir` process was left, and port 7790 was free.
+
+## Multiple choice from the app (branch `feat/multiple-choice`)
+
+Run date: 2026-11-23. Claude Code 2.1.330, Haiku (`--model haiku`), Linux. Plugin loaded with `--plugin-dir <repo>/plugin` from the bundles built in this branch. Isolation as above: `AI_CHAT_CENTER_HOME=<scratch>/home`, `AI_CHAT_CENTER_PORT=7795`, `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1`, a fresh project directory. "An open app tab" was a `curl -N` held on `GET /api/stream` with the bearer token (the hub then writes `app-presence.json` with `clients: 1`).
+
+| # | Step | Result |
+|---|------|--------|
+| 1 | `/cc` connects | PASS |
+| 2 | `/cc answers on` saves the setting and Claude confirms it | PASS |
+| 3 | App message asks for AskUserQuestion | PASS |
+| 4 | `GET /api/sessions` shows `pendingQuestion` (turn origin `app` from the UserPromptSubmit prompt) | PASS |
+| 5 | Answer posted from the app reaches Claude | PASS |
+| 6 | Same request typed in the terminal shows the native dialog | PASS |
+| 7 | After `/cc answers off`, an app-started question goes to the terminal | PASS |
+| + | "Answer in the terminal" (`{"release":true}`) hands the question to the native dialog | PASS |
+
+### `/cc` and `/cc answers on`
+
+`/ai-chat-center:cc` showed `UserPromptSubmit says: AI Chat Center is ready: http://127.0.0.1:7795/#token=<token>` and Claude replied "Sessão conectada ao AI Chat Center. O link foi mostrado acima." `/ai-chat-center:cc answers on` showed `UserPromptSubmit says: AI Chat Center: you can now answer multiple-choice questions from the app, including confirmations. To turn off: /cc answers off`; Claude replied "Respostas de perguntas do app ativadas." `config.json` then held `"answersFromApp": true`.
+
+### Question in an app-started turn
+
+`POST /messages {"text":"Use the AskUserQuestion tool to ask me my favorite color, with options Red and Blue, then quote my answer."}`. The screen showed `● Stop hook feedback`, then the spinner line with the hook's `statusMessage`: `(AI Chat Center: answer in the app (Esc to cancel)… · 23s …)`. Claude Code accepted the `statusMessage` key and the other hooks kept firing. No native dialog appeared.
+
+`turns/<sid>.json` held `"origin": "app"`: the turn woken by the waiter runs UserPromptSubmit with the keyed `[AI Chat Center message …]` block in `input.prompt`, so the spec §5.1 fallback was not needed. `GET /api/sessions`:
+```json
+{"sessionId":"403c38c8-…","state":"waiting","pendingQuestion":{"toolUseId":"toolu_0187…","questions":[{"question":"Qual é a sua cor favorita?","options":[{"label":"Red","description":"Vermelho"},{"label":"Blue","description":"Azul"}],"header":"Cor favorita","multiSelect":false}],"createdAt":"2026-11-23T13:47:27.522Z"}}
+```
+`POST /api/sessions/<sid>/questions/toolu_0187… {"answers":{"Qual é a sua cor favorita?":"Blue"}}` → `202 {"ok":true}`. Screen:
+```
+● Answered Claude's questions:
+  ⎿  · Qual é a sua cor favorita? → Blue
+● Sua resposta: "Blue" (azul).
+```
+The session went back to `idle` with no `pendingQuestion`, the question file was removed, and the events had `{"kind":"question","toolUseId":"toolu_0187…","answers":{"Qual é a sua cor favorita?":"Blue"}}`.
+
+### Question in a terminal turn
+
+The same request (fruit, Apple/Pear) typed in the terminal: `turns/<sid>.json` was `"origin": "terminal"`, the native dialog appeared at once (`☐ Fruta favorita … 1. Apple 2. Pear 3. Type something. 4. Chat about this`), the API showed `state: waiting` with no `pendingQuestion`. Choosing Pear in the terminal gave `· Qual é a sua fruta favorita? → Pear` and `Sua resposta: "Pear" (pera).`
+
+### `/cc answers off`
+
+`UserPromptSubmit says: AI Chat Center: multiple-choice questions are answered only in the terminal again.`; Claude replied "Respostas de perguntas do app desativadas." and `config.json` held `"answersFromApp": false`. An app message (animal, Cat/Dog) was delivered (`Stop hook feedback`, origin `app`), and the native dialog appeared in the terminal with no `pendingQuestion`. Cat was chosen there and quoted.
+
+### "Answer in the terminal" from the app
+
+After `/cc answers on` again, an app message (season, Summer/Winter) produced a `pendingQuestion`; `POST …/questions/<toolUseId> {"release":true}` → `202`, and within 5 seconds the native dialog appeared in the terminal. Winter was chosen there and quoted.
+
+### Cleanup
+
+`/exit` closed the session (exit code 0). The scratch hub was stopped after checking that its command line was `hub.mjs` and its `AI_CHAT_CENTER_HOME` was the scratch folder; the `curl` stream ended with it. No waiter with the scratch home was left. `logs/` held only `hub.log`, with no errors (no `ask.log` or `hook.log` was written).
