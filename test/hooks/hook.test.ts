@@ -11,7 +11,9 @@ import { register, getRegistration, markDisconnected } from '../../src/core/regi
 import { isBusy, setBusy } from '../../src/core/busy.js';
 import { getWaiting } from '../../src/core/waiting.js';
 import { paths } from '../../src/core/paths.js';
-import { saveConfig } from '../../src/core/config.js';
+import { saveConfig, loadConfig } from '../../src/core/config.js';
+import { getTurnOrigin, setTurnOrigin } from '../../src/core/turn.js';
+import { ANSWERS_ON, ANSWERS_OFF } from '../../src/hooks/hook.js';
 import { tmpDir } from '../helpers/tmp.js';
 
 const URL_ = 'http://127.0.0.1:7777/#token=t';
@@ -679,5 +681,43 @@ describe('ensureHub', () => {
 
   it('starts the hub detached, hidden, from the home directory (not the session folder)', () => {
     expect(hubSpawnOptions()).toMatchObject({ detached: true, stdio: 'ignore', windowsHide: true, cwd: os.homedir() });
+  });
+});
+
+describe('answers command and turn origin', () => {
+  const block = (key: string) => `[AI Chat Center message id=x key=${key}]\ntexto\n[/AI Chat Center message]`;
+
+  it('isCcCommand parses answers on/off', () => {
+    expect(isCcCommand('/cc answers on')).toBe('answers-on');
+    expect(isCcCommand('/ai-chat-center:cc  ANSWERS  off ')).toBe('answers-off');
+    expect(isCcCommand('/cc answers')).toBe('unknown');
+  });
+
+  it('/cc answers on|off saves the flag, works without a session', async () => {
+    const on = await handleHook('prompt-submit', inp({ prompt: '/cc answers on' }), ctx());
+    expect(out(on).hookSpecificOutput.additionalContext).toContain(ANSWERS_ON);
+    expect(out(on).systemMessage).toBeTruthy();
+    expect((await loadConfig()).answersFromApp).toBe(true);
+    const off = await handleHook('prompt-submit', inp({ prompt: '/cc answers off' }), ctx());
+    expect(out(off).hookSpecificOutput.additionalContext).toContain(ANSWERS_OFF);
+    expect((await loadConfig()).answersFromApp).toBe(false);
+  });
+
+  it('records the turn origin on an active session', async () => {
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
+    const key = await keyOf();
+    await handleHook('prompt-submit', inp({ prompt: `wake\n${block(key)}` }), ctx());
+    expect(await getTurnOrigin('s1')).toBe('app');
+    await handleHook('prompt-submit', inp({ prompt: block('other') }), ctx());
+    expect(await getTurnOrigin('s1')).toBe('terminal');
+    await handleHook('prompt-submit', inp({ prompt: block(key) }), ctx());
+    await handleHook('prompt-submit', inp({ prompt: 'oi' }), ctx());
+    expect(await getTurnOrigin('s1')).toBe('terminal');
+  });
+
+  it('/cc clears the turn origin', async () => {
+    await setTurnOrigin('s1', 'app');
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
+    expect(await getTurnOrigin('s1')).toBeNull();
   });
 });

@@ -25,8 +25,9 @@ import { DIR_MODE, ensureDir } from '../core/fsAtomic.js';
 import { claudeConfigDir, codeStamp, getRegistration, isActive, markDisconnected, register, stampedByThisCode, updateRegistration } from '../core/registry.js';
 import { clearWaiting, setWaiting } from '../core/waiting.js';
 import { clearBusy, setBusy } from '../core/busy.js';
+import { clearTurnOrigin, promptOrigin, setTurnOrigin } from '../core/turn.js';
 import { ensureHub } from './ensureHub.js';
-import { loadConfig } from '../core/config.js';
+import { loadConfig, saveConfig } from '../core/config.js';
 import { t } from '../core/i18n.js';
 import { isCcCommand } from '../core/ccCommand.js';
 
@@ -57,6 +58,8 @@ export interface HookResult {
 const MAX_PREVIOUS_KEYS = 20;
 
 export const UNKNOWN_ARG = 'AI Chat Center: unknown argument. Use /cc or /cc off.';
+export const ANSWERS_ON = 'AI Chat Center: answering questions from the app is ON';
+export const ANSWERS_OFF = 'AI Chat Center: answering questions from the app is OFF';
 export const CONNECTED = 'AI Chat Center: connected';
 export const PID_UNKNOWN =
   'AI Chat Center: could not identify the Claude process; closing the terminal will be detected by the hub.';
@@ -100,6 +103,7 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
   });
   await clearBusy(sid);
   await clearWaiting(sid);
+  await clearTurnOrigin(sid);
   const { language } = await loadConfig();
   // The token URL is shown to the user only (systemMessage). The model gets the key and a status
   // line: the token must not end up in the model context or be repeated in its reply.
@@ -138,6 +142,11 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
   if (event === 'prompt-submit') {
     const cmd = isCcCommand(input.prompt);
     if (cmd === 'unknown') return output(UNKNOWN_ARG, t((await loadConfig()).language, 'hook.unknownArg'));
+    if (cmd === 'answers-on' || cmd === 'answers-off') {
+      const on = cmd === 'answers-on';
+      const { language } = await saveConfig({ answersFromApp: on });
+      return output(on ? ANSWERS_ON : ANSWERS_OFF, t(language, on ? 'hook.answersOn' : 'hook.answersOff'));
+    }
     if (cmd === 'on') return connect(input, resolve, ctx);
     const reg = await getRegistration(sid);
     if (!reg) return nothing;
@@ -148,6 +157,7 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
       await clearWaiting(sid);
       // A turn starts (typed, or woken by a delivery): the waiter must not inject app messages until it ends.
       await setBusy(sid);
+      await setTurnOrigin(sid, promptOrigin(input.prompt, reg.key));
     }
     return nothing;
   }

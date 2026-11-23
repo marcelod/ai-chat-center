@@ -4,6 +4,8 @@ import { readJson, writeJsonAtomic } from './fsAtomic.js';
 export type Lang = 'en' | 'pt-BR';
 export interface Config {
   language: Lang;
+  /** The app may answer Claude Code's multiple-choice dialogs (/cc answers on|off). */
+  answersFromApp: boolean;
 }
 
 const LANGS: Lang[] = ['en', 'pt-BR'];
@@ -11,9 +13,11 @@ const LANGS: Lang[] = ['en', 'pt-BR'];
 export async function loadConfig(): Promise<Config> {
   const c = await readJson<Partial<Config>>(paths().config);
   const language = LANGS.includes(c?.language as Lang) ? (c!.language as Lang) : 'en';
-  return { language };
+  return { language, answersFromApp: c?.answersFromApp === true };
 }
 
-export async function saveConfig(c: Config): Promise<void> {
-  await writeJsonAtomic(paths().config, c);
+export async function saveConfig(patch: Partial<Config>): Promise<Config> {
+  const next = { ...(await loadConfig()), ...patch };
+  await writeJsonAtomic(paths().config, next);
+  return next;
 }

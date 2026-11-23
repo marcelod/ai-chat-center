@@ -226,10 +226,10 @@ describe('api', () => {
   });
   it('config roundtrip', async () => {
     const u = await start(fakeProvider());
-    expect(JSON.parse((await req(u, '/api/config', { headers: auth })).body)).toEqual({ language: 'en' });
+    expect(JSON.parse((await req(u, '/api/config', { headers: auth })).body)).toEqual({ language: 'en', answersFromApp: false });
     const put = await req(u, '/api/config', { method: 'PUT', headers: json, body: JSON.stringify({ language: 'pt-BR' }) });
     expect(put.status).toBe(200);
-    expect(JSON.parse((await req(u, '/api/config', { headers: auth })).body)).toEqual({ language: 'pt-BR' });
+    expect(JSON.parse((await req(u, '/api/config', { headers: auth })).body)).toEqual({ language: 'pt-BR', answersFromApp: false });
   });
   it('invalid language returns 400', async () => {
     const u = await start(fakeProvider());

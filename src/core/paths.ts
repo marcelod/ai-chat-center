@@ -16,6 +16,8 @@ export interface Paths {
   waitingFile: (sid: string) => string;
   /** Present while a turn is running (set on every prompt submit, cleared by the Stop waiter; see busy.ts). */
   busyFile: (sid: string) => string;
+  /** Origin ('app' | 'terminal') of the running turn (see turn.ts). */
+  turnFile: (sid: string) => string;
   /** Ids of the last messages delivered to a session (replay protection, see delivered.ts). */
   deliveredFile: (sid: string) => string;
   logDir: string;
@@ -44,6 +46,7 @@ export function paths(): Paths {
     waiterLock: (sid) => (assertSessionId(sid), path.join(home, 'waiters', `${sid}.lock`)),
     waitingFile: (sid) => (assertSessionId(sid), path.join(home, 'waiting', `${sid}.json`)),
     busyFile: (sid) => (assertSessionId(sid), path.join(home, 'busy', sid)),
+    turnFile: (sid) => (assertSessionId(sid), path.join(home, 'turns', `${sid}.json`)),
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, 'delivered', `${sid}.json`)),
     logDir: path.join(home, 'logs'),
   };

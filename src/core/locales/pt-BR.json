@@ -2,7 +2,9 @@
   "hook": {
     "ready": "AI Chat Center pronto: {url}",
     "hubFailed": "AI Chat Center: o hub não iniciou. Veja {log}",
-    "unknownArg": "AI Chat Center: argumento desconhecido. Use /cc ou /cc off."
+    "unknownArg": "AI Chat Center: argumento desconhecido. Use /cc ou /cc off.",
+    "answersOn": "AI Chat Center: agora você pode responder pelo app as perguntas de múltipla escolha, inclusive confirmações. Para desligar: /cc answers off",
+    "answersOff": "AI Chat Center: perguntas de múltipla escolha voltam a ser respondidas só no terminal."
   },
   "ui": {
     "title": "AI Chat Center",

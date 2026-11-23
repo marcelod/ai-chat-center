@@ -13,9 +13,18 @@ beforeEach(() => {
 
 describe('config', () => {
   it('loadConfig defaults to en, then persists pt-BR', async () => {
-    expect(await loadConfig()).toEqual({ language: 'en' });
+    expect(await loadConfig()).toEqual({ language: 'en', answersFromApp: false });
     await saveConfig({ language: 'pt-BR' });
     expect((await loadConfig()).language).toBe('pt-BR');
+  });
+  it('saveConfig merges the patch and returns the result', async () => {
+    await saveConfig({ answersFromApp: true });
+    expect(await saveConfig({ language: 'pt-BR' })).toEqual({ language: 'pt-BR', answersFromApp: true });
+    expect(await loadConfig()).toEqual({ language: 'pt-BR', answersFromApp: true });
+  });
+  it('an old file without answersFromApp loads as false', async () => {
+    await writeJsonAtomic(path.join(tmp, 'config.json'), { language: 'en' });
+    expect(await loadConfig()).toEqual({ language: 'en', answersFromApp: false });
   });
 });
 

@@ -193,7 +193,7 @@ export class TranscriptParser {
       const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(content)?.[1]?.trim();
       const cc = isCcCommand(args ? `${cmd} ${args}` : cmd); // the same rule as the hook
       if (cc === 'on' || cc === 'off') return [{ kind: 'notice', id: uuid, ts, code: cc === 'on' ? 'connected' : 'disconnected' }];
-      if (cc === 'unknown') return [];
+      if (cc === 'unknown' || cc === 'answers-on' || cc === 'answers-off') return [];
     }
 
     const shellIn = tag(content, 'bash-input');
