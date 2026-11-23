@@ -449,6 +449,15 @@ The same request (fruit, Apple/Pear) typed in the terminal: `turns/<sid>.json` w
 
 After `/cc answers on` again, an app message (season, Summer/Winter) produced a `pendingQuestion`; `POST …/questions/<toolUseId> {"release":true}` → `202`, and within 5 seconds the native dialog appeared in the terminal. Winter was chosen there and quoted.
 
+### Not exercised live
+
+These paths are covered by unit tests only; they were not run in a live session:
+
+- Esc in the terminal while a question waits in the app (the hook is killed; on Linux/macOS the signal handler cleans up, and the hub also drops a question whose hook pid is dead).
+- An app-started turn with no app tab open (the hook gives no decision and the native dialog shows at once).
+- A `multiSelect` question answered from the app.
+- Windows (Esc there is TerminateProcess, with no handler: see W13 in [windows-checklist.md](windows-checklist.md)).
+
 ### Cleanup
 
 `/exit` closed the session (exit code 0). The scratch hub was stopped after checking that its command line was `hub.mjs` and its `AI_CHAT_CENTER_HOME` was the scratch folder; the `curl` stream ended with it. No waiter with the scratch home was left. `logs/` held only `hub.log`, with no errors (no `ask.log` or `hook.log` was written).

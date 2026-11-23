@@ -38,4 +38,6 @@ Run [windows-checklist.md](windows-checklist.md) once on a Windows machine for a
 
 ## 4. Tag
 
+Bump the version (see "Releasing" in the README) for every release that changes the hub API, such as the question endpoint: a running hub of an older version is replaced only when the version differs, and an older hub without the endpoint would answer the app's question POSTs with 404.
+
 Tag the release commit `vX.Y.Z` and push the tag (see "Releasing" in the README).
