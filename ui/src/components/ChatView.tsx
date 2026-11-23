@@ -19,7 +19,7 @@ type Props = {
   answersFromApp?: boolean;
   onAnswer?: (toolUseId: string, answers: Record<string, string>) => Promise<void>;
   onRelease?: (toolUseId: string) => Promise<void>;
-  onRename?: (name: string) => Promise<void>;
+  onRename?: (name: string) => Promise<{ name: string } | void>;
   onBack: () => void;
 };
 
@@ -68,18 +68,30 @@ function Typing() {
   );
 }
 
-function SessionTitle({ session, onRename }: { session: SessionView; onRename?: (name: string) => Promise<void> }) {
+function SessionTitle({
+  session,
+  name,
+  onRename,
+  onRenamed,
+}: {
+  session: SessionView;
+  name: string;
+  onRename?: (name: string) => Promise<{ name: string } | void>;
+  onRenamed: (name: string) => void;
+}) {
   const t = useT();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
   const [failed, setFailed] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const done = useRef(false);
+  const pencil = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false);
 
   const open = () => {
     if (!onRename) return;
     done.current = false;
-    setValue(session.name);
+    setValue(name);
     setFailed(false);
     setEditing(true);
   };
@@ -88,13 +100,24 @@ function SessionTitle({ session, onRename }: { session: SessionView; onRename?: 
       input.current?.focus();
       input.current?.select();
     }
+    if (!editing && refocus.current) {
+      refocus.current = false;
+      pencil.current?.focus();
+    }
   }, [editing]);
 
   const save = async () => {
     if (done.current) return;
     done.current = true;
+    const next = value.trim();
+    if (next === name) {
+      setEditing(false);
+      return;
+    }
     try {
-      await onRename?.(value.trim());
+      const res = await onRename?.(next);
+      if (res && typeof res.name === 'string') onRenamed(res.name);
+      refocus.current = true;
       setEditing(false);
     } catch {
       done.current = false;
@@ -103,6 +126,7 @@ function SessionTitle({ session, onRename }: { session: SessionView; onRename?: 
   };
   const cancel = () => {
     done.current = true;
+    refocus.current = true;
     setEditing(false);
   };
 
@@ -143,11 +167,12 @@ function SessionTitle({ session, onRename }: { session: SessionView; onRename?: 
         onClick={open}
         className={`truncate text-base font-semibold ${onRename ? 'cursor-text' : ''}`}
       >
-        {session.name}
+        {name}
       </h2>
       {onRename && (
         <button
           type="button"
+          ref={pencil}
           aria-label={t('ui.rename.label')}
           onClick={open}
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted hover:bg-field"
@@ -165,6 +190,8 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const { state } = session;
+  const [override, setOverride] = useState<{ base: string; name: string } | null>(null);
+  const shownName = override && override.base === session.name ? override.name : session.name;
 
   const reconciled = new Set(events.flatMap((e) => (e.kind === 'user' && e.appMessageId ? [e.appMessageId] : [])));
   const queued = pending.filter((m) => !reconciled.has(m.id));
@@ -221,10 +248,15 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
           <BackIcon />
         </button>
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-avatar text-sm font-semibold text-avatar-text">
-          {initials(session.name)}
+          {initials(shownName)}
         </div>
         <div className="min-w-0">
-          <SessionTitle session={session} onRename={onRename} />
+          <SessionTitle
+            session={session}
+            name={shownName}
+            onRename={onRename}
+            onRenamed={(n) => setOverride({ base: session.name, name: n })}
+          />
           <p className="truncate font-mono text-xs text-muted">{session.cwd}</p>
         </div>
         <StatusPill state={state} asking={session.waitingKind === 'question'} />

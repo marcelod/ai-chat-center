@@ -40,7 +40,7 @@ function setup(
     events: ChatEvent[];
     pending: PendingMessage[];
     onSend: (text: string) => Promise<void>;
-    onRename: (name: string) => Promise<void>;
+    onRename: (name: string) => Promise<{ name: string } | void>;
   }> = {},
 ) {
   const onSend = props.onSend ?? vi.fn(async () => {});
@@ -359,9 +359,38 @@ describe('ChatView', () => {
       expect(screen.getByRole('textbox', { name: 'Rename session' })).toBeInTheDocument();
     });
 
-    it('limits the length and shows the original name as a title', () => {
+    it('shows the original name as the title of a custom name', () => {
       setup({ session: session({ name: 'Custom', originalName: 'billing-api' }) });
       expect(screen.getByRole('heading', { name: 'Custom' })).toHaveAttribute('title', 'billing-api');
+    });
+
+    it('shows the new name right after saving, before the session updates', async () => {
+      const onRename = vi.fn(async (n: string) => ({ name: n }));
+      setup({ onRename });
+      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      const input = screen.getByRole('textbox', { name: 'Rename session' });
+      await userEvent.clear(input);
+      await userEvent.type(input, 'Novo{Enter}');
+      expect(await screen.findByRole('heading', { name: 'Novo' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Rename session' })).toHaveFocus();
+    });
+
+    it('saves on blur', async () => {
+      const onRename = vi.fn(async () => {});
+      setup({ onRename });
+      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      await userEvent.type(screen.getByRole('textbox', { name: 'Rename session' }), 'x');
+      await userEvent.tab();
+      expect(onRename).toHaveBeenCalledWith('billing-apix');
+    });
+
+    it('does not save when the name is unchanged', async () => {
+      const onRename = vi.fn(async () => {});
+      setup({ onRename });
+      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      await userEvent.keyboard('{Enter}');
+      expect(onRename).not.toHaveBeenCalled();
+      expect(screen.queryByRole('textbox', { name: 'Rename session' })).not.toBeInTheDocument();
     });
 
     it('opens by clicking the name', async () => {
