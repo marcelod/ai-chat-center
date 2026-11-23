@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { LiveSession, SessionView } from '@shared/types';
 import { formatTime, initials, previewText } from '../format';
 import { useLang, useT } from '../i18n';
-import { ChatIcon, ChevronIcon, SearchIcon } from './icons';
+import { ChatIcon, ChevronIcon, PanelIcon, SearchIcon } from './icons';
 import { SettingsMenu, type NotificationsControl } from './SettingsMenu';
 import type { Language } from '../api';
 
@@ -15,6 +15,8 @@ type Props = {
   onLanguage: (l: Language) => void;
   error?: boolean;
   notifications?: NotificationsControl;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 };
 
 const dotColor: Record<SessionView['state'], string> = {
@@ -24,41 +26,58 @@ const dotColor: Record<SessionView['state'], string> = {
   disconnected: 'bg-disconnected',
 };
 
-export function SessionList({ connected, others, unread, selectedId, onSelect, onLanguage, error, notifications }: Props) {
+export function SessionList({ connected, others, unread, selectedId, onSelect, onLanguage, error, notifications, collapsed = false, onToggleCollapsed }: Props) {
   const t = useT();
   const lang = useLang();
   const [query, setQuery] = useState('');
   const [showOthers, setShowOthers] = useState(false);
   const q = query.trim().toLowerCase();
-  const rows = q
+  const rows = q && !collapsed
     ? connected.filter((s) => s.name.toLowerCase().includes(q) || s.cwd.toLowerCase().includes(q))
     : connected;
 
   return (
     <div className="flex h-full flex-col bg-surface">
-      <header className="flex items-center gap-3 px-4 pb-2 pt-4">
-        <div className="flex h-[34px] w-[34px] items-center justify-center rounded-[10px] bg-accent text-accent-contrast">
-          <ChatIcon width={18} height={18} />
-        </div>
-        <h1 className="flex-1 font-display text-xl font-semibold">{t('ui.title')}</h1>
-        <SettingsMenu onLanguage={onLanguage} notifications={notifications} />
+      <header className={`flex items-center gap-3 pb-2 pt-4 ${collapsed ? 'justify-center px-2' : 'px-4'}`}>
+        {!collapsed && (
+          <>
+            <div className="flex h-[34px] w-[34px] items-center justify-center rounded-[10px] bg-accent text-accent-contrast">
+              <ChatIcon width={18} height={18} />
+            </div>
+            <h1 className="flex-1 font-display text-xl font-semibold">{t('ui.title')}</h1>
+            <SettingsMenu onLanguage={onLanguage} notifications={notifications} />
+          </>
+        )}
+        {onToggleCollapsed && (
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            aria-label={collapsed ? t('ui.expandList') : t('ui.collapseList')}
+            title={collapsed ? t('ui.expandList') : t('ui.collapseList')}
+            className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-[10px] text-muted hover:bg-field md:flex"
+          >
+            <PanelIcon width={20} height={20} className={collapsed ? 'rotate-180' : ''} />
+          </button>
+        )}
       </header>
 
-      <div className="px-4 py-2">
-        <div className="flex h-11 items-center gap-2 rounded-[10px] bg-field px-3 text-muted focus-within:ring-2 focus-within:ring-accent">
-          <SearchIcon width={18} height={18} />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t('ui.search')}
-            aria-label={t('ui.search')}
-            className="h-full flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
-          />
+      {!collapsed && (
+        <div className="px-4 py-2">
+          <div className="flex h-11 items-center gap-2 rounded-[10px] bg-field px-3 text-muted focus-within:ring-2 focus-within:ring-accent">
+            <SearchIcon width={18} height={18} />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t('ui.search')}
+              aria-label={t('ui.search')}
+              className="h-full flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+            />
+          </div>
         </div>
-      </div>
+      )}
 
-      {error && <p className="px-4 py-1 text-xs text-waiting-text">{t('ui.loadError')}</p>}
+      {error && !collapsed && <p className="px-4 py-1 text-xs text-waiting-text">{t('ui.loadError')}</p>}
 
       <ul className="flex-1 overflow-y-auto">
         {rows.map((s) => {
@@ -72,7 +91,11 @@ export function SessionList({ connected, others, unread, selectedId, onSelect, o
                 data-state={s.state}
                 aria-current={selected || undefined}
                 onClick={() => onSelect(s.sessionId)}
-                className={`flex min-h-[64px] w-full items-center gap-3 px-4 py-2 text-left ${
+                aria-label={collapsed ? s.name : undefined}
+                title={collapsed ? s.name : undefined}
+                className={`flex min-h-[64px] w-full items-center py-2 text-left ${
+                  collapsed ? 'justify-center px-2' : 'gap-3 px-4'
+                } ${
                   selected ? 'bg-selected' : 'hover:bg-field'
                 }`}
               >
@@ -82,8 +105,17 @@ export function SessionList({ connected, others, unread, selectedId, onSelect, o
                     aria-hidden="true"
                     className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface ${dotColor[s.state]}`}
                   />
+                  {collapsed && n > 0 && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-accent-contrast"
+                    >
+                      {n}
+                    </span>
+                  )}
                   <span className="sr-only">{s.waitingKind === 'question' ? t('ui.question.statusAria') : t(`ui.state.${s.state}`)}</span>
                 </span>
+                {!collapsed && (
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-2">
                     <span className="flex-1 truncate text-[15px] font-bold">{s.name}</span>
@@ -105,16 +137,17 @@ export function SessionList({ connected, others, unread, selectedId, onSelect, o
                     )}
                   </span>
                 </span>
+                )}
               </button>
             </li>
           );
         })}
-        {rows.length === 0 && (
+        {rows.length === 0 && !collapsed && (
           <li className="px-4 py-6 text-sm text-muted">{q ? t('ui.noResults') : t('ui.empty')}</li>
         )}
       </ul>
 
-      {others.length > 0 && (
+      {others.length > 0 && !collapsed && (
         <section className="border-t border-line">
           <button
             type="button"

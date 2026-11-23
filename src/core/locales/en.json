@@ -12,6 +12,8 @@
       "failed": "Couldn't rename"
     },
     "title": "AI Chat Center",
+    "collapseList": "Collapse list",
+    "expandList": "Expand list",
     "search": "Search by name or folder",
     "selectConversation": "Select a conversation",
     "selectConversationHint": "Pick a session on the left to follow it here.",

@@ -5,6 +5,7 @@ import { SessionList } from './components/SessionList';
 import { ChatView } from './components/ChatView';
 import { notificationsSupported } from './notify';
 import { useLiveSessions } from './useLiveSessions';
+import { useCollapsedList } from './useCollapsedList';
 import { LangProvider, useT } from './i18n';
 
 function NoToken() {
@@ -22,6 +23,7 @@ function NoToken() {
 function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
   const t = useT();
   const [answersFromApp, setAnswersFromApp] = useState(false);
+  const [collapsed, toggleCollapsed] = useCollapsedList();
   const live = useLiveSessions();
   const { data, eventsById, pending, unread, selectedId, select, send, retry, error, loading } = live;
   const selected = data.connected.find((s) => s.sessionId === selectedId);
@@ -38,7 +40,9 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
   return (
     <div className="flex h-full">
       <aside
-        className={`h-full w-full shrink-0 border-r border-line md:block md:w-[360px] ${
+        className={`h-full w-full shrink-0 border-r border-line md:block ${
+          collapsed ? 'md:w-[72px]' : 'md:w-[360px]'
+        } ${
           selectedId ? 'hidden' : 'block'
         }`}
       >
@@ -50,6 +54,8 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
           onSelect={select}
           onLanguage={onLanguage}
           error={error}
+          collapsed={collapsed}
+          onToggleCollapsed={toggleCollapsed}
           notifications={{
             supported: notificationsSupported(),
             enabled: live.notify,

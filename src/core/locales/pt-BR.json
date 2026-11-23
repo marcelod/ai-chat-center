@@ -12,6 +12,8 @@
       "failed": "Não foi possível renomear"
     },
     "title": "AI Chat Center",
+    "collapseList": "Recolher lista",
+    "expandList": "Expandir lista",
     "search": "Buscar por nome ou pasta",
     "selectConversation": "Selecione uma conversa",
     "selectConversationHint": "Escolha uma sessão à esquerda para acompanhá-la aqui.",
