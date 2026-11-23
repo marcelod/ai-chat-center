@@ -31,6 +31,7 @@ function paths() {
     turnFile: (sid) => (assertSessionId(sid), path.join(home, "turns", `${sid}.json`)),
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
     questionsDir: (sid) => (assertSessionId(sid), path.join(home, "questions", sid)),
+    namesFile: (sid) => (assertSessionId(sid), path.join(home, "names", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
     logDir: path.join(home, "logs")
   };

@@ -32,6 +32,7 @@ function paths() {
     turnFile: (sid) => (assertSessionId(sid), path.join(home, "turns", `${sid}.json`)),
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
     questionsDir: (sid) => (assertSessionId(sid), path.join(home, "questions", sid)),
+    namesFile: (sid) => (assertSessionId(sid), path.join(home, "names", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
     logDir: path.join(home, "logs")
   };
@@ -525,7 +526,13 @@ var en_default = {
     answersOff: "AI Chat Center: multiple-choice questions are answered only in the terminal again."
   },
   ui: {
+    rename: {
+      label: "Rename session",
+      failed: "Couldn't rename"
+    },
     title: "AI Chat Center",
+    collapseList: "Collapse list",
+    expandList: "Expand list",
     search: "Search by name or folder",
     selectConversation: "Select a conversation",
     selectConversationHint: "Pick a session on the left to follow it here.",
@@ -638,7 +645,13 @@ var pt_BR_default = {
     answersOff: "AI Chat Center: perguntas de m\xFAltipla escolha voltam a ser respondidas s\xF3 no terminal."
   },
   ui: {
+    rename: {
+      label: "Renomear sess\xE3o",
+      failed: "N\xE3o foi poss\xEDvel renomear"
+    },
     title: "AI Chat Center",
+    collapseList: "Recolher lista",
+    expandList: "Expandir lista",
     search: "Buscar por nome ou pasta",
     selectConversation: "Selecione uma conversa",
     selectConversationHint: "Escolha uma sess\xE3o \xE0 esquerda para acompanh\xE1-la aqui.",

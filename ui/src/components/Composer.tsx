@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useT } from '../i18n';
 import { SendIcon } from './icons';
 
@@ -16,11 +16,25 @@ const statusOf = (e: unknown): number | undefined => {
   return typeof s === 'number' ? s : Number((e as Error | null)?.message);
 };
 
+const LINE_PX = 22;
+const PAD_PX = 12;
+const MAX_LINES = 8;
+const MAX_HEIGHT = MAX_LINES * LINE_PX + 2 * PAD_PX;
+
 export function Composer({ name, disabled: sessionOff, blockedByQuestion = false, onSend }: Props) {
   const t = useT();
   const disabled = sessionOff || blockedByQuestion;
   const [text, setText] = useState('');
   const [failure, setFailure] = useState<Failure | null>(null);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  // Grow with the content up to 8 lines, then scroll; shrinks back when the text is cleared.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
+  }, [text]);
 
   const deliver = async (body: string) => {
     setFailure(null);
@@ -77,14 +91,16 @@ export function Composer({ name, disabled: sessionOff, blockedByQuestion = false
       )}
       <div className="flex items-end gap-2">
         <textarea
+          ref={ref}
           rows={1}
+          style={{ maxHeight: MAX_HEIGHT, lineHeight: `${LINE_PX}px`, overflowY: 'auto' }}
           value={text}
           disabled={disabled}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           aria-label={t('ui.composer.placeholder', { name })}
           placeholder={blockedByQuestion ? t('ui.composer.answerPlaceholder') : disabled ? t('ui.composer.disconnectedPlaceholder') : t('ui.composer.placeholder', { name })}
-          className="max-h-40 min-h-[46px] flex-1 resize-none rounded-xl border border-field-border bg-surface px-3.5 py-3 text-[15px] text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 disabled:bg-field"
+          className="min-h-[46px] flex-1 resize-none rounded-xl border border-field-border bg-surface px-3.5 py-3 text-[15px] text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 disabled:bg-field"
         />
         <button
           type="button"

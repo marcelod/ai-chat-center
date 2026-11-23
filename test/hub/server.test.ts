@@ -458,7 +458,13 @@ describe('static', () => {
     fs.writeFileSync(path.join(dir, 'index.html'), '<h1>app</h1>');
     fs.writeFileSync(path.join(dir, 'a.js'), 'x');
     fs.writeFileSync(path.join(dir, 'a.css'), 'x');
+    fs.writeFileSync(path.join(dir, 'favicon.svg'), '<svg/>');
+    fs.writeFileSync(path.join(dir, 'favicon-32.png'), 'x');
     const u = await start(fakeProvider(), { staticDir: dir });
+    const svg = await req(u, '/favicon.svg');
+    expect(svg.status).toBe(200);
+    expect(svg.headers['content-type']).toBe('image/svg+xml');
+    expect((await req(u, '/favicon-32.png')).headers['content-type']).toBe('image/png');
     const js = await req(u, '/a.js');
     expect(js.headers['content-type']).toContain('text/javascript');
     expect((await req(u, '/a.css')).headers['content-type']).toContain('text/css');

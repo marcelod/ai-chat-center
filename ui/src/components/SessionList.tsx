@@ -2,7 +2,8 @@ import { useState } from 'react';
 import type { LiveSession, SessionView } from '@shared/types';
 import { formatTime, initials, previewText } from '../format';
 import { useLang, useT } from '../i18n';
-import { ChatIcon, ChevronIcon, PanelIcon, SearchIcon } from './icons';
+import { Logo } from './Logo';
+import { ChevronIcon, PanelIcon, SearchIcon } from './icons';
 import { SettingsMenu, type NotificationsControl } from './SettingsMenu';
 import type { Language } from '../api';
 
@@ -41,9 +42,7 @@ export function SessionList({ connected, others, unread, selectedId, onSelect, o
       <header className={`flex items-center gap-3 pb-2 pt-4 ${collapsed ? 'justify-center px-2' : 'px-4'}`}>
         {!collapsed && (
           <>
-            <div className="flex h-[34px] w-[34px] items-center justify-center rounded-[10px] bg-accent text-accent-contrast">
-              <ChatIcon width={18} height={18} />
-            </div>
+            <Logo size={34} />
             <h1 className="flex-1 font-display text-xl font-semibold">{t('ui.title')}</h1>
             <SettingsMenu onLanguage={onLanguage} notifications={notifications} />
           </>

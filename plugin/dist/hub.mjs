@@ -34,6 +34,7 @@ function paths() {
     turnFile: (sid) => (assertSessionId(sid), path.join(home, "turns", `${sid}.json`)),
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
     questionsDir: (sid) => (assertSessionId(sid), path.join(home, "questions", sid)),
+    namesFile: (sid) => (assertSessionId(sid), path.join(home, "names", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
     logDir: path.join(home, "logs")
   };
@@ -93,6 +94,24 @@ function proofMatches(token, challenge, port, answer) {
   const want = Buffer.from(healthProof(token, challenge, port, answer.pid, answer.version));
   const got = Buffer.from(String(answer.proof));
   return want.length === got.length && crypto2.timingSafeEqual(want, got);
+}
+
+// src/core/names.ts
+var MAX_DISPLAY_NAME = 80;
+function validDisplayName(v) {
+  if (typeof v !== "string") return null;
+  if (v === "") return "";
+  if (v !== v.trim() || v.length > MAX_DISPLAY_NAME) return null;
+  return v;
+}
+async function getDisplayName(sid) {
+  const d = await readJson(paths().namesFile(sid));
+  return d && typeof d.name === "string" && validDisplayName(d.name) ? d.name : null;
+}
+async function setDisplayName(sid, name) {
+  const file = paths().namesFile(sid);
+  if (name === "") await removeFile(file);
+  else await writeJsonAtomic(file, { name });
 }
 
 // src/hub/provider.ts
@@ -1138,15 +1157,18 @@ var ClaudeCodeProvider = class {
       if (!disconnected && live.ok && l?.status === "idle") await this.dropStaleBusy(sid);
       const cwd = l?.cwd ?? reg.cwd;
       const queued = disconnected ? [] : await peek(sid);
+      const originalName = l?.name || path7.basename(cwd);
+      const custom = await getDisplayName(sid);
       const view = {
         sessionId: sid,
-        name: l?.name || path7.basename(cwd),
+        name: custom ?? originalName,
         cwd,
         state,
         pendingAppMessageIds: queued.map((m) => m.id),
         pendingAppMessages: queued.map(({ id, text, createdAt }) => ({ id, text, createdAt })),
         _sort: Date.parse(reg.connectedAt) || 0
       };
+      if (custom) view.originalName = originalName;
       if (waitingKind) view.waitingKind = waitingKind;
       if (pendingQuestion) view.pendingQuestion = pendingQuestion;
       if (state === "idle" && await this.deliveryStalled(sid, queued)) view.deliveryStalled = true;
@@ -1213,6 +1235,7 @@ var ClaudeCodeProvider = class {
         s.waitingKind ?? null,
         s.pendingQuestion?.toolUseId ?? null,
         s.name,
+        s.originalName ?? null,
         s.lastEvent?.id ?? null,
         s.pendingAppMessageIds,
         s.deliveryStalled ?? false,
@@ -1507,7 +1530,7 @@ data: ${JSON.stringify(c)}
       await saveConfig({ language: body.language });
       return sendJson(res, 200, { language: body.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|questions\/([^/]+))$/.exec(p);
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid;
       try {
@@ -1556,6 +1579,17 @@ data: ${JSON.stringify(c)}
         if (r === "not-found") throw new HttpError(404, "no such pending question");
         if (r === "conflict") throw new HttpError(409, "already answered");
         return sendJson(res, 202, { ok: true });
+      }
+      if (m[2] === "name" && method === "PUT") {
+        const body = await readJsonBody(req);
+        const name = body && typeof body === "object" && !Array.isArray(body) ? validDisplayName(body.name) : null;
+        if (name === null) throw new HttpError(400, "invalid name");
+        const reg = await getRegistration(sid);
+        if (!reg) throw new HttpError(404, "no such session");
+        await setDisplayName(sid, name);
+        let shown = name;
+        if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path8.basename(reg.cwd);
+        return sendJson(res, 200, { name: shown });
       }
       if (m[2] === "events" && method === "GET") return sendJson(res, 200, await provider.events(sid));
       if (m[2] === "messages" && method === "POST") {
