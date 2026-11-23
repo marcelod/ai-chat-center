@@ -8,6 +8,10 @@ import '@fontsource/jetbrains-mono/latin-400.css';
 import '@fontsource/jetbrains-mono/latin-500.css';
 import './index.css';
 import { App } from './App';
+import { applyTheme, readTheme } from './theme';
+
+// Before the first render, so a forced light or dark theme never flashes the OS one.
+applyTheme(readTheme());
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

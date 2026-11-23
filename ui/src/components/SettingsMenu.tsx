@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Language } from '../api';
 import { useLang, useT } from '../i18n';
 import { GearIcon } from './icons';
+import { readTheme, saveTheme, type Theme } from '../theme';
 
 export type NotificationsControl = { supported: boolean; enabled: boolean; onToggle: (on: boolean) => void };
 
@@ -15,6 +16,7 @@ export function SettingsMenu({
   const t = useT();
   const lang = useLang();
   const [open, setOpen] = useState(false);
+  const [theme, setTheme] = useState<Theme>(readTheme);
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -55,6 +57,23 @@ export function SettingsMenu({
           >
             <option value="en">English</option>
             <option value="pt-BR">Português (Brasil)</option>
+          </select>
+          <label className="mt-3 block text-xs font-semibold text-muted" htmlFor="acc-theme">
+            {t('ui.theme.label')}
+          </label>
+          <select
+            id="acc-theme"
+            value={theme}
+            onChange={(e) => {
+              const next = e.target.value as Theme;
+              saveTheme(next);
+              setTheme(next);
+            }}
+            className="mt-1 h-11 w-full rounded-[10px] bg-field px-2 text-sm text-ink"
+          >
+            <option value="system">{t('ui.theme.system')}</option>
+            <option value="light">{t('ui.theme.light')}</option>
+            <option value="dark">{t('ui.theme.dark')}</option>
           </select>
           {notifications?.supported && (
             <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-2 text-sm">

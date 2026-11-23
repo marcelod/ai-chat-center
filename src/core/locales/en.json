@@ -27,6 +27,7 @@
     "you": "You",
     "yesterday": "yesterday",
     "settings": "Settings",
+    "theme": {"label": "Theme", "system": "System", "light": "Light", "dark": "Dark"},
     "language": "Language",
     "back": "Back",
     "unread": "{n} unread",

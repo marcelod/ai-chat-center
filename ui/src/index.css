@@ -32,8 +32,9 @@
   color-scheme: light dark;
 }
 
+/* Dark tokens: the OS choice unless the app forces light, and always when the app forces dark. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --c-page: #0e1015;
     --c-surface: #171a21;
     --c-text: #e8eaf0;
@@ -63,6 +64,42 @@
     --c-danger: #f87171;
     --c-field-border: #3a3f4c;
   }
+}
+
+:root[data-theme='dark'] {
+  --c-page: #0e1015;
+  --c-surface: #171a21;
+  --c-text: #e8eaf0;
+  --c-muted: #9aa1b2;
+  --c-border: #272b35;
+  --c-field: #21252f;
+  --c-accent: #7b93ff;
+  --c-accent-contrast: #0e1015;
+  --c-selected: #20263d;
+  --c-busy: #f59e0b;
+  --c-idle: #7d8494;
+  --c-waiting: #fb923c;
+  --c-waiting-text: #fdba74;
+  --c-disconnected: #3a3f4c;
+  --c-avatar: #252c4a;
+  --c-avatar-text: #b7c3ff;
+  --c-bubble-user: #2a3566;
+  --c-bubble-meta: #b4bbd0;
+  --c-busy-bg: #3a2a10;
+  --c-busy-text: #fbbf6a;
+  --c-warn-bg: #3b2218;
+  --c-banner-bg: #2d1f19;
+  --c-banner-border: #6b3a26;
+  --c-queued-bg: #1d2234;
+  --c-queued-border: #4a5688;
+  --c-ok: #4ade80;
+  --c-danger: #f87171;
+  --c-field-border: #3a3f4c;
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
 }
 
 @theme inline {

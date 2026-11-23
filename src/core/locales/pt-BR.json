@@ -27,6 +27,7 @@
     "you": "Você",
     "yesterday": "ontem",
     "settings": "Configurações",
+    "theme": {"label": "Tema", "system": "Sistema", "light": "Claro", "dark": "Escuro"},
     "language": "Idioma",
     "back": "Voltar",
     "unread": "{n} não lidas",
