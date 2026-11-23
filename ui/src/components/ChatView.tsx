@@ -30,9 +30,9 @@ const NOTICE_KEY = {
   compacted: 'ui.chat.compacted',
 } as const;
 
-function StatusPill({ state }: { state: SessionView['state'] }) {
+function StatusPill({ state, asking }: { state: SessionView['state']; asking: boolean }) {
   const t = useT();
-  const label = t(`ui.status.${state}`);
+  const label = asking ? t('ui.question.waiting') : t(`ui.status.${state}`);
   const style: Record<SessionView['state'], string> = {
     busy: 'bg-busy-bg text-busy-text',
     waiting: 'bg-warn-bg text-waiting-text',
@@ -135,7 +135,7 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
           <h2 className="truncate text-base font-semibold">{session.name}</h2>
           <p className="truncate font-mono text-xs text-muted">{session.cwd}</p>
         </div>
-        <StatusPill state={state} />
+        <StatusPill state={state} asking={session.waitingKind === 'question'} />
       </header>
 
       <div
@@ -181,9 +181,11 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
             <div>
               <p className="text-sm font-semibold">
                 {t(
-                  session.waitingKind === 'input' || session.waitingKind === 'question'
-                    ? 'ui.chat.waitingInputBanner'
-                    : 'ui.chat.waitingBanner',
+                  session.waitingKind === 'question'
+                    ? 'ui.question.banner'
+                    : session.waitingKind === 'input'
+                      ? 'ui.chat.waitingInputBanner'
+                      : 'ui.chat.waitingBanner',
                 )}
               </p>
               {session.waitingKind !== 'input' && session.waitingKind !== 'question' && <p className="mt-0.5 text-[13px]">{t('ui.chat.waitingBannerHint')}</p>}

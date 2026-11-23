@@ -118,4 +118,17 @@ describe('QuestionCard', () => {
     setup(ev({ answerText: 'User answered: Blue' }), { pending: false });
     expect(screen.getByText('User answered: Blue')).toBeInTheDocument();
   });
+
+  it('a failing release shows the send-failed text instead of rejecting', async () => {
+    const onRelease = vi.fn(async () => {
+      throw new ApiError(500);
+    });
+    render(
+      <LangProvider lang="en">
+        <QuestionCard event={ev()} pending answersFromApp onAnswer={async () => {}} onRelease={onRelease} />
+      </LangProvider>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Answer in the terminal' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+  });
 });

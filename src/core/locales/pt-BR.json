@@ -41,6 +41,8 @@
       "send": "Enviar",
       "alreadyAnswered": "Já respondida",
       "answered": "Respondida",
+      "banner": "O Claude está fazendo uma pergunta — responda abaixo",
+      "statusAria": "Status: aguardando sua resposta",
       "waiting": "aguardando sua resposta",
       "enableHint": "Para responder por aqui, digite /cc answers on no terminal"
     },

@@ -275,4 +275,18 @@ describe('ChatView', () => {
     expect(screen.getByRole('textbox', { name: /Message billing-api/ })).toBeDisabled();
     expect(screen.getByPlaceholderText('Answer the question above')).toBeInTheDocument();
   });
+
+  it('says to answer below (banner and header status) when the question is routed to the app', () => {
+    setup({
+      session: session({
+        state: 'waiting',
+        waitingKind: 'question',
+        pendingQuestion: { toolUseId: 'tu1', createdAt: ts(5), questions: [{ question: 'Q?', options: [{ label: 'A' }] }] },
+      }),
+      events: [],
+    });
+    expect(screen.getByText('Claude is asking you a question — answer below')).toBeInTheDocument();
+    expect(screen.getByText('waiting for your answer', { selector: '[data-state="waiting"]' })).toBeInTheDocument();
+    expect(screen.queryByText(/in the terminal/)).toBeNull();
+  });
 });

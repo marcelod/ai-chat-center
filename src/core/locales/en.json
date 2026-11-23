@@ -41,6 +41,8 @@
       "send": "Send",
       "alreadyAnswered": "Already answered",
       "answered": "Answered",
+      "banner": "Claude is asking you a question — answer below",
+      "statusAria": "Status: waiting for your answer",
       "waiting": "waiting for your answer",
       "enableHint": "To answer here, type /cc answers on in the terminal"
     },

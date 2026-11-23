@@ -102,6 +102,15 @@ export function QuestionCard({ event, pending, answersFromApp, onAnswer, onRelea
     }
   };
 
+  const release = async () => {
+    setFailed(false);
+    try {
+      await onRelease();
+    } catch {
+      setFailed(true);
+    }
+  };
+
   return (
     <Shell>
       {questions.map((q) => {
@@ -172,7 +181,7 @@ export function QuestionCard({ event, pending, answersFromApp, onAnswer, onRelea
         <button
           type="button"
           disabled={submitted}
-          onClick={() => void onRelease()}
+          onClick={() => void release()}
           className="min-h-11 rounded-lg px-3 text-sm font-semibold text-muted underline disabled:opacity-40"
         >
           {t('ui.question.answerInTerminal')}

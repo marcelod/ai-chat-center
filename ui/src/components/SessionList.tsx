@@ -82,7 +82,7 @@ export function SessionList({ connected, others, unread, selectedId, onSelect, o
                     aria-hidden="true"
                     className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface ${dotColor[s.state]}`}
                   />
-                  <span className="sr-only">{t(`ui.state.${s.state}`)}</span>
+                  <span className="sr-only">{s.waitingKind === 'question' ? t('ui.question.statusAria') : t(`ui.state.${s.state}`)}</span>
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-2">
