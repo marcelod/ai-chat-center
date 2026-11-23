@@ -20,6 +20,10 @@ export interface Paths {
   turnFile: (sid: string) => string;
   /** Ids of the last messages delivered to a session (replay protection, see delivered.ts). */
   deliveredFile: (sid: string) => string;
+  /** Pending AskUserQuestion questions and their answers (see questions.ts). */
+  questionsDir: (sid: string) => string;
+  /** Written by the hub while an app tab is open (see presence.ts). */
+  presenceFile: string;
   logDir: string;
 }
 
@@ -48,6 +52,8 @@ export function paths(): Paths {
     busyFile: (sid) => (assertSessionId(sid), path.join(home, 'busy', sid)),
     turnFile: (sid) => (assertSessionId(sid), path.join(home, 'turns', `${sid}.json`)),
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, 'delivered', `${sid}.json`)),
+    questionsDir: (sid) => (assertSessionId(sid), path.join(home, 'questions', sid)),
+    presenceFile: path.join(home, 'app-presence.json'),
     logDir: path.join(home, 'logs'),
   };
 }

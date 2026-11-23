@@ -1,7 +1,7 @@
 import { paths } from './paths.js';
 import { readJson, removeFile, writeJsonAtomic } from './fsAtomic.js';
 
-export type WaitingKind = 'permission' | 'input';
+export type WaitingKind = 'permission' | 'input' | 'question';
 
 export async function setWaiting(sid: string, kind: WaitingKind): Promise<void> {
   await writeJsonAtomic(paths().waitingFile(sid), { kind, at: new Date().toISOString() });

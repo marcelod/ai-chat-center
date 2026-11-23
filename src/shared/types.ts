@@ -40,7 +40,7 @@ export type SessionView = {
   name: string;
   cwd: string;
   state: 'busy' | 'idle' | 'waiting' | 'disconnected';
-  waitingKind?: 'permission' | 'input';
+  waitingKind?: 'permission' | 'input' | 'question';
   lastEvent?: ChatEvent;
   pendingAppMessageIds: string[];
   /** The same queued messages with their text, so the app can show them after a reload or in another tab. */
@@ -53,6 +53,11 @@ export type SessionView = {
    */
   undeliveredUnsigned?: number;
 };
+
+export type QuestionOption = { label: string; description?: string };
+export type Question = { question: string; header?: string; options: QuestionOption[]; multiSelect?: boolean };
+/** An AskUserQuestion waiting for an answer from the app (see core/questions.ts). */
+export type PendingQuestion = { toolUseId: string; questions: Question[]; createdAt: string };
 
 export type ProviderChange =
   | { type: 'events'; sessionId: string; events: ChatEvent[] }
