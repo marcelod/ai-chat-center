@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { ChatEvent, SessionView } from '@shared/types';
 import { formatTime, initials } from '../format';
 import { useLang, useT } from '../i18n';
@@ -192,6 +192,10 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
   const { state } = session;
   const [override, setOverride] = useState<{ base: string; name: string } | null>(null);
   const shownName = override && override.base === session.name ? override.name : session.name;
+  // Once the session moved off the name the override was made on, the override is stale.
+  useEffect(() => {
+    setOverride((o) => (o && o.base !== session.name ? null : o));
+  }, [session.name]);
 
   const reconciled = new Set(events.flatMap((e) => (e.kind === 'user' && e.appMessageId ? [e.appMessageId] : [])));
   const queued = pending.filter((m) => !reconciled.has(m.id));
@@ -237,7 +241,7 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
   };
 
   return (
-    <section className="flex h-full min-h-0 flex-col" aria-label={session.name}>
+    <section className="flex h-full min-h-0 flex-col" aria-label={shownName}>
       <header className="flex items-center gap-3 border-b border-line bg-surface px-3 py-3 md:px-5">
         <button
           type="button"

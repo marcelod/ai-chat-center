@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useT } from '../i18n';
 import { SendIcon } from './icons';
 
@@ -29,7 +29,7 @@ export function Composer({ name, disabled: sessionOff, blockedByQuestion = false
   const ref = useRef<HTMLTextAreaElement>(null);
 
   // Grow with the content up to 8 lines, then scroll; shrinks back when the text is cleared.
-  useLayoutEffect(() => {
+  const resize = useCallback(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = 'auto';
@@ -37,7 +37,17 @@ export function Composer({ name, disabled: sessionOff, blockedByQuestion = false
     const border = el.offsetHeight - el.clientHeight;
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT) + border}px`;
     el.style.overflowY = el.scrollHeight > MAX_HEIGHT ? 'auto' : 'hidden';
-  }, [text]);
+  }, []);
+  useLayoutEffect(resize, [text, resize]);
+
+  // A width change (window resize, sidebar toggle) re-wraps the text: measure again.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => resize());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [resize]);
 
   const deliver = async (body: string) => {
     setFailure(null);
@@ -110,7 +120,7 @@ export function Composer({ name, disabled: sessionOff, blockedByQuestion = false
           aria-label={t('ui.composer.send')}
           disabled={disabled || !text.trim()}
           onClick={submit}
-          className="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-xl bg-accent text-accent-contrast disabled:opacity-40"
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-contrast disabled:opacity-40"
         >
           <SendIcon />
         </button>

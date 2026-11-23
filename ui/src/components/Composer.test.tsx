@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LangProvider } from '../i18n';
@@ -40,5 +40,34 @@ describe('Composer growth', () => {
     expect(box().value).toBe('');
     expect(box().style.height).toBe('48px');
     expect(box().style.overflowY).toBe('hidden');
+  });
+
+  it('recalculates the height when the textarea width changes', async () => {
+    let cb: (() => void) | undefined;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(c: () => void) {
+          cb = c;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    try {
+      setup();
+      await userEvent.setup().type(box(), 'a');
+      expect(box().style.height).toBe('48px');
+      scroll = 120; // narrower textarea: the same text now wraps
+      act(() => cb?.());
+      expect(box().style.height).toBe('122px');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps the send button as tall as a one-line textarea', () => {
+    setup();
+    expect(screen.getByRole('button', { name: 'Send' })).toHaveClass('h-12');
   });
 });

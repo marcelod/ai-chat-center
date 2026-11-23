@@ -375,6 +375,30 @@ describe('ChatView', () => {
       expect(screen.getByRole('button', { name: 'Rename session' })).toHaveFocus();
     });
 
+    it('drops the override once the session moved on, so a rename back to the base shows', async () => {
+      const onRename = vi.fn(async (n: string) => ({ name: n }));
+      const { rerenderWith } = setup({ session: session({ name: 'A' }), onRename });
+      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      const input = screen.getByRole('textbox', { name: 'Rename session' });
+      await userEvent.clear(input);
+      await userEvent.type(input, 'B{Enter}');
+      expect(await screen.findByRole('heading', { name: 'B' })).toBeInTheDocument();
+      rerenderWith({ session: session({ name: 'B' }), onRename });
+      expect(screen.getByRole('heading', { name: 'B' })).toBeInTheDocument();
+      rerenderWith({ session: session({ name: 'A' }), onRename });
+      expect(screen.getByRole('heading', { name: 'A' })).toBeInTheDocument();
+    });
+
+    it('labels the section with the displayed name', async () => {
+      const onRename = vi.fn(async (n: string) => ({ name: n }));
+      setup({ session: session({ name: 'A' }), onRename });
+      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      const input = screen.getByRole('textbox', { name: 'Rename session' });
+      await userEvent.clear(input);
+      await userEvent.type(input, 'B{Enter}');
+      expect(await screen.findByRole('region', { name: 'B' })).toBeInTheDocument();
+    });
+
     it('saves on blur', async () => {
       const onRename = vi.fn(async () => {});
       setup({ onRename });
