@@ -393,7 +393,7 @@ async function clearDelivered(sid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.2.3";
+var VERSION = "0.2.4";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
