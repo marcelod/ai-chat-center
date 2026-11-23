@@ -358,3 +358,46 @@ The app asked Claude to run `python3 -c "print(sum(range(3_000_000_000)))"`. Esc
 ### Cleanup
 
 The driver was stopped, which closed the terminal: `claude` exited and, 3 s later, no `waiter.mjs` process was left. The hub was stopped with the pid from `hub.json` (`hub stopped`, `hub.json` removed). No `hub.mjs`, `waiter.mjs`, `hook.mjs`, `drive-session` or `claude --plugin-dir` process was left, and port 7790 was free.
+
+## Audit round 5 (branch `fix/audit-round-1`, version 0.2.4)
+
+Run date: 2026-11-23. Claude Code 2.1.330, Node 22, Linux, `claude --plugin-dir <repo>/plugin --model haiku --permission-mode auto`, isolated `AI_CHAT_CENTER_HOME=<scratch>/home`, `AI_CHAT_CENTER_PORT=7790`, `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1`, a fresh project folder. App messages were posted to the hub API with the Bearer token. Tokens are shown as `<token>`, the session id as `<sid>`.
+
+| Scenario | Result |
+|----------|--------|
+| `/cc` connects; the registration records the claude pid, the config dir, `version: "0.2.4"` and `protocol: 2`; the install secret exists as soon as the hub starts; home `700`, token and secret `600` | PASS |
+| An app message is delivered and answered (the waiter is a direct child of `claude`) | PASS |
+| Esc during an app-started turn: a later app message is still delivered, nothing typed in the terminal | PASS |
+| `kill -9` the hub, then `/cc`: a new hub on the same port at once, and messages flow again | PASS |
+| `drive-session.mjs app` (release check) reports `ACTED` | PASS |
+| **A registration stamped by another protocol: the hub answers 409 `session-older-version` and queues nothing; a prompt typed in the session re-stamps it, and the next app message is delivered** | PASS |
+| Closing the terminal leaves no waiter running | PASS |
+
+### `/cc` and an app message
+
+```
+❯ /ai-chat-center:cc
+  ⎿  UserPromptSubmit says: AI Chat Center is ready: http://127.0.0.1:7790/#token=<token>
+● Sessão conectada ao AI Chat Center. O link já apareceu acima.
+```
+The registration held `"pid": <claude pid>`, `"version": "0.2.4"`, `"protocol": 2`. `Reply with exactly: APP-R5` from the app gave `● Stop hook feedback` then `● APP-R5`. The prompt waiter's parent was the `claude` process.
+
+### Esc during an app-started turn
+
+The app asked Claude to run `python3 -c "print(sum(range(3_000_000_000)))"`. Esc at 07:40:17 while it ran: `⎿ Interrupted · What should Claude do instead?`, and the busy marker stayed. The app then posted `Reply with exactly: APP-AFTER-ESC-R5`; `waiter.log` logged `dropped a busy marker left by an interrupted turn of session <sid>` at 07:40:26, and `● APP-AFTER-ESC-R5` was on screen by 07:40:27.
+
+### `kill -9` the hub, then `/cc`
+
+`kill -9 <hub pid>` left `hub.json` behind. `/ai-chat-center:cc` answered `AI Chat Center is ready: http://127.0.0.1:7790/#token=<token>` ("Sessão reconectada…"); `hub.log` shows the new hub listening on 7790 with no "another live hub" line, and `hub.json` named it. `Reply with exactly: APP-AFTER-KILL-R5` was delivered and answered.
+
+### Release check
+
+`node scripts/e2e/drive-session.mjs app --state <state> --home <scratch>/home --port 7790` printed `ACTED APP-CHECK-…` and exited 0.
+
+### A session on another protocol (audit R5-M1)
+
+The registration was edited to `"version": "0.2.3", "protocol": 1`, as a session left open across a plugin update would have it. `POST /api/sessions/<sid>/messages` answered `409 {"error":"session runs an older version","code":"session-older-version"}` and the inbox stayed empty. `Reply with exactly: TYPED2-R5` typed in the terminal (the prompt hook of this version) re-stamped the registration to `0.2.4` / `2`; the next app message (`APP-RESTAMPED2-R5`) was delivered and answered. The refused text never reached the session.
+
+### Cleanup
+
+The driver was stopped, which closed the terminal; `claude` exited and no waiter of that session was left. The hub was stopped after checking that its command line contained `hub.mjs` (`hub stopped`). No `drive-session` or `claude --plugin-dir` process was left, and port 7790 was free.
