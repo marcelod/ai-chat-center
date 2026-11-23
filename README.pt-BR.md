@@ -74,17 +74,16 @@ Tudo fica no seu computador. O hub escuta apenas em 127.0.0.1. O plugin não lê
 - **Porta.** O hub usa 127.0.0.1:7777. Se essa porta estiver ocupada, ele tenta de 7778 a 7787; o link do `/cc` sempre mostra a porta real.
 - **Variáveis de ambiente.** `AI_CHAT_CENTER_PORT` define a primeira porta a tentar. `AI_CHAT_CENTER_HOME` muda a pasta de estado (padrão `~/.ai-chat-center`). Defina-as no ambiente em que o Claude Code é iniciado.
 - **Logs** ficam em `~/.ai-chat-center/logs/`: `hub.log` (o hub), `hook.log` (o `/cc` e o hook de prompt) e `waiter.log` (entrega de mensagens, inclusive as antigas descartadas).
-- **Parar o hub.** Encerre o processo cujo pid está em `~/.ai-chat-center/hub.json` (por exemplo `kill <pid>`, ou `Stop-Process -Id <pid>` no Windows). Ele volta a iniciar no próximo `/cc`.
+- **Parar o hub.** Apague `~/.ai-chat-center/hub.json`: o hub se encerra sozinho em até um minuto. Para pará-lo na hora, encerre o processo cujo pid está nesse arquivo, mas só depois de conferir que ele é o hub (depois de reiniciar o computador ou de uma falha, o arquivo pode apontar para outro processo). Ele volta a iniciar no próximo `/cc`.
+  - macOS e Linux: `pid=$(node -p "require(process.argv[1]).pid" ~/.ai-chat-center/hub.json) && ps -p "$pid" -o args= | grep -q hub.mjs && kill "$pid"`
+  - Windows PowerShell: `$p = (Get-Content "$HOME\.ai-chat-center\hub.json" | ConvertFrom-Json).pid; if ((Get-CimInstance Win32_Process -Filter "ProcessId=$p").CommandLine -like '*hub.mjs*') { Stop-Process -Id $p }`
 - **Depois de atualizar o plugin**, rode `/cc` uma vez em uma sessão conectada: esse `/cc` substitui o hub antigo. Só um hub mais antigo é substituído: uma sessão que ainda roda uma cópia mais antiga do plugin usa o hub mais novo como ele está. Um hub da versão 0.2.0 ou anterior não consegue se provar, então ele só é parado quando tudo o identifica como nosso (o pid do hub.json está vivo, o hub informa esse mesmo pid e uma versão mais antiga, recusa um token aleatório e aceita o token gravado no disco; um hub que não informa o pid nunca é parado). Caso contrário, o `/cc` avisa que não conseguiu verificá-lo e o deixa rodando; reinicie o computador ou pare-o (veja acima). Até esse `/cc`, um hub que continua rodando segue aceitando mensagens da aba dele. Mensagens na fila de um hub anterior à 0.2.3 não são assinadas do jeito que a 0.2.3 confere, então nunca são entregues: elas ficam separadas na caixa de entrada da sessão como `.unsigned` (registradas no `waiter.log`), e o app mostra que uma mensagem de uma versão anterior não foi entregue. Envie-as de novo.
 
 ## Desinstalação
 
 1. Desinstale o plugin: `/plugin uninstall ai-chat-center@ai-chat-center`.
 2. Remova o marketplace: `/plugin marketplace remove ai-chat-center`.
-3. Pare o hub, se estiver rodando (pid em `~/.ai-chat-center/hub.json`; nada acontece se o arquivo não existir):
-   - macOS e Linux: `f=~/.ai-chat-center/hub.json; [ -f "$f" ] && kill "$(node -p "require('$f').pid")" 2>/dev/null; true`
-   - Windows PowerShell: `$f = "$HOME\.ai-chat-center\hub.json"; if (Test-Path $f) { Stop-Process -Id (Get-Content $f | ConvertFrom-Json).pid -ErrorAction SilentlyContinue }`
-4. Apague o estado (token, segredo da instalação, registros, logs). Um hub que ainda esteja rodando se encerra sozinho em até um minuto:
+3. Apague o estado (token, segredo da instalação, registros, logs). Um hub que ainda esteja rodando se encerra sozinho em até um minuto, porque o `hub.json` deixou de existir:
    - macOS e Linux: `rm -rf ~/.ai-chat-center`
    - Windows PowerShell: `Remove-Item -Recurse -Force "$HOME\.ai-chat-center"`
 

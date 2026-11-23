@@ -74,17 +74,16 @@ Everything stays on your computer. The hub listens only on 127.0.0.1. The plugin
 - **Port.** The hub uses 127.0.0.1:7777. If that port is busy, it tries 7778 to 7787; the `/cc` link always shows the real port.
 - **Environment variables.** `AI_CHAT_CENTER_PORT` sets the first port to try. `AI_CHAT_CENTER_HOME` moves the state folder (default `~/.ai-chat-center`). Set them in the environment Claude Code starts from.
 - **Logs** are in `~/.ai-chat-center/logs/`: `hub.log` (the hub), `hook.log` (`/cc` and the prompt hook) and `waiter.log` (message delivery, including discarded old messages).
-- **Stopping the hub.** End the process whose pid is in `~/.ai-chat-center/hub.json` (for example `kill <pid>`, or `Stop-Process -Id <pid>` on Windows). It starts again on the next `/cc`.
+- **Stopping the hub.** Delete `~/.ai-chat-center/hub.json`: the hub exits on its own within a minute. To stop it at once, end the process whose pid is in that file, but only after checking that it is the hub (after a reboot or a crash the file can name another process). It starts again on the next `/cc`.
+  - macOS and Linux: `pid=$(node -p "require(process.argv[1]).pid" ~/.ai-chat-center/hub.json) && ps -p "$pid" -o args= | grep -q hub.mjs && kill "$pid"`
+  - Windows PowerShell: `$p = (Get-Content "$HOME\.ai-chat-center\hub.json" | ConvertFrom-Json).pid; if ((Get-CimInstance Win32_Process -Filter "ProcessId=$p").CommandLine -like '*hub.mjs*') { Stop-Process -Id $p }`
 - **After a plugin update**, run `/cc` once in a connected session: that `/cc` replaces the old hub. Only an older hub is replaced: a session still running an older copy of the plugin uses a newer hub as it is. A hub of version 0.2.0 or older cannot prove itself, so it is stopped only when everything identifies it as ours (hub.json's pid is alive, the hub reports that same pid and an older version, it refuses a random token, and it accepts the token on disk; a hub that reports no pid is never stopped). Otherwise `/cc` says it could not be verified and leaves it running; restart the computer, or stop it (see above). Until that `/cc`, a hub that is still running keeps accepting app messages from its tab. Messages queued by a hub older than 0.2.3 are not signed the way 0.2.3 checks, so they are never delivered: they are kept aside in the session's inbox as `.unsigned` (logged in `waiter.log`), and the app shows that a message from an older version was not delivered. Send them again.
 
 ## Uninstall
 
 1. Uninstall the plugin: `/plugin uninstall ai-chat-center@ai-chat-center`.
 2. Remove the marketplace: `/plugin marketplace remove ai-chat-center`.
-3. Stop the hub, if it runs (pid in `~/.ai-chat-center/hub.json`; nothing happens when the file is missing):
-   - macOS and Linux: `f=~/.ai-chat-center/hub.json; [ -f "$f" ] && kill "$(node -p "require('$f').pid")" 2>/dev/null; true`
-   - Windows PowerShell: `$f = "$HOME\.ai-chat-center\hub.json"; if (Test-Path $f) { Stop-Process -Id (Get-Content $f | ConvertFrom-Json).pid -ErrorAction SilentlyContinue }`
-4. Delete its state (token, install secret, registrations, logs). A hub that is still running then exits within a minute on its own:
+3. Delete its state (token, install secret, registrations, logs). A hub that is still running then exits within a minute on its own, because `hub.json` is gone:
    - macOS and Linux: `rm -rf ~/.ai-chat-center`
    - Windows PowerShell: `Remove-Item -Recurse -Force "$HOME\.ai-chat-center"`
 

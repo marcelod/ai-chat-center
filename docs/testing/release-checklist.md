@@ -28,7 +28,7 @@ node scripts/e2e/drive-session.mjs app --state "$S" --home "$AI_CHAT_CENTER_HOME
 - `REFUSED <word>` (exit 2): the message was delivered but the model declined it. Release blocker: record the Claude Code version, the model and the screen (`screen --state "$S"`), and do not publish.
 - `UNDELIVERED <word>` (exit 1): delivery itself failed; see `$AI_CHAT_CENTER_HOME/logs/waiter.log`.
 
-Clean up: stop the driver (`kill %1`), stop the hub (pid in `$AI_CHAT_CENTER_HOME/hub.json`), and check that no `waiter.mjs`, `hub.mjs` or `claude --plugin-dir` process is left.
+Clean up: stop the driver (`kill %1`), stop the hub (delete `$AI_CHAT_CENTER_HOME/hub.json` and it exits within a minute, or kill its pid after checking that its command line contains `hub.mjs`), and check that no `waiter.mjs`, `hub.mjs` or `claude --plugin-dir` process is left.
 
 Record the result (Claude Code version, model, verdict) in [e2e-results.md](e2e-results.md).
 

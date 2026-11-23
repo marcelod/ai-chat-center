@@ -68,8 +68,10 @@ Invoke-RestMethod "http://127.0.0.1:$port/api/sessions" -Headers $hdr | ConvertT
   The lock file in `waiters\` stays behind. Type any prompt in the terminal so a new waiter starts on Stop. It must take over the stale lock (the pid in the lock is dead). Then a message from the app is delivered again. Do the same for the hub: kill the `hub.mjs` process, leave `hub.json` in place, and run `/cc`. A new hub starts and the link works.
 - [ ] **W6. No orphan processes at the end.** Close all test terminals. Within a minute, Task Manager → Details shows no `node.exe` running `waiter.mjs`. The hub (`hub.mjs`) is expected to keep running; stop it with:
   ```powershell
-  Stop-Process -Id (Get-Content "$env:USERPROFILE\.ai-chat-center\hub.json" | ConvertFrom-Json).pid
+  $p = (Get-Content "$env:USERPROFILE\.ai-chat-center\hub.json" | ConvertFrom-Json).pid
+  if ((Get-CimInstance Win32_Process -Filter "ProcessId=$p").CommandLine -like '*hub.mjs*') { Stop-Process -Id $p }
   ```
+  Also check the README's stop command (the same check) and that deleting `hub.json` alone makes the hub exit within a minute.
 - [ ] **W8. No console flash from `claude agents`.** With the app open on a connected session, watch the desktop for a minute: the hub runs `claude agents --json` every few seconds, and no console window may flash (it runs with `windowsHide`). Also run `/cc` in a session that was never connected and check that no window flashes during the pid lookup.
 - [ ] **W9. The project folder is not locked by the hub.** Start the hub from a fresh test folder (close any running hub first, see W6, then `/cc` in a session opened in `C:\Temp\cc lock`). Exit that session, then delete the folder (`Remove-Item -Recurse "C:\Temp\cc lock"`) while the hub keeps running. The delete succeeds (the hub's working directory is your user folder), and the app keeps working for other sessions.
 - [ ] **W10. A hub killed without its cleanup.** With a hub running, kill it the way Windows does (`Stop-Process -Id <hub pid>`, Task Manager, or a reboot): `hub.json` stays behind. Run `/cc` again: it answers within a second or two with a working link, and `hub.json` names the new hub's pid.

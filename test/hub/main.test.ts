@@ -342,7 +342,8 @@ describe('main', () => {
 // exits on its own instead of lingering with an old token.
 describe('hub ownership check', () => {
   it('calls onReplaced once hub.json names another pid or port, or is gone', async () => {
-    for (const change of ['other-pid', 'other-port', 'gone'] as const) {
+    // 'folder': the uninstall step deletes the whole state folder; the hub must exit (and close) on its own.
+    for (const change of ['other-pid', 'other-port', 'gone', 'folder'] as const) {
       let replaced = 0;
       const h = await startHub({ ownershipCheckMs: 10, onReplaced: () => void replaced++ });
       try {
@@ -350,6 +351,7 @@ describe('hub ownership check', () => {
         expect(replaced).toBe(0);
         const file = path.join(home, 'hub.json');
         if (change === 'gone') await fsp.rm(file);
+        else if (change === 'folder') await fsp.rm(home, { recursive: true, force: true });
         else {
           const cur = JSON.parse(await fsp.readFile(file, 'utf8'));
           await fsp.writeFile(file, JSON.stringify(change === 'other-pid' ? { ...cur, pid: cur.pid + 1 } : { ...cur, port: cur.port + 1 }));
