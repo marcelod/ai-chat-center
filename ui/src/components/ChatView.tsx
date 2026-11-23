@@ -4,6 +4,7 @@ import { formatTime, initials } from '../format';
 import { useLang, useT } from '../i18n';
 import type { PendingMessage } from '../useLiveSessions';
 import { ActionsGroup } from './ActionsGroup';
+import { QuestionCard } from './QuestionCard';
 import { Composer } from './Composer';
 import { BackIcon, WarningIcon } from './icons';
 import { AssistantBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
@@ -15,6 +16,9 @@ type Props = {
   loading: boolean;
   onSend: (text: string) => Promise<void>;
   onRetry?: (id: string) => void;
+  answersFromApp?: boolean;
+  onAnswer?: (toolUseId: string, answers: Record<string, string>) => Promise<void>;
+  onRelease?: (toolUseId: string) => Promise<void>;
   onBack: () => void;
 };
 
@@ -63,7 +67,7 @@ function Typing() {
   );
 }
 
-export function ChatView({ session, events, pending, loading, onSend, onRetry, onBack }: Props) {
+export function ChatView({ session, events, pending, loading, onSend, onRetry, onBack, answersFromApp = false, onAnswer, onRelease }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -91,6 +95,17 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
         return <AssistantBubble key={e.id} text={e.text} />;
       case 'actions':
         return <ActionsGroup key={e.id} items={e.items} />;
+      case 'question':
+        return (
+          <QuestionCard
+            key={e.id}
+            event={e}
+            pending={session.pendingQuestion?.toolUseId === e.toolUseId}
+            answersFromApp={answersFromApp}
+            onAnswer={(answers) => onAnswer?.(e.toolUseId, answers) ?? Promise.resolve()}
+            onRelease={() => onRelease?.(e.toolUseId) ?? Promise.resolve()}
+          />
+        );
       case 'notice':
         return (
           <p key={e.id} className="self-center rounded-full bg-field px-3 py-1 text-xs text-muted">
@@ -165,15 +180,20 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
             <WarningIcon className="mt-0.5 shrink-0" />
             <div>
               <p className="text-sm font-semibold">
-                {t(session.waitingKind === 'input' ? 'ui.chat.waitingInputBanner' : 'ui.chat.waitingBanner')}
+                {t(
+                  session.waitingKind === 'input' || session.waitingKind === 'question'
+                    ? 'ui.chat.waitingInputBanner'
+                    : 'ui.chat.waitingBanner',
+                )}
               </p>
-              {session.waitingKind !== 'input' && <p className="mt-0.5 text-[13px]">{t('ui.chat.waitingBannerHint')}</p>}
+              {session.waitingKind !== 'input' && session.waitingKind !== 'question' && <p className="mt-0.5 text-[13px]">{t('ui.chat.waitingBannerHint')}</p>}
             </div>
           </div>
         )}
       </div>
 
-      <Composer key={session.sessionId} name={session.name} disabled={state === 'disconnected'} onSend={onSend} />
+      <Composer key={session.sessionId} name={session.name} disabled={state === 'disconnected'}
+        blockedByQuestion={Boolean(session.pendingQuestion)} onSend={onSend} />
     </section>
   );
 }

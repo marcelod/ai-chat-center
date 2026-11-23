@@ -34,6 +34,16 @@
       "disconnected": "Disconnected",
       "compacted": "Conversation compacted"
     },
+    "question": {
+      "answerInTerminal": "Answer in the terminal",
+      "answerInTerminalNotice": "Answer in the terminal",
+      "other": "Other answer",
+      "send": "Send",
+      "alreadyAnswered": "Already answered",
+      "answered": "Answered",
+      "waiting": "waiting for your answer",
+      "enableHint": "To answer here, type /cc answers on in the terminal"
+    },
     "status": {
       "busy": "working…",
       "idle": "idle",
@@ -72,6 +82,7 @@
     },
     "composer": {
       "placeholder": "Message {name}…",
+      "answerPlaceholder": "Answer the question above",
       "disconnectedPlaceholder": "Session disconnected",
       "hint": "Enter sends · Shift+Enter adds a line · while Claude is busy, messages are queued",
       "disconnectedHint": "This session is disconnected. Type /cc in its terminal to reconnect.",

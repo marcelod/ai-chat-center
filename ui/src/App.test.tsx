@@ -50,7 +50,7 @@ const sessions: SessionsResponse = {
 beforeEach(() => {
   vi.mocked(api.hasToken).mockReturnValue(true);
   vi.mocked(api.getSessions).mockResolvedValue(sessions);
-  vi.mocked(api.getConfig).mockResolvedValue({ language: 'en' });
+  vi.mocked(api.getConfig).mockResolvedValue({ language: 'en', answersFromApp: false });
 });
 
 describe('App', () => {

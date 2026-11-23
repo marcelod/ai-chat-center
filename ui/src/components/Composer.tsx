@@ -2,7 +2,7 @@ import { useState, type KeyboardEvent } from 'react';
 import { useT } from '../i18n';
 import { SendIcon } from './icons';
 
-type Props = { name: string; disabled: boolean; onSend: (text: string) => Promise<void> };
+type Props = { name: string; disabled: boolean; blockedByQuestion?: boolean; onSend: (text: string) => Promise<void> };
 type Failure = { kind: 'disconnected' } | { kind: 'version'; direction: 'older' | 'newer' } | { kind: 'failed'; text: string };
 
 /** The session runs another version of the plugin (audit R5-M1): `session-older-version` / `session-newer-version`. */
@@ -16,8 +16,9 @@ const statusOf = (e: unknown): number | undefined => {
   return typeof s === 'number' ? s : Number((e as Error | null)?.message);
 };
 
-export function Composer({ name, disabled, onSend }: Props) {
+export function Composer({ name, disabled: sessionOff, blockedByQuestion = false, onSend }: Props) {
   const t = useT();
+  const disabled = sessionOff || blockedByQuestion;
   const [text, setText] = useState('');
   const [failure, setFailure] = useState<Failure | null>(null);
 
@@ -82,7 +83,7 @@ export function Composer({ name, disabled, onSend }: Props) {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           aria-label={t('ui.composer.placeholder', { name })}
-          placeholder={disabled ? t('ui.composer.disconnectedPlaceholder') : t('ui.composer.placeholder', { name })}
+          placeholder={blockedByQuestion ? t('ui.composer.answerPlaceholder') : disabled ? t('ui.composer.disconnectedPlaceholder') : t('ui.composer.placeholder', { name })}
           className="max-h-40 min-h-[46px] flex-1 resize-none rounded-xl border border-field-border bg-surface px-3.5 py-3 text-[15px] text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 disabled:bg-field"
         />
         <button
@@ -95,7 +96,7 @@ export function Composer({ name, disabled, onSend }: Props) {
           <SendIcon />
         </button>
       </div>
-      {disabled ? (
+      {sessionOff ? (
         <p className="mt-2 rounded-lg bg-field px-3 py-2 text-[12.5px] text-muted">{t('ui.composer.disconnectedHint')}</p>
       ) : (
         <p className="mt-2 text-[11.5px] text-muted">{t('ui.composer.hint')}</p>

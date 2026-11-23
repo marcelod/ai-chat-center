@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { formatTime } from './format';
+import type { SessionView } from '@shared/types';
+import { formatTime, previewText } from './format';
 import { translate } from './i18n';
 
 const now = new Date(2026, 0, 14, 15, 0);
@@ -14,5 +15,12 @@ describe('formatTime', () => {
     const out = formatTime(at(6), 'en', t, now);
     expect(out).toMatch(/Jan/);
     expect(out).toMatch(/6/);
+  });
+});
+
+describe('previewText for a pending question', () => {
+  it('shows the question waiting text', () => {
+    const s = { sessionId: 's', name: 'n', cwd: '/', state: 'waiting', waitingKind: 'question', pendingAppMessageIds: [] } as SessionView;
+    expect(previewText(s, (k) => k)).toBe('ui.question.waiting');
   });
 });

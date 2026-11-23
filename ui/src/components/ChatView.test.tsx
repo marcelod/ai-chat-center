@@ -262,4 +262,17 @@ describe('ChatView', () => {
     await userEvent.click(screen.getByRole('button', { name: /1 action/ }));
     expect(screen.getByText(/a\.txt/)).toBeInTheDocument();
   });
+
+  it('disables the composer while a question is pending', () => {
+    setup({
+      session: session({
+        state: 'waiting',
+        waitingKind: 'question',
+        pendingQuestion: { toolUseId: 'tu1', createdAt: ts(5), questions: [{ question: 'Q?', options: [{ label: 'A' }] }] },
+      }),
+      events: [{ kind: 'question', id: 'q1', ts: ts(5), toolUseId: 'tu1', questions: [{ question: 'Q?', options: [{ label: 'A' }] }] }],
+    });
+    expect(screen.getByRole('textbox', { name: /Message billing-api/ })).toBeDisabled();
+    expect(screen.getByPlaceholderText('Answer the question above')).toBeInTheDocument();
+  });
 });

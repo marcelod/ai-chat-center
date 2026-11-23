@@ -1,7 +1,7 @@
 import type { ChatEvent, ProviderChange, SessionsResponse } from '@shared/types';
 
 export type Language = 'en' | 'pt-BR';
-export type UiConfig = { language: Language };
+export type UiConfig = { language: Language; answersFromApp: boolean };
 
 const TOKEN_KEY = 'acc.token';
 
@@ -177,8 +177,16 @@ export async function sendMessage(id: string, text: string): Promise<{ id: strin
     body: JSON.stringify({ text }),
   });
 }
+const questionPath = (sid: string, toolUseId: string) =>
+  `/api/sessions/${encodeURIComponent(sid)}/questions/${encodeURIComponent(toolUseId)}`;
+export async function answerQuestion(sid: string, toolUseId: string, answers: Record<string, string>): Promise<void> {
+  await request<unknown>(questionPath(sid, toolUseId), { method: 'POST', body: JSON.stringify({ answers }) });
+}
+export async function releaseQuestion(sid: string, toolUseId: string): Promise<void> {
+  await request<unknown>(questionPath(sid, toolUseId), { method: 'POST', body: JSON.stringify({ release: true }) });
+}
 export const getConfig = () => request<UiConfig>('/api/config');
-export const setConfig = (c: UiConfig) =>
+export const setConfig = (c: Pick<UiConfig, 'language'>) =>
   request<UiConfig>('/api/config', { method: 'PUT', body: JSON.stringify(c) });
 
 export type StreamHandlers = { onOpen?: () => void; onError?: () => void };

@@ -34,6 +34,16 @@
       "disconnected": "Desconectada",
       "compacted": "Conversa compactada"
     },
+    "question": {
+      "answerInTerminal": "Responder no terminal",
+      "answerInTerminalNotice": "Responda no terminal",
+      "other": "Outra resposta",
+      "send": "Enviar",
+      "alreadyAnswered": "Já respondida",
+      "answered": "Respondida",
+      "waiting": "aguardando sua resposta",
+      "enableHint": "Para responder por aqui, digite /cc answers on no terminal"
+    },
     "status": {
       "busy": "trabalhando…",
       "idle": "parada",
@@ -72,6 +82,7 @@
     },
     "composer": {
       "placeholder": "Mensagem para {name}…",
+      "answerPlaceholder": "Responda a pergunta acima",
       "disconnectedPlaceholder": "Sessão desconectada",
       "hint": "Enter envia · Shift+Enter quebra a linha · enquanto o Claude trabalha, as mensagens ficam na fila",
       "disconnectedHint": "Esta sessão está desconectada. Digite /cc no terminal dela para reconectar.",

@@ -39,7 +39,7 @@ function eventPreview(e: ChatEvent | undefined, t: T): string {
 }
 
 export function previewText(s: SessionView, t: T): string {
-  if (s.state === 'waiting') return t('ui.waiting');
+  if (s.state === 'waiting') return t(s.waitingKind === 'question' ? 'ui.question.waiting' : 'ui.waiting');
   if (s.state === 'disconnected') return t('ui.disconnected');
   return eventPreview(s.lastEvent, t).replace(/\s+/g, ' ').trim();
 }

@@ -21,9 +21,19 @@ function NoToken() {
 
 function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
   const t = useT();
+  const [answersFromApp, setAnswersFromApp] = useState(false);
   const live = useLiveSessions();
   const { data, eventsById, pending, unread, selectedId, select, send, retry, error, loading } = live;
   const selected = data.connected.find((s) => s.sessionId === selectedId);
+
+  const pendingId = selected?.pendingQuestion?.toolUseId;
+  useEffect(() => {
+    // `/cc answers on|off` is typed in the terminal, so re-read the setting whenever a question shows up.
+    api
+      .getConfig()
+      .then((c) => setAnswersFromApp(Boolean(c.answersFromApp)))
+      .catch(() => {});
+  }, [pendingId, selectedId]);
 
   return (
     <div className="flex h-full">
@@ -57,6 +67,9 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
             loading={loading}
             onSend={(text) => send(selected.sessionId, text)}
             onRetry={(id) => void retry(selected.sessionId, id)}
+            answersFromApp={answersFromApp}
+            onAnswer={(id, answers) => api.answerQuestion(selected.sessionId, id, answers)}
+            onRelease={(id) => api.releaseQuestion(selected.sessionId, id)}
             onBack={() => select(null)}
           />
         ) : (
