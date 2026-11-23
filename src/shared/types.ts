@@ -41,6 +41,8 @@ export type SessionView = {
   cwd: string;
   state: 'busy' | 'idle' | 'waiting' | 'disconnected';
   waitingKind?: 'permission' | 'input' | 'question';
+  /** An AskUserQuestion the app can answer; only for an active session. */
+  pendingQuestion?: PendingQuestion;
   lastEvent?: ChatEvent;
   pendingAppMessageIds: string[];
   /** The same queued messages with their text, so the app can show them after a reload or in another tab. */

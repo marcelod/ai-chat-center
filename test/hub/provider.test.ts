@@ -5,8 +5,9 @@ import { ClaudeCodeProvider, SessionDisconnectedError, SessionProtocolError } fr
 import { PROTOCOL, VERSION } from '../../src/core/version.js';
 import { listLiveSessions } from '../../src/hub/status.js';
 import type { LiveSession } from '../../src/shared/types.js';
-import { register, getRegistration } from '../../src/core/registry.js';
+import { register, getRegistration, markDisconnected } from '../../src/core/registry.js';
 import { setWaiting } from '../../src/core/waiting.js';
+import { putPending, removePending } from '../../src/core/questions.js';
 import { peek } from '../../src/core/inbox.js';
 import { paths } from '../../src/core/paths.js';
 import { tmpDir } from '../helpers/tmp.js';
@@ -162,6 +163,30 @@ describe('provider', () => {
     await setWaiting('s1', 'permission');
     const p = new ClaudeCodeProvider(async () => null);
     expect((await p.listSessions()).connected[0]).toMatchObject({ state: 'waiting', waitingKind: 'permission' });
+  });
+  it('a pending question shows as waiting/question on an active session, and not on a disconnected one', async () => {
+    await reg();
+    const pq = { toolUseId: 'tu1', questions: [{ question: 'Q?', options: [{ label: 'A' }, { label: 'B' }] }], createdAt: '2026-01-01T00:00:00.000Z' };
+    await putPending('s1', pq);
+    const p = new ClaudeCodeProvider(async () => [live({ status: 'busy' })]);
+    expect((await p.listSessions()).connected[0]).toMatchObject({ state: 'waiting', waitingKind: 'question', pendingQuestion: pq });
+    const p2 = new ClaudeCodeProvider(async () => null);
+    expect((await p2.listSessions()).connected[0]).toMatchObject({ state: 'waiting', waitingKind: 'question', pendingQuestion: pq });
+    await markDisconnected('s1', 'exited');
+    const v = (await p.listSessions()).connected[0];
+    expect(v.state).toBe('disconnected');
+    expect(v.pendingQuestion).toBeUndefined();
+  });
+  it('poll emits sessions when a pending question appears or goes away', async () => {
+    await reg();
+    const p = new ClaudeCodeProvider(async () => [live({ status: 'busy' })]);
+    await p.poll();
+    expect((await p.poll()).map((c) => c.type)).toEqual([]);
+    await putPending('s1', { toolUseId: 'tu1', questions: [{ question: 'Q?', options: [{ label: 'A' }, { label: 'B' }] }], createdAt: '2026-01-01T00:00:00.000Z' });
+    expect((await p.poll()).map((c) => c.type)).toEqual(['sessions']);
+    expect((await p.poll()).map((c) => c.type)).toEqual([]);
+    await removePending('s1', 'tu1');
+    expect((await p.poll()).map((c) => c.type)).toEqual(['sessions']);
   });
   it('others lists unregistered interactive sessions only', async () => {
     await reg();

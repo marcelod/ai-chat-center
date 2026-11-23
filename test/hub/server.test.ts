@@ -10,6 +10,9 @@ import { SessionDisconnectedError, SessionProtocolError, type Provider } from '.
 import type { ProviderChange } from '../../src/shared/types.js';
 import { VERSION } from '../../src/core/version.js';
 import { tmpDir } from '../helpers/tmp.js';
+import { saveConfig, loadConfig } from '../../src/core/config.js';
+import { putPending, readAnswer } from '../../src/core/questions.js';
+import { paths } from '../../src/core/paths.js';
 
 const TOKEN = 'a'.repeat(64);
 let home: string;
@@ -239,6 +242,110 @@ describe('api', () => {
   it('unknown api route returns 404', async () => {
     const u = await start(fakeProvider());
     expect((await req(u, '/api/nope', { headers: auth })).status).toBe(404);
+  });
+});
+
+describe('answers endpoint', () => {
+  const Q = { question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] };
+  const post = (u: URL, id: string, body: unknown, sid = 's1') =>
+    req(u, `/api/sessions/${sid}/questions/${id}`, { method: 'POST', headers: json, body: JSON.stringify(body) });
+  const seed = (id = 'tu1') => putPending('s1', { toolUseId: id, questions: [Q], createdAt: '2026-01-01T00:00:00.000Z' });
+
+  it('requires auth and a valid Origin', async () => {
+    const u = await start(fakeProvider());
+    expect((await req(u, '/api/sessions/s1/questions/tu1', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(401);
+    expect((await req(u, '/api/sessions/s1/questions/tu1', { method: 'POST', headers: { ...json, origin: 'http://evil.com' }, body: '{}' })).status).toBe(403);
+  });
+  it('403 when answersFromApp is off (answers and release)', async () => {
+    const u = await start(fakeProvider());
+    await seed();
+    expect((await post(u, 'tu1', { answers: { 'Which?': 'A' } })).status).toBe(403);
+    expect((await post(u, 'tu1', { release: true })).status).toBe(403);
+    expect(await readAnswer('s1', 'tu1')).toBeNull();
+  });
+  it('202 writes the answer; a second one is 409', async () => {
+    const u = await start(fakeProvider());
+    await saveConfig({ answersFromApp: true });
+    await seed();
+    const r = await post(u, 'tu1', { answers: { 'Which?': 'A' } });
+    expect(r.status).toBe(202);
+    expect(JSON.parse(r.body)).toEqual({ ok: true });
+    expect(await readAnswer('s1', 'tu1')).toEqual({ answers: { 'Which?': 'A' } });
+    expect((await post(u, 'tu1', { release: true })).status).toBe(409);
+  });
+  it('202 for release', async () => {
+    const u = await start(fakeProvider());
+    await saveConfig({ answersFromApp: true });
+    await seed();
+    expect((await post(u, 'tu1', { release: true })).status).toBe(202);
+    expect(await readAnswer('s1', 'tu1')).toEqual({ release: true });
+  });
+  it('400 for invalid tool use id, body or answers', async () => {
+    const u = await start(fakeProvider());
+    await saveConfig({ answersFromApp: true });
+    await seed();
+    expect((await post(u, 'bad.id', { release: true })).status).toBe(400);
+    expect((await post(u, '..%2Fx', { release: true })).status).toBe(400);
+    expect((await post(u, 'tu1', {})).status).toBe(400);
+    expect((await post(u, 'tu1', { release: false })).status).toBe(400);
+    expect((await post(u, 'tu1', 'str')).status).toBe(400);
+    expect((await post(u, 'tu1', { answers: { 'Other?': 'A' } })).status).toBe(400);
+    expect((await post(u, 'tu1', { answers: { 'Which?': '' } })).status).toBe(400);
+    expect(await readAnswer('s1', 'tu1')).toBeNull();
+  });
+  it('404 when nothing is pending with that id, or the session id is invalid', async () => {
+    const u = await start(fakeProvider());
+    await saveConfig({ answersFromApp: true });
+    expect((await post(u, 'tu1', { release: true })).status).toBe(404);
+    await seed('other');
+    expect((await post(u, 'tu1', { release: true })).status).toBe(404);
+    expect((await post(u, 'tu1', { release: true }, '..%2Fx')).status).toBe(404);
+  });
+  it('PUT /api/config ignores answersFromApp in the body', async () => {
+    const u = await start(fakeProvider());
+    await req(u, '/api/config', { method: 'PUT', headers: json, body: JSON.stringify({ language: 'pt-BR', answersFromApp: true }) });
+    expect((await loadConfig()).answersFromApp).toBe(false);
+    await saveConfig({ answersFromApp: true });
+    await req(u, '/api/config', { method: 'PUT', headers: json, body: JSON.stringify({ language: 'en', answersFromApp: false }) });
+    expect(await loadConfig()).toEqual({ language: 'en', answersFromApp: true });
+  });
+});
+
+describe('app presence', () => {
+  const readPresence = () => JSON.parse(fs.readFileSync(paths().presenceFile, 'utf8')) as { clients: number; at: number };
+  const until = async (f: () => boolean) => {
+    const end = Date.now() + 3000;
+    while (!f()) {
+      if (Date.now() > end) throw new Error('timeout');
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  };
+  it('tracks connected tabs and zeroes on close', async () => {
+    const u = await start(fakeProvider());
+    const a = await openStream(u, '/api/stream', auth);
+    await until(() => fs.existsSync(paths().presenceFile) && readPresence().clients === 1);
+    const b = await openStream(u, '/api/stream', auth);
+    await until(() => readPresence().clients === 2);
+    a.req.destroy();
+    await until(() => readPresence().clients === 1);
+    await hub!.close();
+    hub = undefined;
+    expect(readPresence().clients).toBe(0);
+    b.req.destroy();
+  });
+  it('the heartbeat refreshes at', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      const u = await start(fakeProvider());
+      const s = await openStream(u, '/api/stream', auth);
+      await vi.waitFor(() => expect(fs.existsSync(paths().presenceFile)).toBe(true));
+      const t0 = readPresence().at;
+      await vi.advanceTimersByTimeAsync(16_000);
+      await vi.waitFor(() => expect(readPresence().at).toBeGreaterThan(t0));
+      s.req.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

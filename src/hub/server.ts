@@ -8,6 +8,8 @@ import { SessionDisconnectedError, SessionProtocolError } from './provider.js';
 import type { ProviderChange } from '../shared/types.js';
 import { assertSessionId } from '../core/paths.js';
 import { loadConfig, saveConfig, type Lang } from '../core/config.js';
+import { writePresence } from '../core/presence.js';
+import { assertToolUseId, getPending, validAnswers, writeAnswer, type AnswerFile } from '../core/questions.js';
 import { VERSION } from '../core/version.js';
 import { CHALLENGE_RE, healthProof } from '../core/healthProof.js';
 
@@ -116,6 +118,9 @@ export async function createHub(
   let heartbeat: NodeJS.Timeout | null = null;
   let closed = false;
 
+  const publishPresence = () => {
+    writePresence(clients.size).catch((e) => log(`presence write failed: ${(e as Error).message}`));
+  };
   const fanOut = (c: ProviderChange) => {
     const frame = `event: ${c.type}\ndata: ${JSON.stringify(c)}\n\n`;
     for (const r of clients) r.write(frame);
@@ -164,6 +169,7 @@ export async function createHub(
     schedulePoll(++pollGen);
     heartbeat = setInterval(() => {
       for (const r of clients) r.write(': heartbeat\n\n');
+      publishPresence();
     }, HEARTBEAT_MS);
   };
   const stopTimers = () => {
@@ -254,8 +260,10 @@ export async function createHub(
       res.write('retry: 3000\n\n');
       clients.add(res);
       startTimers();
+      publishPresence();
       res.on('close', () => {
         clients.delete(res);
+        if (!closed) publishPresence();
         if (clients.size === 0) stopTimers();
       });
       return;
@@ -268,7 +276,7 @@ export async function createHub(
       await saveConfig({ language: body.language as Lang });
       return sendJson(res, 200, { language: body.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages)$/.exec(p);
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid: string;
       try {
@@ -280,6 +288,41 @@ export async function createHub(
         assertSessionId(sid);
       } catch {
         throw new HttpError(404, 'not found');
+      }
+      if (m[3] !== undefined && method === 'POST') {
+        let toolUseId: string;
+        try {
+          toolUseId = decodeURIComponent(m[3]);
+          assertToolUseId(toolUseId);
+        } catch {
+          req.resume();
+          throw new HttpError(400, 'invalid tool use id');
+        }
+        if (!(await loadConfig()).answersFromApp) {
+          req.resume();
+          throw new HttpError(403, 'answers from the app are off');
+        }
+        const body = (await readJsonBody(req)) as { answers?: unknown; release?: unknown } | null;
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'invalid body');
+        const hasRelease = Object.hasOwn(body, 'release');
+        const hasAnswers = Object.hasOwn(body, 'answers');
+        if (hasRelease === hasAnswers) throw new HttpError(400, 'invalid body');
+        const pending = await getPending(sid);
+        let answer: AnswerFile;
+        if (hasRelease) {
+          if (body.release !== true) throw new HttpError(400, 'invalid body');
+          if (!pending || pending.toolUseId !== toolUseId) throw new HttpError(404, 'no such pending question');
+          answer = { release: true };
+        } else {
+          if (!pending || pending.toolUseId !== toolUseId) throw new HttpError(404, 'no such pending question');
+          const answers = validAnswers(pending.questions, body.answers);
+          if (!answers) throw new HttpError(400, 'invalid answers');
+          answer = { answers };
+        }
+        const r = await writeAnswer(sid, toolUseId, answer);
+        if (r === 'not-found') throw new HttpError(404, 'no such pending question');
+        if (r === 'conflict') throw new HttpError(409, 'already answered');
+        return sendJson(res, 202, { ok: true });
       }
       if (m[2] === 'events' && method === 'GET') return sendJson(res, 200, await provider.events(sid));
       if (m[2] === 'messages' && method === 'POST') {
@@ -350,8 +393,10 @@ export async function createHub(
         stopTimers();
         for (const r of clients) r.end();
         clients.clear();
-        server.close(() => resolve());
-        server.closeAllConnections();
+        writePresence(0).catch(() => {}).finally(() => {
+          server.close(() => resolve());
+          server.closeAllConnections();
+        });
       }),
   };
 }

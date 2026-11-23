@@ -4,6 +4,7 @@ import type { ChatEvent, LiveSession, ProviderChange, SessionView } from '../sha
 import { getRegistration, isActive, listRegistrations, markDisconnected, sameConfigDir, trustedKeys, type Registration } from '../core/registry.js';
 import { busyAge, clearBusy } from '../core/busy.js';
 import { countUnsigned, enqueue, peek } from '../core/inbox.js';
+import { getPending } from '../core/questions.js';
 import { getWaiting } from '../core/waiting.js';
 import { paths } from '../core/paths.js';
 import { TranscriptReader } from './transcript/reader.js';
@@ -215,6 +216,7 @@ export class ClaudeCodeProvider implements Provider {
       }
 
       const waiting = disconnected ? null : await getWaiting(sid);
+      const pendingQuestion = disconnected ? null : await getPending(sid);
       // Live status is the source of truth when the lookup succeeded; the waiting file only
       // decides when there is no live data for this session (failed lookup).
       let state: SessionView['state'];
@@ -227,6 +229,10 @@ export class ClaudeCodeProvider implements Provider {
         state = 'waiting';
         waitingKind = waiting.kind;
       } else state = l?.status ?? 'idle';
+      if (pendingQuestion) {
+        state = 'waiting';
+        waitingKind = 'question';
+      }
       if (!disconnected && live.ok && l?.status === 'idle') await this.dropStaleBusy(sid);
       const cwd = l?.cwd ?? reg.cwd;
       const queued = disconnected ? [] : await peek(sid);
@@ -240,6 +246,7 @@ export class ClaudeCodeProvider implements Provider {
         _sort: Date.parse(reg.connectedAt) || 0,
       };
       if (waitingKind) view.waitingKind = waitingKind;
+      if (pendingQuestion) view.pendingQuestion = pendingQuestion;
       if (state === 'idle' && (await this.deliveryStalled(sid, queued))) view.deliveryStalled = true;
       const unsigned = disconnected ? 0 : await countUnsigned(sid);
       if (unsigned > 0) view.undeliveredUnsigned = unsigned;
@@ -308,6 +315,7 @@ export class ClaudeCodeProvider implements Provider {
         s.sessionId,
         s.state,
         s.waitingKind ?? null,
+        s.pendingQuestion?.toolUseId ?? null,
         s.name,
         s.lastEvent?.id ?? null,
         s.pendingAppMessageIds,
