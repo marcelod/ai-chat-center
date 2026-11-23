@@ -8,7 +8,7 @@ import { loadConfig } from '../core/config.js';
 import { getTurnOrigin } from '../core/turn.js';
 import { appPresent } from '../core/presence.js';
 import { clearWaiting, setWaiting } from '../core/waiting.js';
-import { assertToolUseId, parseQuestions, putPending, readAnswer, removeAnswer, removePending, validAnswers } from '../core/questions.js';
+import { assertToolUseId, parseQuestions, putPending, readAnswer, removeAnswer, removePending, removePendingSync, validAnswers } from '../core/questions.js';
 
 // PreToolUse hook on AskUserQuestion. Returns the decision JSON (allow + the answers given in the app) or
 // null: no decision, and Claude Code shows its own dialog in the terminal.
@@ -31,6 +31,30 @@ const valid = (check: (v: string) => void, v: string): boolean => {
     return false;
   }
 };
+/**
+ * The wait in progress, for the signal handlers: Esc in Claude Code or a closed terminal kills the hook
+ * before `finally` can run. `waiting` is true while the waiting state is the 'question' this hook set.
+ */
+let active: { sid: string; id: string; waiting: boolean } | null = null;
+
+/** Synchronous cleanup of what the current wait wrote (pending + answer files, its waiting state). */
+export function abortActiveSync(): void {
+  const a = active;
+  active = null;
+  if (!a) return;
+  try {
+    removePendingSync(a.sid, a.id);
+  } catch (e) {
+    logError(e);
+  }
+  if (!a.waiting) return;
+  try {
+    fs.rmSync(paths().waitingFile(a.sid), { force: true });
+  } catch (e) {
+    logError(e);
+  }
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function runAsk(input: AskInput, opts: AskOptions = {}): Promise<string | null> {
@@ -58,14 +82,18 @@ async function ask(input: AskInput, opts: AskOptions): Promise<string | null> {
 
   const start = Date.now();
   let released = false;
+  const mine = { sid, id, waiting: false };
+  active = mine;
   try {
     await putPending(sid, { toolUseId: id, questions, createdAt: new Date(start).toISOString() });
+    mine.waiting = true;
     await setWaiting(sid, 'question');
     for (;;) {
       // null is also a file still being written: not yet.
       const a = await readAnswer(sid, id);
       if (a && 'release' in a && a.release === true) {
         released = true;
+        mine.waiting = false;
         await setWaiting(sid, 'input');
         return null;
       }
@@ -90,6 +118,7 @@ async function ask(input: AskInput, opts: AskOptions): Promise<string | null> {
       await sleep(pollMs);
     }
   } finally {
+    if (active === mine) active = null;
     await cleanup(sid, id, released);
   }
 }
@@ -127,6 +156,19 @@ async function readStdin(): Promise<string> {
 /** `node ask.mjs pre-tool`: stdin is the PreToolUse input; stdout is only the decision JSON, if any. */
 export async function main(): Promise<void> {
   let out: string | null = null;
+  // Esc cancels the hook by killing it; a closed terminal sends SIGHUP (absent on Windows). Without a
+  // handler Node exits at once and the question would stay pending in the app. No stdout on this path.
+  const onSignal = () => {
+    abortActiveSync();
+    process.exit(0);
+  };
+  for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
+    try {
+      process.on(sig, onSignal);
+    } catch {
+      /* not supported on this platform */
+    }
+  }
   try {
     if (process.argv[2] === 'pre-tool') out = await runAsk(JSON.parse(await readStdin()) as AskInput);
   } catch (e) {

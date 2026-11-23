@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { rmSync } from 'node:fs';
 import path from 'node:path';
 import { paths } from './paths.js';
 import { ensureDir, FILE_MODE, readJson, removeFile, writeJsonAtomic } from './fsAtomic.js';
@@ -65,6 +66,12 @@ export async function getPending(sid: string): Promise<PendingQuestion | null> {
 export async function removePending(sid: string, toolUseId: string): Promise<void> {
   await removeFile(pendingFile(sid, toolUseId));
   await removeFile(answerFile(sid, toolUseId));
+}
+
+/** removePending for a signal handler, which cannot await. */
+export function removePendingSync(sid: string, toolUseId: string): void {
+  rmSync(pendingFile(sid, toolUseId), { force: true });
+  rmSync(answerFile(sid, toolUseId), { force: true });
 }
 
 /** Deletes only the answer file (an invalid answer), so the question stays pending for a new one. */
