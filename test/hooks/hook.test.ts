@@ -797,6 +797,21 @@ describe('answers command and turn origin', () => {
       expect(hookLog()).not.toContain('tok-secret');
     });
 
+    it('flag on, the browser fails to start later: the async error goes to hook.log without the url', async () => {
+      await saveConfig({ openWindow: true });
+      let handler: ((e: Error) => void) | undefined;
+      const c = {
+        ...winCtx(),
+        spawn: (() => ({ unref() {}, on(ev: string, h: (e: Error) => void) { if (ev === 'error') handler = h; return this; } })) as never,
+      };
+      const r = await handleHook('prompt-submit', inp({ prompt: '/cc' }), c);
+      expect(out(r).hookSpecificOutput.additionalContext).toContain('AI Chat Center: connected');
+      handler!(new Error('spawn /usr/bin/chromium ENOENT'));
+      expect(hookLog()).toMatch(/app window.*ENOENT/);
+      expect(hookLog()).not.toContain(CODE);
+      expect(hookLog()).not.toContain('tok-secret');
+    });
+
     it('flag on, hub failed to start: no window attempt', async () => {
       await saveConfig({ openWindow: true });
       const c = { ...winCtx(), ensureHub: async () => { throw new Error('boom'); } };

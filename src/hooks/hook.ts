@@ -148,6 +148,7 @@ async function openWindowQuietly(url: string, ctx: HookContext): Promise<void> {
       findBrowser: ctx.findBrowser ?? (() => findBrowser()),
       ...(ctx.fetch ? { fetch: ctx.fetch } : {}),
       ...(ctx.spawn ? { spawn: ctx.spawn } : {}),
+      onError: (msg) => logError(msg),
     });
   } catch (e) {
     // Messages from launchAppWindow never carry the token; log the message only (no stack, no url).
@@ -182,7 +183,7 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
       answersResult = output(on ? ANSWERS_ON : ANSWERS_OFF, t(language, on ? 'hook.answersOn' : 'hook.answersOff'));
     }
     if (cmd === 'on') return connect(input, resolve, ctx);
-    // `/cc answers on|off` and `/cc window on|off` are typed turns too: it gets the same bookkeeping as any other prompt.
+    // `/cc answers on|off` and `/cc window on|off` are typed turns too: they get the same bookkeeping as any other prompt.
     const reg = await getRegistration(sid);
     if (!reg) return answersResult ?? nothing;
     if (cmd === 'off') await markDisconnected(sid, 'off');

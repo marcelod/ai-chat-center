@@ -841,7 +841,18 @@ var WIN_EXES = [
   ["Microsoft", "Edge", "Application", "msedge.exe"]
 ];
 var WIN_BASES = ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"];
-function findBrowser(env = process.env, platform = process.platform, exists = fs5.existsSync) {
+function isExecutableFile(p, platform = process.platform, checks = {}) {
+  const stat = checks.stat ?? fs5.statSync;
+  const access = checks.access ?? fs5.accessSync;
+  try {
+    if (!stat(p).isFile()) return false;
+    if (platform !== "win32") access(p, fs5.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function findBrowser(env = process.env, platform = process.platform, exists = (p) => isExecutableFile(p, platform)) {
   const ok = (p) => {
     try {
       return exists(p);
@@ -862,15 +873,13 @@ function findBrowser(env = process.env, platform = process.platform, exists = fs
 }
 function openAppWindow(browser, url, deps = {}) {
   const spawn2 = deps.spawn ?? nodeSpawn;
-  const platform = deps.platform ?? process.platform;
   try {
-    const child = spawn2(browser, [`--app=${url}`, "--new-window"], {
-      detached: true,
-      stdio: "ignore",
-      shell: false,
-      ...platform === "win32" ? { windowsHide: true } : {}
-    });
-    child.on?.("error", () => {
+    const child = spawn2(browser, [`--app=${url}`, "--new-window"], { detached: true, stdio: "ignore", shell: false });
+    child.on?.("error", (e) => {
+      try {
+        deps.onError?.(`app window: could not start ${browser}: ${String(e?.message ?? e).split(url).join("<url>")}`);
+      } catch {
+      }
     });
     child.unref();
     return true;
@@ -978,7 +987,8 @@ async function openWindowQuietly(url, ctx) {
     await launchAppWindow(url, {
       findBrowser: ctx.findBrowser ?? (() => findBrowser()),
       ...ctx.fetch ? { fetch: ctx.fetch } : {},
-      ...ctx.spawn ? { spawn: ctx.spawn } : {}
+      ...ctx.spawn ? { spawn: ctx.spawn } : {},
+      onError: (msg) => logError(msg)
     });
   } catch (e) {
     logError(e instanceof Error ? e.message : String(e));

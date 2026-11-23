@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
-import { findBrowser, openAppWindow, launchAppWindow } from '../../src/hooks/openWindow.js';
+import { findBrowser, openAppWindow, launchAppWindow, isExecutableFile } from '../../src/hooks/openWindow.js';
 
 const CODE = 'c0de'.repeat(16);
 const onlyExists = (...files: string[]) => (p: string) => files.includes(p);
@@ -51,6 +51,25 @@ describe('findBrowser', () => {
   });
 });
 
+describe('isExecutableFile', () => {
+  const st = (file: boolean) => () => ({ isFile: () => file });
+  const ok = () => {};
+  const denied = () => { throw new Error('EACCES'); };
+  it('posix: only a regular file with the execute bit', () => {
+    expect(isExecutableFile('/b', 'linux', { stat: st(true) as never, access: ok })).toBe(true);
+    expect(isExecutableFile('/b', 'darwin', { stat: st(false) as never, access: ok })).toBe(false);
+    expect(isExecutableFile('/b', 'linux', { stat: st(true) as never, access: denied })).toBe(false);
+    expect(isExecutableFile('/b', 'linux', { stat: (() => { throw new Error('ENOENT'); }) as never, access: ok })).toBe(false);
+  });
+  it('windows: a regular file is enough (no execute bit)', () => {
+    expect(isExecutableFile('C:\\b.exe', 'win32', { stat: st(true) as never, access: denied })).toBe(true);
+    expect(isExecutableFile('C:\\b', 'win32', { stat: st(false) as never, access: ok })).toBe(false);
+  });
+  it('default check on this machine: a directory is not a browser', () => {
+    expect(isExecutableFile(process.cwd())).toBe(false);
+  });
+});
+
 type Call = { cmd: string; args: string[]; opts: Record<string, unknown> };
 const fakeSpawn = (calls: Call[], fail = false) =>
   ((cmd: string, args: string[], opts: Record<string, unknown>) => {
@@ -64,7 +83,7 @@ describe('openAppWindow', () => {
   it('spawns the browser detached, without a shell, with --app and --new-window, and unrefs it', () => {
     const calls: Call[] = [];
     const url = 'http://127.0.0.1:7777/#pair=abc';
-    expect(openAppWindow('/usr/bin/chromium', url, { spawn: fakeSpawn(calls), platform: 'linux' })).toBe(true);
+    expect(openAppWindow('/usr/bin/chromium', url, { spawn: fakeSpawn(calls) })).toBe(true);
     expect(calls).toHaveLength(1);
     expect(calls[0].cmd).toBe('/usr/bin/chromium');
     expect(calls[0].args).toEqual([`--app=${url}`, '--new-window']);
@@ -72,14 +91,27 @@ describe('openAppWindow', () => {
     expect((calls[0] as unknown as { child: { unrefed: boolean } }).child.unrefed).toBe(true);
   });
 
-  it('hides the console window on Windows', () => {
+  it('does not pass windowsHide on Windows (it would start a GUI browser hidden)', () => {
     const calls: Call[] = [];
-    openAppWindow('C:\\chrome.exe', 'http://127.0.0.1:1/#pair=x', { spawn: fakeSpawn(calls), platform: 'win32' });
-    expect(calls[0].opts).toMatchObject({ windowsHide: true, shell: false });
+    openAppWindow('C:\\chrome.exe', 'http://127.0.0.1:1/#pair=x', { spawn: fakeSpawn(calls) });
+    expect(calls[0].opts).toMatchObject({ detached: true, stdio: 'ignore', shell: false });
+    expect(calls[0].opts).not.toHaveProperty('windowsHide');
+  });
+
+  it('reports an async spawn error through onError, without the url', () => {
+    let handler: ((e: Error) => void) | undefined;
+    const spawn = (() => ({ unref() {}, on(ev: string, h: (e: Error) => void) { if (ev === 'error') handler = h; return this; } })) as never;
+    const seen: string[] = [];
+    const url = 'http://127.0.0.1:1/#pair=secretcode';
+    openAppWindow('/usr/bin/chromium', url, { spawn, onError: (m) => seen.push(m) });
+    handler!(new Error(`spawn /usr/bin/chromium EACCES ${url}`));
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatch(/app window.*EACCES/);
+    expect(seen[0]).not.toContain('secretcode');
   });
 
   it('returns false when spawn throws', () => {
-    expect(openAppWindow('/nope', 'http://127.0.0.1:1/#pair=x', { spawn: fakeSpawn([], true), platform: 'linux' })).toBe(false);
+    expect(openAppWindow('/nope', 'http://127.0.0.1:1/#pair=x', { spawn: fakeSpawn([], true) })).toBe(false);
   });
 });
 
@@ -94,7 +126,7 @@ describe('launchAppWindow', () => {
   it('asks the hub for a pair code with the bearer token and opens #pair=<code>, never the token', async () => {
     const calls: Call[] = [];
     const seen: { url?: string; init?: RequestInit }[] = [];
-    const r = await launchAppWindow(HUB, { findBrowser: () => '/usr/bin/chromium', fetch: okFetch(seen), spawn: fakeSpawn(calls), platform: 'linux' });
+    const r = await launchAppWindow(HUB, { findBrowser: () => '/usr/bin/chromium', fetch: okFetch(seen), spawn: fakeSpawn(calls) });
     expect(r).toBe(true);
     expect(seen[0].url).toBe('http://127.0.0.1:7777/api/pair-code');
     expect(seen[0].init?.method).toBe('POST');

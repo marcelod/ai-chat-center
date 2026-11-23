@@ -20,11 +20,29 @@ const WIN_EXES = [
 ];
 const WIN_BASES = ['ProgramFiles', 'ProgramFiles(x86)', 'LOCALAPPDATA'];
 
+export interface FileChecks {
+  stat?: (p: string) => { isFile(): boolean };
+  access?: (p: string, mode?: number) => void;
+}
+
+/** A regular file that can be run: with the execute bit on Linux/macOS; any regular file on Windows. */
+export function isExecutableFile(p: string, platform: NodeJS.Platform = process.platform, checks: FileChecks = {}): boolean {
+  const stat = checks.stat ?? fs.statSync;
+  const access = checks.access ?? fs.accessSync;
+  try {
+    if (!stat(p).isFile()) return false;
+    if (platform !== 'win32') access(p, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Path of a Chrome, Chromium or Edge executable (spec §2 order), or null. */
 export function findBrowser(
   env: Env = process.env,
   platform: NodeJS.Platform = process.platform,
-  exists: (p: string) => boolean = fs.existsSync,
+  exists: (p: string) => boolean = (p) => isExecutableFile(p, platform),
 ): string | null {
   const ok = (p: string) => {
     try {
@@ -48,22 +66,25 @@ export function findBrowser(
 
 export interface OpenDeps {
   spawn?: Spawn;
-  platform?: NodeJS.Platform;
+  /** Receives a failure that happens after the spawn returned (ENOENT, EACCES): message only, never the url. */
+  onError?: (msg: string) => void;
 }
 
 /** Starts `browser --app=<url> --new-window` detached, without a shell. False when it could not start. */
 export function openAppWindow(browser: string, url: string, deps: OpenDeps = {}): boolean {
   const spawn = deps.spawn ?? nodeSpawn;
-  const platform = deps.platform ?? process.platform;
   try {
-    const child = spawn(browser, [`--app=${url}`, '--new-window'], {
-      detached: true,
-      stdio: 'ignore',
-      shell: false,
-      ...(platform === 'win32' ? { windowsHide: true } : {}),
+    // No windowsHide: chrome.exe/msedge.exe have no console to hide, and SW_HIDE would apply to the
+    // browser's first window, so a browser that was not running yet would start with the app hidden.
+    const child = spawn(browser, [`--app=${url}`, '--new-window'], { detached: true, stdio: 'ignore', shell: false });
+    // An async spawn error (ENOENT, EACCES after the check) must not crash the hook; it is only logged.
+    child.on?.('error', (e: Error) => {
+      try {
+        deps.onError?.(`app window: could not start ${browser}: ${String(e?.message ?? e).split(url).join('<url>')}`);
+      } catch {
+        /* never break the hook */
+      }
     });
-    // An async spawn error (ENOENT after the check) must not crash the hook.
-    child.on?.('error', () => {});
     child.unref();
     return true;
   } catch {
