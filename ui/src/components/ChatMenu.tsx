@@ -7,6 +7,8 @@ type Props = {
   onRename?: () => void;
   /** Removes the session from the app (absent: no Remove item). Rejects when the hub refused. */
   onRemove?: () => Promise<void>;
+  /** Opens the background picker (absent: no Background item). */
+  onBackground?: () => void;
 };
 
 /**
@@ -14,7 +16,7 @@ type Props = {
  * the button, a click outside closes it, arrow keys move between items. "Remove from app" asks to confirm
  * in place (a second click), never with window.confirm.
  */
-export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({ onRename, onRemove }, button) {
+export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({ onRename, onRemove, onBackground }, button) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -62,7 +64,7 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
     };
   }, [open]);
 
-  if (!onRename && !onRemove) return null;
+  if (!onRename && !onRemove && !onBackground) return null;
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Tab') {
@@ -133,6 +135,21 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
               }}
             >
               {t('ui.chatMenu.rename')}
+            </button>
+          )}
+          {onBackground && (
+            <button
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              aria-haspopup="dialog"
+              className={itemCls}
+              onClick={() => {
+                close(false);
+                onBackground();
+              }}
+            >
+              {t('ui.background.menu')}
             </button>
           )}
           {onRemove && (

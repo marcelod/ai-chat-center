@@ -80,6 +80,9 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
             onRelease={(id) => api.releaseQuestion(selected.sessionId, id)}
             onRename={(name) => api.renameSession(selected.sessionId, name)}
             onRemove={() => live.remove(selected.sessionId)}
+            onSetBackground={(bg) => api.setBackground(selected.sessionId, bg)}
+            onUploadBackground={(file) => api.uploadBackgroundImage(selected.sessionId, file)}
+            onLoadBackgroundImage={() => api.getBackgroundImage(selected.sessionId)}
             onBack={() => select(null)}
           />
         ) : (
