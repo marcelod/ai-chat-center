@@ -2,10 +2,10 @@ import { createRequire as __acc_createRequire } from 'node:module';
 const require = __acc_createRequire(import.meta.url);
 
 // src/hub/main.ts
-import fs12 from "node:fs/promises";
+import fs14 from "node:fs/promises";
 import fsSync from "node:fs";
-import path10 from "node:path";
-import crypto8 from "node:crypto";
+import path12 from "node:path";
+import crypto10 from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 // src/core/paths.ts
@@ -35,8 +35,12 @@ function paths() {
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
     questionsDir: (sid) => (assertSessionId(sid), path.join(home, "questions", sid)),
     namesFile: (sid) => (assertSessionId(sid), path.join(home, "names", `${sid}.json`)),
+    pinsFile: (sid) => (assertSessionId(sid), path.join(home, "pins", `${sid}.json`)),
     metaFile: (sid) => (assertSessionId(sid), path.join(home, "meta", `${sid}.json`)),
+    backgroundsDir: path.join(home, "backgrounds"),
+    backgroundFile: (sid) => (assertSessionId(sid), path.join(home, "backgrounds", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
+    attachmentsDir: path.join(home, "attachments"),
     logDir: path.join(home, "logs")
   };
 }
@@ -95,6 +99,17 @@ function proofMatches(token, challenge, port, answer) {
   const want = Buffer.from(healthProof(token, challenge, port, answer.pid, answer.version));
   const got = Buffer.from(String(answer.proof));
   return want.length === got.length && crypto2.timingSafeEqual(want, got);
+}
+
+// src/core/pins.ts
+async function isPinned(sid) {
+  const d = await readJson(paths().pinsFile(sid));
+  return d?.pinned === true;
+}
+async function setPinned(sid, pinned) {
+  const file = paths().pinsFile(sid);
+  if (pinned) await writeJsonAtomic(file, { pinned: true });
+  else await removeFile(file);
 }
 
 // src/core/names.ts
@@ -168,28 +183,134 @@ function shortModel(id) {
   return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ""}`;
 }
 
+// src/core/background.ts
+import fs3 from "node:fs/promises";
+import path4 from "node:path";
+import crypto3 from "node:crypto";
+
+// src/shared/background.ts
+var BACKGROUND_COLORS = ["rose", "peach", "sand", "mint", "teal", "sky", "lavender", "slate"];
+var BACKGROUND_GRADIENTS = ["sunrise", "ocean", "meadow", "dusk", "aurora", "ember"];
+var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
+
+// src/core/background.ts
+var MIME = { png: "image/png", jpg: "image/jpeg", webp: "image/webp", gif: "image/gif" };
+var imageRe = (sid) => new RegExp(`^${sid}-[0-9a-f]{16}\\.(png|jpg|webp|gif)$`);
+var chains = /* @__PURE__ */ new Map();
+function serial(sid, fn) {
+  const run = (chains.get(sid) ?? Promise.resolve()).then(fn, fn);
+  const tail = run.catch(() => {
+  });
+  chains.set(sid, tail);
+  void tail.then(() => {
+    if (chains.get(sid) === tail) chains.delete(sid);
+  });
+  return run;
+}
+var isPlainObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+function validBackgroundPreset(v) {
+  if (v === null) return { ok: true, value: null };
+  if (!isPlainObject(v) || Object.keys(v).length !== 2) return { ok: false };
+  if (v.kind === "color" && BACKGROUND_COLORS.includes(v.value)) return { ok: true, value: v };
+  if (v.kind === "gradient" && BACKGROUND_GRADIENTS.includes(v.value)) return { ok: true, value: v };
+  return { ok: false };
+}
+function sniffImage(b) {
+  if (b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "png";
+  if (b.length >= 3 && b[0] === 255 && b[1] === 216 && b[2] === 255) return "jpg";
+  if (b.length >= 6 && /^GIF8[79]a$/.test(b.toString("latin1", 0, 6))) return "gif";
+  if (b.length >= 12 && b.toString("latin1", 0, 4) === "RIFF" && b.toString("latin1", 8, 12) === "WEBP") return "webp";
+  return null;
+}
+async function getBackground(sid) {
+  const d = await readJson(paths().backgroundFile(sid));
+  if (isPlainObject(d) && d.kind === "image") {
+    return typeof d.file === "string" && imageRe(sid).test(d.file) && Object.keys(d).length === 2 ? { kind: "image", file: d.file } : null;
+  }
+  const p = validBackgroundPreset(d);
+  return p.ok ? p.value : null;
+}
+async function removeImages(sid, keep) {
+  let names;
+  try {
+    names = await fs3.readdir(paths().backgroundsDir);
+  } catch {
+    return;
+  }
+  const re = imageRe(sid);
+  for (const n of names) if (n !== keep && re.test(n)) await removeFile(path4.join(paths().backgroundsDir, n)).catch(() => {
+  });
+}
+async function setBackground(sid, bg) {
+  const file = paths().backgroundFile(sid);
+  await serial(sid, async () => {
+    if (bg === null) await removeFile(file);
+    else await writeJsonAtomic(file, bg);
+    await removeImages(sid);
+  });
+}
+async function saveBackgroundImage(sid, data) {
+  const file = paths().backgroundFile(sid);
+  const ext = sniffImage(data);
+  if (!ext) return null;
+  return serial(sid, async () => {
+    const name = `${sid}-${crypto3.randomBytes(8).toString("hex")}.${ext}`;
+    const target = path4.join(paths().backgroundsDir, name);
+    await ensureDir(paths().backgroundsDir);
+    const tmp = `${target}.${crypto3.randomUUID()}.tmp`;
+    try {
+      await fs3.writeFile(tmp, data, { mode: FILE_MODE });
+      await withFsRetry(() => fs3.rename(tmp, target));
+    } catch (e) {
+      await fs3.rm(tmp, { force: true });
+      throw e;
+    }
+    const bg = { kind: "image", file: name };
+    await writeJsonAtomic(file, bg);
+    await removeImages(sid, name);
+    return bg;
+  });
+}
+async function readBackgroundImage(sid) {
+  const bg = await getBackground(sid);
+  if (bg?.kind !== "image") return null;
+  const ext = path4.extname(bg.file).slice(1);
+  try {
+    return { data: await fs3.readFile(path4.join(paths().backgroundsDir, bg.file)), type: MIME[ext] };
+  } catch {
+    return null;
+  }
+}
+async function clearBackground(sid) {
+  assertSessionId(sid);
+  await serial(sid, async () => {
+    await removeFile(paths().backgroundFile(sid));
+    await removeImages(sid);
+  });
+}
+
 // src/hub/provider.ts
-import fs10 from "node:fs/promises";
-import path8 from "node:path";
+import fs12 from "node:fs/promises";
+import path10 from "node:path";
 
 // src/core/registry.ts
-import fs7 from "node:fs/promises";
+import fs9 from "node:fs/promises";
 import os2 from "node:os";
-import path6 from "node:path";
+import path8 from "node:path";
 
 // src/core/inbox.ts
-import fs5 from "node:fs/promises";
-import path5 from "node:path";
-import crypto5 from "node:crypto";
+import fs6 from "node:fs/promises";
+import path6 from "node:path";
+import crypto6 from "node:crypto";
 
 // src/core/secret.ts
-import fs3 from "node:fs/promises";
-import crypto3 from "node:crypto";
+import fs4 from "node:fs/promises";
+import crypto4 from "node:crypto";
 var SECRET_RE = /^[0-9a-f]{64}$/;
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function readOnce() {
   try {
-    const s = (await fs3.readFile(paths().secret, "utf8")).trim();
+    const s = (await fs4.readFile(paths().secret, "utf8")).trim();
     return SECRET_RE.test(s) ? { ok: true, secret: s } : { ok: false, reason: "malformed" };
   } catch (e) {
     return { ok: false, reason: e.code === "ENOENT" ? "missing" : "unreadable" };
@@ -212,10 +333,10 @@ async function installSecret() {
   if (have.reason === "unreadable") throw new Error("the install secret cannot be read right now");
   const file = paths().secret;
   await ensureDir(paths().home);
-  const fresh = crypto3.randomBytes(32).toString("hex");
+  const fresh = crypto4.randomBytes(32).toString("hex");
   if (have.reason === "missing") {
     try {
-      await fs3.writeFile(file, fresh, { flag: "wx", mode: FILE_MODE });
+      await fs4.writeFile(file, fresh, { flag: "wx", mode: FILE_MODE });
       return fresh;
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
@@ -227,13 +348,13 @@ async function installSecret() {
       await sleep(10);
     }
   }
-  const tmp = `${file}.${crypto3.randomUUID()}.tmp`;
-  await fs3.writeFile(tmp, fresh, { mode: FILE_MODE });
-  await withFsRetry(() => fs3.rename(tmp, file));
+  const tmp = `${file}.${crypto4.randomUUID()}.tmp`;
+  await fs4.writeFile(tmp, fresh, { mode: FILE_MODE });
+  await withFsRetry(() => fs4.rename(tmp, file));
   const after = await readOnce();
   return after.ok ? after.secret : fresh;
 }
-var mac = (secret, sid, m) => crypto3.createHmac("sha256", secret).update(`v2|${sid}|${m.id}|${m.createdAt}|${m.text}`).digest("hex");
+var mac = (secret, sid, m) => crypto4.createHmac("sha256", secret).update(`v2|${sid}|${m.id}|${m.createdAt}|${m.text}`).digest("hex");
 var separatorFree = (m) => typeof m.id === "string" && typeof m.createdAt === "string" && !m.id.includes("|") && !m.createdAt.includes("|");
 async function signMessage(sid, m) {
   if (!separatorFree(m) || sid.includes("|")) throw new Error("invalid message id or time");
@@ -241,9 +362,9 @@ async function signMessage(sid, m) {
 }
 
 // src/core/lock.ts
-import fs4 from "node:fs/promises";
-import path4 from "node:path";
-import crypto4 from "node:crypto";
+import fs5 from "node:fs/promises";
+import path5 from "node:path";
+import crypto5 from "node:crypto";
 var EMPTY_GRACE_MS = 1e4;
 var LOCK_STALE_MS = 9e4;
 function isAlive(pid) {
@@ -269,30 +390,30 @@ function lockPid(content) {
   return typeof pid === "number" && Number.isInteger(pid) && pid > 0 ? pid : null;
 }
 async function publish(file) {
-  const tmp = `${file}.${crypto4.randomUUID()}.tmp`;
+  const tmp = `${file}.${crypto5.randomUUID()}.tmp`;
   const content = JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() });
   try {
-    await fs4.writeFile(tmp, content, { flag: "wx" });
-    await fs4.link(tmp, file);
+    await fs5.writeFile(tmp, content, { flag: "wx" });
+    await fs5.link(tmp, file);
     return content;
   } catch (e) {
     if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return null;
     throw e;
   } finally {
-    await fs4.rm(tmp, { force: true });
+    await fs5.rm(tmp, { force: true });
   }
 }
 async function staleContent(file) {
   let content;
   let mtimeMs;
   try {
-    content = await fs4.readFile(file, "utf8");
+    content = await fs5.readFile(file, "utf8");
   } catch (e) {
     if (code(e) === "ENOENT") return null;
     content = "";
   }
   try {
-    mtimeMs = (await fs4.stat(file)).mtimeMs;
+    mtimeMs = (await fs5.stat(file)).mtimeMs;
   } catch {
     return null;
   }
@@ -307,8 +428,8 @@ async function reclaim(file, seen) {
   const guard = `${file}.reclaim`;
   if (await publish(guard) === null) {
     try {
-      const st = await fs4.stat(guard);
-      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs4.rm(guard, { force: true });
+      const st = await fs5.stat(guard);
+      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs5.rm(guard, { force: true });
     } catch {
     }
     return null;
@@ -316,7 +437,7 @@ async function reclaim(file, seen) {
   try {
     if (await staleContent(file) !== seen) return null;
     try {
-      await fs4.unlink(file);
+      await fs5.unlink(file);
     } catch (e) {
       if (code(e) !== "ENOENT") {
         if (contention(e)) return null;
@@ -326,7 +447,7 @@ async function reclaim(file, seen) {
     return await publish(file);
   } finally {
     try {
-      if (lockPid(await fs4.readFile(guard, "utf8")) === process.pid) await fs4.rm(guard, { force: true });
+      if (lockPid(await fs5.readFile(guard, "utf8")) === process.pid) await fs5.rm(guard, { force: true });
     } catch {
     }
   }
@@ -335,7 +456,7 @@ async function acquireLock(file) {
   return await acquireLockContent(file) !== null;
 }
 async function acquireLockContent(file) {
-  await ensureDir(path4.dirname(file));
+  await ensureDir(path5.dirname(file));
   const mine = await publish(file);
   if (mine !== null) return mine;
   const seen = await staleContent(file);
@@ -344,11 +465,11 @@ async function acquireLockContent(file) {
 }
 async function releaseLock(file) {
   try {
-    if (lockPid(await fs4.readFile(file, "utf8")) !== process.pid) return;
+    if (lockPid(await fs5.readFile(file, "utf8")) !== process.pid) return;
   } catch {
     return;
   }
-  await fs4.rm(file, { force: true });
+  await fs5.rm(file, { force: true });
 }
 async function withLock(file, waitMs, fn) {
   const deadline = Date.now() + waitMs;
@@ -375,15 +496,15 @@ async function enqueue(sid, text) {
   const dir = paths().inboxDir(sid);
   await ensureDir(dir);
   const now = Date.now();
-  const msg = await signMessage(sid, { id: crypto5.randomUUID(), text, createdAt: new Date(now).toISOString() });
+  const msg = await signMessage(sid, { id: crypto6.randomUUID(), text, createdAt: new Date(now).toISOString() });
   counter = (counter + 1) % 1e6;
   const name = `${String(now).padStart(15, "0")}-${String(counter).padStart(6, "0")}-${msg.id}.msg`;
-  const tmp = path5.join(dir, `.${msg.id}.tmp`);
+  const tmp = path6.join(dir, `.${msg.id}.tmp`);
   try {
-    await fs5.writeFile(tmp, JSON.stringify(msg), { encoding: "utf8", mode: FILE_MODE });
-    await withFsRetry(() => fs5.rename(tmp, path5.join(dir, name)));
+    await fs6.writeFile(tmp, JSON.stringify(msg), { encoding: "utf8", mode: FILE_MODE });
+    await withFsRetry(() => fs6.rename(tmp, path6.join(dir, name)));
   } catch (e) {
-    await fs5.rm(tmp, { force: true });
+    await fs6.rm(tmp, { force: true });
     throw e;
   }
   return msg;
@@ -391,7 +512,7 @@ async function enqueue(sid, text) {
 async function list(sid) {
   const dir = paths().inboxDir(sid);
   try {
-    return (await fs5.readdir(dir)).filter((n) => n.endsWith(".msg")).sort().map((n) => path5.join(dir, n));
+    return (await fs6.readdir(dir)).filter((n) => n.endsWith(".msg")).sort().map((n) => path6.join(dir, n));
   } catch (e) {
     if (e.code === "ENOENT") return [];
     throw e;
@@ -399,7 +520,7 @@ async function list(sid) {
 }
 async function readMsg(file) {
   try {
-    return JSON.parse(await fs5.readFile(file, "utf8"));
+    return JSON.parse(await fs6.readFile(file, "utf8"));
   } catch (e) {
     if (isRace(e)) return null;
     if (e instanceof SyntaxError) return null;
@@ -418,7 +539,7 @@ var CLAIM_MARK = ".claim";
 var UNSIGNED = ".unsigned";
 async function countUnsigned(sid) {
   try {
-    return (await fs5.readdir(paths().inboxDir(sid))).filter((n) => n.endsWith(`.msg${UNSIGNED}`)).length;
+    return (await fs6.readdir(paths().inboxDir(sid))).filter((n) => n.endsWith(`.msg${UNSIGNED}`)).length;
   } catch {
     return 0;
   }
@@ -427,7 +548,7 @@ async function clearInbox(sid) {
   const dir = paths().inboxDir(sid);
   let names;
   try {
-    names = await fs5.readdir(dir);
+    names = await fs6.readdir(dir);
   } catch (e) {
     if (e.code === "ENOENT") return;
     throw e;
@@ -435,7 +556,7 @@ async function clearInbox(sid) {
   for (const n of names) {
     if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`) && !n.endsWith(`.msg${UNSIGNED}`)) continue;
     try {
-      await withFsRetry(() => fs5.rm(path5.join(dir, n), { force: true }));
+      await withFsRetry(() => fs6.rm(path6.join(dir, n), { force: true }));
     } catch (e) {
       if (!isRace(e)) throw e;
     }
@@ -443,13 +564,13 @@ async function clearInbox(sid) {
 }
 
 // src/core/busy.ts
-import fs6 from "node:fs/promises";
+import fs7 from "node:fs/promises";
 async function clearBusy(sid) {
   await removeFile(paths().busyFile(sid));
 }
 async function isBusy(sid) {
   try {
-    await fs6.access(paths().busyFile(sid));
+    await fs7.access(paths().busyFile(sid));
     return true;
   } catch {
     return false;
@@ -457,7 +578,7 @@ async function isBusy(sid) {
 }
 async function busyAge(sid, now = Date.now()) {
   try {
-    return now - (await fs6.stat(paths().busyFile(sid))).mtimeMs;
+    return now - (await fs7.stat(paths().busyFile(sid))).mtimeMs;
   } catch {
     return null;
   }
@@ -476,8 +597,126 @@ async function clearDelivered(sid) {
   await removeFile(paths().deliveredFile(sid));
 }
 
+// src/core/attachments.ts
+import fs8 from "node:fs/promises";
+import path7 from "node:path";
+import crypto7 from "node:crypto";
+var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
+var NAME_MAX_BYTES = 200;
+var EXT_MAX_BYTES = 20;
+var AttachmentTooLargeError = class extends Error {
+  constructor() {
+    super("attachment too large");
+    this.name = "AttachmentTooLargeError";
+  }
+};
+function sessionAttachmentsDir(sid) {
+  assertSessionId(sid);
+  return path7.join(paths().attachmentsDir, sid);
+}
+function sanitizeFileName(raw) {
+  const base = (raw.split(/[\\/]/).pop() ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, "").replace(/[:*?"<>|]/g, "_").trim().replace(/^\.+/, "").trim();
+  if (!base) return "file";
+  if (Buffer.byteLength(base) <= NAME_MAX_BYTES) return base;
+  const dot = base.lastIndexOf(".");
+  const ext = dot > 0 && Buffer.byteLength(base.slice(dot)) <= EXT_MAX_BYTES ? base.slice(dot) : "";
+  return truncateUtf8(base.slice(0, base.length - ext.length), NAME_MAX_BYTES - Buffer.byteLength(ext)) + ext;
+}
+function truncateUtf8(s, max) {
+  let out = "";
+  let bytes = 0;
+  for (const ch of s) {
+    const n = Buffer.byteLength(ch);
+    if (bytes + n > max) break;
+    out += ch;
+    bytes += n;
+  }
+  return out;
+}
+async function storeAttachment(sid, rawName, src, max) {
+  const dir = sessionAttachmentsDir(sid);
+  await ensureDir(dir);
+  await fs8.chmod(paths().attachmentsDir, DIR_MODE).catch(() => {
+  });
+  await fs8.chmod(dir, DIR_MODE).catch(() => {
+  });
+  const file = path7.join(dir, `${crypto7.randomBytes(8).toString("hex")}-${sanitizeFileName(rawName)}`);
+  const fh = await fs8.open(file, "wx", FILE_MODE);
+  let ok = false;
+  try {
+    await new Promise((resolve, reject) => {
+      let size = 0;
+      let tooBig = false;
+      let failed = null;
+      let chain = Promise.resolve();
+      src.on("data", (c) => {
+        if (tooBig || failed) return;
+        size += c.length;
+        if (size > max) {
+          tooBig = true;
+          return;
+        }
+        src.pause();
+        chain = chain.then(async () => {
+          await fh.write(c);
+        }).catch((e) => {
+          failed = e;
+        }).finally(() => src.resume());
+      });
+      src.on("end", () => {
+        void chain.then(() => tooBig ? reject(new AttachmentTooLargeError()) : failed ? reject(failed) : resolve());
+      });
+      src.on("error", reject);
+    });
+    ok = true;
+  } finally {
+    await fh.close().catch(() => {
+    });
+    if (!ok) await fs8.rm(file, { force: true }).catch(() => {
+    });
+  }
+  return file;
+}
+async function cleanupAttachments(alive, now = Date.now(), maxAgeMs = ATTACHMENT_MAX_AGE_MS, stillAlive) {
+  const root = paths().attachmentsDir;
+  let entries;
+  try {
+    entries = await fs8.readdir(root);
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    const dir = path7.join(root, name);
+    let valid = true;
+    try {
+      assertSessionId(name);
+    } catch {
+      valid = false;
+    }
+    if (!valid || !alive.has(name) && !(stillAlive && await stillAlive(name).catch(() => true))) {
+      await fs8.rm(dir, { recursive: true, force: true }).catch(() => {
+      });
+      continue;
+    }
+    let files;
+    try {
+      files = await fs8.readdir(dir);
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      const file = path7.join(dir, f);
+      try {
+        const st = await fs8.lstat(file);
+        if (now - st.mtimeMs > maxAgeMs) await fs8.rm(file, { recursive: true, force: true });
+      } catch {
+      }
+    }
+  }
+}
+
 // src/core/version.ts
-var VERSION = "0.4.7";
+var VERSION = "0.4.8";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -485,17 +724,17 @@ var SESSION_LOCK_WAIT_MS = 2e3;
 var locked = (sid, fn) => withLock(paths().sessionLock(sid), SESSION_LOCK_WAIT_MS, fn);
 function regFile(sid) {
   assertSessionId(sid);
-  return path6.join(paths().sessionsDir, `${sid}.json`);
+  return path8.join(paths().sessionsDir, `${sid}.json`);
 }
 var isActive = (r) => !r.disconnectedAt;
 var isRemoved = (r) => !!r.removedAt;
 function claudeConfigDir() {
   const raw = process.env.CLAUDE_CONFIG_DIR;
-  return path6.resolve(raw && raw.trim() ? raw : path6.join(os2.homedir(), ".claude"));
+  return path8.resolve(raw && raw.trim() ? raw : path8.join(os2.homedir(), ".claude"));
 }
 function sameConfigDir(r, mine = claudeConfigDir()) {
   if (!r.configDir) return true;
-  const a = path6.resolve(r.configDir);
+  const a = path8.resolve(r.configDir);
   return process.platform === "win32" ? a.toLowerCase() === mine.toLowerCase() : a === mine;
 }
 var trustedKeys = (r) => [...r.previousKeys ?? [], ...r.key ? [r.key] : []];
@@ -505,7 +744,7 @@ async function getRegistration(sid) {
 async function listRegistrations() {
   let names;
   try {
-    names = await fs7.readdir(paths().sessionsDir);
+    names = await fs9.readdir(paths().sessionsDir);
   } catch (e) {
     if (e.code === "ENOENT") return [];
     throw e;
@@ -513,7 +752,7 @@ async function listRegistrations() {
   const out = [];
   for (const n of names) {
     if (!n.endsWith(".json")) continue;
-    const r = await readJson(path6.join(paths().sessionsDir, n));
+    const r = await readJson(path8.join(paths().sessionsDir, n));
     if (r) out.push(r);
   }
   return out;
@@ -564,18 +803,24 @@ async function pruneRegistrations(maxAgeMs, now = Date.now()) {
     });
     if (!pruned.includes(sid)) continue;
     await clearInbox(sid);
-    await fs7.rm(paths().inboxDir(sid), { recursive: true, force: true }).catch(() => {
+    await fs9.rm(paths().inboxDir(sid), { recursive: true, force: true }).catch(() => {
     });
     await clearBusy(sid);
     await clearWaiting(sid);
     await clearDelivered(sid);
+    await removeFile(paths().pinsFile(sid)).catch(() => {
+    });
+    await clearBackground(sid).catch(() => {
+    });
   }
+  const alive = new Set((await listRegistrations()).map((r) => r.sessionId));
+  await cleanupAttachments(alive, now, void 0, async (sid) => await getRegistration(sid) !== null);
   return pruned;
 }
 
 // src/core/questions.ts
-import fs8 from "node:fs/promises";
-import path7 from "node:path";
+import fs10 from "node:fs/promises";
+import path9 from "node:path";
 var TOOL_USE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 function assertToolUseId(id) {
   if (typeof id !== "string" || !TOOL_USE_ID_RE.test(id)) {
@@ -604,22 +849,22 @@ function parseQuestions(input) {
   }
   return out;
 }
-var pendingFile = (sid, id) => (assertToolUseId(id), path7.join(paths().questionsDir(sid), `${id}.json`));
-var answerFile = (sid, id) => (assertToolUseId(id), path7.join(paths().questionsDir(sid), `${id}.answer.json`));
+var pendingFile = (sid, id) => (assertToolUseId(id), path9.join(paths().questionsDir(sid), `${id}.json`));
+var answerFile = (sid, id) => (assertToolUseId(id), path9.join(paths().questionsDir(sid), `${id}.answer.json`));
 async function getPending(sid) {
   let names;
   try {
-    names = await fs8.readdir(paths().questionsDir(sid));
+    names = await fs10.readdir(paths().questionsDir(sid));
   } catch {
     return null;
   }
   let best = null;
   for (const n of names) {
     if (!n.endsWith(".json") || n.endsWith(".answer.json")) continue;
-    const p = await readJson(path7.join(paths().questionsDir(sid), n));
+    const p = await readJson(path9.join(paths().questionsDir(sid), n));
     if (p && typeof p.pid === "number" && !isAlive(p.pid)) {
       if (typeof p.toolUseId === "string" && `${p.toolUseId}.json` === n) await removePending(sid, p.toolUseId);
-      else await removeFile(path7.join(paths().questionsDir(sid), n));
+      else await removeFile(path9.join(paths().questionsDir(sid), n));
       continue;
     }
     if (p && typeof p.createdAt === "string" && (!best || p.createdAt > best.createdAt)) best = p;
@@ -634,7 +879,7 @@ async function writeAnswer(sid, toolUseId, a) {
   if (await readJson(pendingFile(sid, toolUseId)) === null) return "not-found";
   await ensureDir(paths().questionsDir(sid));
   try {
-    await fs8.writeFile(answerFile(sid, toolUseId), JSON.stringify(a, null, 2), { encoding: "utf8", flag: "wx", mode: FILE_MODE });
+    await fs10.writeFile(answerFile(sid, toolUseId), JSON.stringify(a, null, 2), { encoding: "utf8", flag: "wx", mode: FILE_MODE });
     return "ok";
   } catch (e) {
     if (e.code === "EEXIST") return "conflict";
@@ -688,6 +933,25 @@ function isCcCommand(prompt) {
   return "unknown";
 }
 
+// src/shared/attachments.ts
+var MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+var LINE_RE = /^\[Attachment: ((?:\/|[A-Za-z]:[\\/]).*)\]$/;
+function attachmentDisplayName(absPath) {
+  const base = absPath.split(/[\\/]/).pop() ?? absPath;
+  return base.replace(/^[0-9a-f]{16}-/, "") || base;
+}
+function splitAttachments(text) {
+  const attachments = [];
+  const kept = [];
+  for (const line of text.split("\n")) {
+    const m = LINE_RE.exec(line.replace(/\r$/, ""));
+    if (m) attachments.push(attachmentDisplayName(m[1]));
+    else kept.push(line);
+  }
+  if (attachments.length === 0) return { text, attachments };
+  return { text: kept.join("\n").trim(), attachments };
+}
+
 // src/hub/transcript/parse.ts
 var RESULT_MAX = 2e3;
 var QUEUED_DEDUP_MS = 30 * 6e4;
@@ -697,6 +961,10 @@ var SUMMARY_MAX = 120;
 var truncate = (s, max) => s.length > max ? s.slice(0, max) : s;
 var WRAPPER_TAGS = /<\/?(?:pasted_content|teammate-message)(?:\s+[\w-]+="[^"]*")*\s*>/g;
 var unwrapPrompt = (text) => text.replace(WRAPPER_TAGS, "");
+function body(text) {
+  const r = splitAttachments(text);
+  return r.attachments.length ? r : { text };
+}
 var AGENT_MESSAGE_PREFIX = "Another Claude session sent a message:";
 var AGENT_BLOCK = /<(teammate-message|agent-message)((?:\s+[\w-]+="[^"]*")*)\s*>\n?([\s\S]*?)<\/\1>/g;
 function attr(attrs, name) {
@@ -840,7 +1108,7 @@ var TranscriptParser = class {
     this.open = null;
     this.queued.push({ text: text.trim(), at: Date.parse(ts) || 0 });
     const n = Math.max(images, pasted);
-    return [{ kind: "user", id: uuid, ts, text, origin: "terminal", ...n ? { images: n } : {} }];
+    return [{ kind: "user", id: uuid, ts, ...body(text), origin: "terminal", ...n ? { images: n } : {} }];
   }
   takeQueued(text, ts) {
     const at = Date.parse(ts) || 0;
@@ -905,7 +1173,7 @@ var TranscriptParser = class {
       const images = parts.images;
       if ((text2.trim() || images) && !text2.startsWith(INTERRUPTED) && !this.takeQueued(text2, ts)) {
         this.open = null;
-        out.push({ kind: "user", id: uuid, ts, text: text2, origin: "terminal", ...images ? { images } : {} });
+        out.push({ kind: "user", id: uuid, ts, ...body(text2), origin: "terminal", ...images ? { images } : {} });
       }
       return out;
     }
@@ -918,7 +1186,7 @@ var TranscriptParser = class {
           kind: "user",
           id: uuid,
           ts,
-          text: m.text,
+          ...body(m.text),
           origin: "app",
           appMessageId: m.id
         })),
@@ -957,7 +1225,7 @@ var TranscriptParser = class {
     if (!text.trim()) return [];
     if (this.takeQueued(text, ts)) return [];
     this.open = null;
-    return [{ kind: "user", id: uuid, ts, text, origin: "terminal" }];
+    return [{ kind: "user", id: uuid, ts, ...body(text), origin: "terminal" }];
   }
   /**
    * A teammate's or subagent's message (agent teams, SendMessage, a subagent's hand-back): Claude Code
@@ -1026,8 +1294,8 @@ var TranscriptParser = class {
 // src/hub/transcript/reader.ts
 var CHUNK = 64 * 1024;
 var TranscriptReader = class {
-  constructor(path11, keys) {
-    this.path = path11;
+  constructor(path13, keys) {
+    this.path = path13;
     this.keys = keys;
     this.parser = new TranscriptParser(keys);
   }
@@ -1158,7 +1426,7 @@ async function queryLiveSessions(run = runClaudeAgentsJson) {
 }
 
 // src/hooks/parentClaude.ts
-import fs9 from "node:fs";
+import fs11 from "node:fs";
 import { execFileSync } from "node:child_process";
 function isClaudeArgv(argv) {
   const base = (s) => s.split(/[\\/]/).pop() ?? "";
@@ -1168,7 +1436,7 @@ function isClaudeArgv(argv) {
 function readProcessArgv(pid, platform) {
   try {
     if (platform === "linux") {
-      return fs9.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
+      return fs11.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
     }
     const out = execFileSync("ps", ["-o", "args=", "-p", String(pid)], { encoding: "utf8", timeout: 2e3, stdio: ["ignore", "pipe", "ignore"] });
     return out.trim().split(/\s+/).filter(Boolean);
@@ -1210,6 +1478,11 @@ var SessionProtocolError = class extends Error {
   sessionId;
   direction;
 };
+function assertSameProtocol(reg) {
+  if (reg.protocol !== PROTOCOL) {
+    throw new SessionProtocolError(reg.sessionId, typeof reg.protocol === "number" && reg.protocol > PROTOCOL ? "newer" : "older");
+  }
+}
 var LIVE_TTL_MS = 5e3;
 var LIVE_IDLE_TTL_MS = 3e4;
 var STALE_BUSY_MS = 1e4;
@@ -1313,7 +1586,7 @@ var ClaudeCodeProvider = class {
     const oldest = Math.min(...queued.map((m) => Date.parse(m.createdAt)).filter((n) => !Number.isNaN(n)));
     if (!Number.isFinite(oldest) || this.now() - oldest < STALLED_AFTER_MS) return false;
     try {
-      return this.now() - (await fs10.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
+      return this.now() - (await fs12.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
     } catch {
       return true;
     }
@@ -1327,7 +1600,7 @@ var ClaudeCodeProvider = class {
   async transcriptMissing(transcriptPath, connectedAt) {
     if (this.now() - (Date.parse(connectedAt) || 0) < TRANSCRIPT_MISSING_AFTER_MS) return false;
     try {
-      await fs10.stat(transcriptPath);
+      await fs12.stat(transcriptPath);
       return false;
     } catch (err) {
       return err.code === "ENOENT";
@@ -1430,7 +1703,7 @@ var ClaudeCodeProvider = class {
       if (!disconnected && live.ok && l?.status === "idle") await this.dropStaleBusy(sid);
       const cwd = l?.cwd ?? reg.cwd;
       const queued = disconnected ? [] : await peek(sid);
-      const originalName = l?.name || path8.basename(cwd);
+      const originalName = l?.name || path10.basename(cwd);
       const custom = await getDisplayName(sid);
       const view = {
         sessionId: sid,
@@ -1442,6 +1715,7 @@ var ClaudeCodeProvider = class {
         _sort: Date.parse(reg.connectedAt) || 0
       };
       if (custom) view.originalName = originalName;
+      if (await isPinned(sid)) view.pinned = true;
       if (waitingKind) view.waitingKind = waitingKind;
       if (pendingQuestion) view.pendingQuestion = pendingQuestion;
       if (state === "idle" && await this.deliveryStalled(sid, queued)) view.deliveryStalled = true;
@@ -1454,6 +1728,8 @@ var ClaudeCodeProvider = class {
       if (rawModel) view.model = shortModel(rawModel);
       const effort = await getEffort(sid);
       if (effort) view.effort = effort;
+      const background = await getBackground(sid);
+      if (background) view.background = background;
       connected.push(view);
     }
     connected.sort((a, b) => {
@@ -1523,7 +1799,9 @@ var ClaudeCodeProvider = class {
         s.undeliveredUnsigned ?? 0,
         s.branch ?? null,
         s.model ?? null,
-        s.effort ?? null
+        s.effort ?? null,
+        s.background ?? null,
+        s.pinned ?? false
       ])
     });
     if (signature !== this.lastSignature) {
@@ -1535,15 +1813,13 @@ var ClaudeCodeProvider = class {
   async send(sid, text) {
     const reg = await getRegistration(sid);
     if (!reg || !isActive(reg)) throw new SessionDisconnectedError(sid);
-    if (reg.protocol !== PROTOCOL) {
-      throw new SessionProtocolError(sid, typeof reg.protocol === "number" && reg.protocol > PROTOCOL ? "newer" : "older");
-    }
+    assertSameProtocol(reg);
     const msg = await enqueue(sid, text);
     const again = await getRegistration(sid);
     if (!again || !isActive(again)) {
       const dir = paths().inboxDir(sid);
       try {
-        for (const n of await fs10.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs10.rm(path8.join(dir, n), { force: true });
+        for (const n of await fs12.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs12.rm(path10.join(dir, n), { force: true });
       } catch {
       }
       throw new SessionDisconnectedError(sid);
@@ -1554,9 +1830,9 @@ var ClaudeCodeProvider = class {
 
 // src/hub/server.ts
 import http from "node:http";
-import fs11 from "node:fs/promises";
-import path9 from "node:path";
-import crypto7 from "node:crypto";
+import fs13 from "node:fs/promises";
+import path11 from "node:path";
+import crypto9 from "node:crypto";
 
 // src/core/config.ts
 var LANGS = ["en", "pt-BR"];
@@ -1577,7 +1853,7 @@ async function writePresence(clients) {
 }
 
 // src/hub/pairing.ts
-import crypto6 from "node:crypto";
+import crypto8 from "node:crypto";
 var PAIR_TTL_MS = 6e4;
 var MAX_PENDING = 5;
 var CODE_RE = /^[0-9a-f]{64}$/;
@@ -1591,7 +1867,7 @@ function createPairing(now = Date.now) {
     issue() {
       prune2();
       while (pending.size >= MAX_PENDING) pending.delete(pending.keys().next().value);
-      const code2 = crypto6.randomBytes(32).toString("hex");
+      const code2 = crypto8.randomBytes(32).toString("hex");
       pending.set(code2, now() + PAIR_TTL_MS);
       return code2;
     },
@@ -1601,7 +1877,7 @@ function createPairing(now = Date.now) {
       const given = Buffer.from(code2);
       let match = null;
       for (const c of pending.keys()) {
-        if (crypto6.timingSafeEqual(given, Buffer.from(c))) match = c;
+        if (crypto8.timingSafeEqual(given, Buffer.from(c))) match = c;
       }
       if (match === null) return false;
       pending.delete(match);
@@ -1618,8 +1894,8 @@ var WINDOW_FRESH_MS = 15e4;
 var MAX_WINDOWS = 20;
 var WINDOW_ID_RE = /^[0-9a-f]{32}$/;
 var LANGS2 = ["en", "pt-BR"];
-var CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'";
-var MIME = {
+var CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'";
+var MIME2 = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
@@ -1651,12 +1927,12 @@ function tokenOk(given, expected) {
   const a = Buffer.from(given);
   const b = Buffer.from(expected);
   if (a.length !== b.length) return false;
-  return crypto7.timingSafeEqual(a, b);
+  return crypto9.timingSafeEqual(a, b);
 }
-function readBody(req) {
+function readRawBody(req, max) {
   return new Promise((resolve, reject) => {
     const declared = Number(req.headers["content-length"]);
-    if (Number.isFinite(declared) && declared > MAX_BODY) {
+    if (Number.isFinite(declared) && declared > max) {
       req.resume();
       return reject(new HttpError(413, "body too large"));
     }
@@ -1666,16 +1942,19 @@ function readBody(req) {
     req.on("data", (c) => {
       if (tooBig) return;
       size += c.length;
-      if (size > MAX_BODY) {
+      if (size > max) {
         tooBig = true;
         chunks.length = 0;
         return;
       }
       chunks.push(c);
     });
-    req.on("end", () => tooBig ? reject(new HttpError(413, "body too large")) : resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("end", () => tooBig ? reject(new HttpError(413, "body too large")) : resolve(Buffer.concat(chunks)));
     req.on("error", reject);
   });
+}
+async function readBody(req) {
+  return (await readRawBody(req, MAX_BODY)).toString("utf8");
 }
 async function readJsonBody(req) {
   const ct = String(req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
@@ -1773,9 +2052,9 @@ data: ${JSON.stringify(c)}
     if (heartbeat) clearInterval(heartbeat);
     pollTimer = heartbeat = null;
   };
-  const sendJson = (res, status, body) => {
+  const sendJson = (res, status, body2) => {
     res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify(body));
+    res.end(JSON.stringify(body2));
   };
   const serveStatic = async (req, res, pathname) => {
     if (req.method !== "GET" && req.method !== "HEAD") return sendJson(res, 404, { error: "not found" });
@@ -1786,16 +2065,16 @@ data: ${JSON.stringify(c)}
       return sendJson(res, 404, { error: "not found" });
     }
     if (rel.includes("\0")) return sendJson(res, 404, { error: "not found" });
-    const root = path9.resolve(staticDir);
-    const target = path9.resolve(root, "." + path9.sep + rel);
-    if (target !== root && !target.startsWith(root + path9.sep)) return sendJson(res, 404, { error: "not found" });
+    const root = path11.resolve(staticDir);
+    const target = path11.resolve(root, "." + path11.sep + rel);
+    if (target !== root && !target.startsWith(root + path11.sep)) return sendJson(res, 404, { error: "not found" });
     const send = async (file) => {
       try {
-        const st = await fs11.stat(file);
+        const st = await fs13.stat(file);
         if (!st.isFile()) return false;
-        const data = await fs11.readFile(file);
-        const ext = path9.extname(file).toLowerCase();
-        const type = MIME[ext] ?? "application/octet-stream";
+        const data = await fs13.readFile(file);
+        const ext = path11.extname(file).toLowerCase();
+        const type = MIME2[ext] ?? "application/octet-stream";
         const headers = { "Content-Type": type, "Content-Length": data.length };
         if (ext === ".html") headers["Content-Security-Policy"] = CSP;
         res.writeHead(200, headers);
@@ -1807,23 +2086,23 @@ data: ${JSON.stringify(c)}
     };
     let rootExists = true;
     try {
-      rootExists = (await fs11.stat(root)).isDirectory();
+      rootExists = (await fs13.stat(root)).isDirectory();
     } catch {
       rootExists = false;
     }
     const accepts = String(req.headers.accept ?? "").includes("text/html");
-    const spaEligible = req.method === "GET" && accepts && path9.extname(pathname) === "";
+    const spaEligible = req.method === "GET" && accepts && path11.extname(pathname) === "";
     const isRoot = pathname === "/";
     if (!rootExists) {
       if (isRoot || spaEligible) {
-        res.writeHead(200, { "Content-Type": MIME[".html"], "Content-Security-Policy": CSP });
+        res.writeHead(200, { "Content-Type": MIME2[".html"], "Content-Security-Policy": CSP });
         return void res.end(FALLBACK_PAGE);
       }
       return sendJson(res, 404, { error: "not found" });
     }
     if (target !== root && await send(target)) return;
     if (isRoot || spaEligible) {
-      if (await send(path9.join(root, "index.html"))) return;
+      if (await send(path11.join(root, "index.html"))) return;
     }
     sendJson(res, 404, { error: "not found" });
   };
@@ -1838,8 +2117,8 @@ data: ${JSON.stringify(c)}
       return sendJson(res, 200, { ok: true, version: VERSION, pid: process.pid, proof });
     }
     if (p === "/api/pair" && method === "POST") {
-      const body = await readJsonBody(req);
-      const code2 = body && typeof body === "object" && !Array.isArray(body) ? body.code : void 0;
+      const body2 = await readJsonBody(req);
+      const code2 = body2 && typeof body2 === "object" && !Array.isArray(body2) ? body2.code : void 0;
       if (typeof code2 !== "string" || !pairing.redeem(code2)) throw new HttpError(400, "invalid code");
       return sendJson(res, 200, { token });
     }
@@ -1861,8 +2140,8 @@ data: ${JSON.stringify(c)}
     }
     if (p === "/api/pair-code" && method === "POST") {
       const json = String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json");
-      const body = json ? await readJsonBody(req) : (req.resume(), null);
-      const sid = body && typeof body === "object" && !Array.isArray(body) ? body.sessionId : void 0;
+      const body2 = json ? await readJsonBody(req) : (req.resume(), null);
+      const sid = body2 && typeof body2 === "object" && !Array.isArray(body2) ? body2.sessionId : void 0;
       if (liveWindows() > 0) {
         if (typeof sid === "string") {
           try {
@@ -1877,11 +2156,11 @@ data: ${JSON.stringify(c)}
       return sendJson(res, 200, { code: pairing.issue() });
     }
     if (p === "/api/window" && method === "POST") {
-      const body = await readJsonBody(req);
-      const id = body && typeof body === "object" && !Array.isArray(body) ? body.id : void 0;
+      const body2 = await readJsonBody(req);
+      const id = body2 && typeof body2 === "object" && !Array.isArray(body2) ? body2.id : void 0;
       if (typeof id !== "string" || !WINDOW_ID_RE.test(id)) throw new HttpError(400, "invalid window id");
       windows.delete(id);
-      if (body.closing !== true) {
+      if (body2.closing !== true) {
         liveWindows();
         while (windows.size >= MAX_WINDOWS) windows.delete(windows.keys().next().value);
         windows.set(id, now());
@@ -1891,12 +2170,12 @@ data: ${JSON.stringify(c)}
     if (p === "/api/sessions" && method === "GET") return sendJson(res, 200, await provider.listSessions());
     if (p === "/api/config" && method === "GET") return sendJson(res, 200, await loadConfig());
     if (p === "/api/config" && method === "PUT") {
-      const body = await readJsonBody(req);
-      if (!body || typeof body !== "object" || !LANGS2.includes(body.language)) throw new HttpError(400, "invalid language");
-      await saveConfig({ language: body.language });
-      return sendJson(res, 200, { language: body.language });
+      const body2 = await readJsonBody(req);
+      if (!body2 || typeof body2 !== "object" || !LANGS2.includes(body2.language)) throw new HttpError(400, "invalid language");
+      await saveConfig({ language: body2.language });
+      return sendJson(res, 200, { language: body2.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|remove|questions\/([^/]+))$/.exec(p);
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|pin|disconnect|remove|background|background-image|attachments|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid;
       try {
@@ -1922,22 +2201,22 @@ data: ${JSON.stringify(c)}
           req.resume();
           throw new HttpError(403, "answers from the app are off");
         }
-        const body = await readJsonBody(req);
-        if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "invalid body");
-        const hasRelease = Object.hasOwn(body, "release");
-        const hasAnswers = Object.hasOwn(body, "answers");
+        const body2 = await readJsonBody(req);
+        if (!body2 || typeof body2 !== "object" || Array.isArray(body2)) throw new HttpError(400, "invalid body");
+        const hasRelease = Object.hasOwn(body2, "release");
+        const hasAnswers = Object.hasOwn(body2, "answers");
         if (hasRelease === hasAnswers) throw new HttpError(400, "invalid body");
         const reg = await getRegistration(sid);
         if (!reg || !isActive(reg)) throw new HttpError(404, "no such pending question");
         const pending = await getPending(sid);
         let answer;
         if (hasRelease) {
-          if (body.release !== true) throw new HttpError(400, "invalid body");
+          if (body2.release !== true) throw new HttpError(400, "invalid body");
           if (!pending || pending.toolUseId !== toolUseId) throw new HttpError(404, "no such pending question");
           answer = { release: true };
         } else {
           if (!pending || pending.toolUseId !== toolUseId) throw new HttpError(404, "no such pending question");
-          const answers = validAnswers(pending.questions, body.answers);
+          const answers = validAnswers(pending.questions, body2.answers);
           if (!answers) throw new HttpError(400, "invalid answers");
           answer = { answers };
         }
@@ -1947,15 +2226,32 @@ data: ${JSON.stringify(c)}
         return sendJson(res, 202, { ok: true });
       }
       if (m[2] === "name" && method === "PUT") {
-        const body = await readJsonBody(req);
-        const name = body && typeof body === "object" && !Array.isArray(body) ? validDisplayName(body.name) : null;
+        const body2 = await readJsonBody(req);
+        const name = body2 && typeof body2 === "object" && !Array.isArray(body2) ? validDisplayName(body2.name) : null;
         if (name === null) throw new HttpError(400, "invalid name");
         const reg = await getRegistration(sid);
         if (!reg) throw new HttpError(404, "no such session");
         await setDisplayName(sid, name);
         let shown = name;
-        if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path9.basename(reg.cwd);
+        if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path11.basename(reg.cwd);
         return sendJson(res, 200, { name: shown });
+      }
+      if (m[2] === "pin" && method === "PUT") {
+        const body2 = await readJsonBody(req);
+        if (!body2 || typeof body2 !== "object" || Array.isArray(body2) || typeof body2.pinned !== "boolean") throw new HttpError(400, "invalid body");
+        if (!await getRegistration(sid)) throw new HttpError(404, "no such session");
+        await setPinned(sid, body2.pinned);
+        fanOut({ type: "sessions" });
+        return sendJson(res, 200, { pinned: body2.pinned });
+      }
+      if (m[2] === "disconnect" && method === "POST") {
+        req.resume();
+        const reg = await getRegistration(sid);
+        if (!reg) throw new HttpError(404, "no such session");
+        if (!isActive(reg)) throw new HttpError(409, "already disconnected");
+        await markDisconnected(sid, "off");
+        fanOut({ type: "sessions" });
+        return sendJson(res, 200, { ok: true });
       }
       if (m[2] === "remove" && method === "POST") {
         req.resume();
@@ -1963,10 +2259,73 @@ data: ${JSON.stringify(c)}
         fanOut({ type: "sessions" });
         return sendJson(res, 200, { ok: true });
       }
+      if (m[2] === "background" && method === "PUT") {
+        const v = validBackgroundPreset(await readJsonBody(req));
+        if (!v.ok) throw new HttpError(400, "invalid background");
+        if (!await getRegistration(sid)) throw new HttpError(404, "no such session");
+        await setBackground(sid, v.value);
+        fanOut({ type: "sessions" });
+        return sendJson(res, 200, { background: v.value });
+      }
+      if (m[2] === "background-image" && method === "POST") {
+        if (!await getRegistration(sid)) {
+          req.resume();
+          throw new HttpError(404, "no such session");
+        }
+        const data = await readRawBody(req, BACKGROUND_IMAGE_MAX);
+        const background = await saveBackgroundImage(sid, data);
+        if (!background) throw new HttpError(415, "png, jpeg, webp or gif only");
+        fanOut({ type: "sessions" });
+        return sendJson(res, 200, { background });
+      }
+      if (m[2] === "background-image" && method === "GET") {
+        const img = await readBackgroundImage(sid);
+        if (!img) throw new HttpError(404, "no background image");
+        res.writeHead(200, { "Content-Type": img.type, "Content-Length": img.data.length });
+        return void res.end(img.data);
+      }
+      if (m[2] === "attachments" && method === "POST") {
+        const reg = await getRegistration(sid);
+        if (!reg) {
+          req.resume();
+          throw new HttpError(404, "no such session");
+        }
+        if (!isActive(reg)) {
+          req.resume();
+          throw new SessionDisconnectedError(sid);
+        }
+        try {
+          assertSameProtocol(reg);
+        } catch (e) {
+          req.resume();
+          throw e;
+        }
+        const rawName = req.headers["x-file-name"];
+        let name;
+        try {
+          if (typeof rawName !== "string" || rawName === "") throw new Error("missing");
+          name = decodeURIComponent(rawName);
+        } catch {
+          req.resume();
+          throw new HttpError(400, "invalid file name");
+        }
+        const declared = Number(req.headers["content-length"]);
+        if (Number.isFinite(declared) && declared > MAX_ATTACHMENT_BYTES) {
+          req.resume();
+          throw new HttpError(413, "file too large");
+        }
+        try {
+          const stored = await storeAttachment(sid, name, req, MAX_ATTACHMENT_BYTES);
+          return sendJson(res, 200, { path: stored });
+        } catch (e) {
+          if (e instanceof AttachmentTooLargeError) throw new HttpError(413, "file too large");
+          throw e;
+        }
+      }
       if (m[2] === "events" && method === "GET") return sendJson(res, 200, await provider.events(sid));
       if (m[2] === "messages" && method === "POST") {
-        const body = await readJsonBody(req);
-        const text = body && typeof body === "object" ? body.text : void 0;
+        const body2 = await readJsonBody(req);
+        const text = body2 && typeof body2 === "object" ? body2.text : void 0;
         if (typeof text !== "string" || text.trim() === "" || text.length > MAX_TEXT) throw new HttpError(400, "invalid text");
         const { id } = await provider.send(sid, text);
         return sendJson(res, 202, { id });
@@ -2047,7 +2406,7 @@ async function holdsHub(r, now = Date.now()) {
   if (r.pid !== null) return isAlive(r.pid);
   let last = Date.parse(r.connectedAt) || 0;
   try {
-    last = Math.max(last, (await fs12.stat(r.transcriptPath)).mtimeMs);
+    last = Math.max(last, (await fs14.stat(r.transcriptPath)).mtimeMs);
   } catch {
   }
   return now - last < UNKNOWN_PID_HOLD_MS;
@@ -2062,20 +2421,20 @@ async function prune(log) {
 }
 async function rotateToken() {
   const file = paths().token;
-  await ensureDir(path10.dirname(file));
-  const t = crypto8.randomBytes(32).toString("hex");
+  await ensureDir(path12.dirname(file));
+  const t = crypto10.randomBytes(32).toString("hex");
   await writeFileAtomic600(file, t);
-  await fs12.chmod(file, 384).catch(() => {
+  await fs14.chmod(file, 384).catch(() => {
   });
   return t;
 }
 async function writeFileAtomic600(file, data) {
-  const tmp = `${file}.${process.pid}.${crypto8.randomUUID()}.tmp`;
+  const tmp = `${file}.${process.pid}.${crypto10.randomUUID()}.tmp`;
   try {
-    await fs12.writeFile(tmp, data, { mode: 384 });
-    await withFsRetry(() => fs12.rename(tmp, file));
+    await fs14.writeFile(tmp, data, { mode: 384 });
+    await withFsRetry(() => fs14.rename(tmp, file));
   } catch (e) {
-    await fs12.rm(tmp, { force: true });
+    await fs14.rm(tmp, { force: true });
     throw e;
   }
 }
@@ -2085,7 +2444,7 @@ async function liveHubExists(self) {
   if (self && info.port === self.port) return false;
   let token;
   try {
-    token = (await fs12.readFile(paths().token, "utf8")).trim();
+    token = (await fs14.readFile(paths().token, "utf8")).trim();
   } catch {
     return false;
   }
@@ -2118,7 +2477,7 @@ async function acquireHubLock(lock) {
 async function startHub(opts = {}) {
   const logDir = paths().logDir;
   await ensureDir(logDir);
-  const logFile = path10.join(logDir, "hub.log");
+  const logFile = path12.join(logDir, "hub.log");
   let secret = "";
   const log = (msg) => {
     try {
@@ -2133,7 +2492,7 @@ async function startHub(opts = {}) {
     return null;
   };
   if (await liveHubExists()) return deferred("before the lock");
-  const lock = path10.join(paths().home, "hub.lock");
+  const lock = path12.join(paths().home, "hub.lock");
   const locked2 = await acquireHubLock(lock);
   let hub;
   try {
@@ -2142,7 +2501,7 @@ async function startHub(opts = {}) {
     secret = token;
     const base = pickPort();
     const tries = base === 0 ? 1 : 11;
-    const staticDir = path10.join(path10.dirname(fileURLToPath(import.meta.url)), "ui");
+    const staticDir = path12.join(path12.dirname(fileURLToPath(import.meta.url)), "ui");
     const provider = opts.listLive ? new ClaudeCodeProvider(opts.listLive) : new ClaudeCodeProvider();
     let lastErr;
     for (let i = 0; i < tries && !hub; i++) {
@@ -2233,7 +2592,7 @@ async function startHub(opts = {}) {
         clearInterval(ownTimer);
         await started.close();
         const cur = await readJson(paths().hubJson);
-        if (cur?.pid === process.pid && cur?.port === port) await fs12.rm(paths().hubJson, { force: true });
+        if (cur?.pid === process.pid && cur?.port === port) await fs14.rm(paths().hubJson, { force: true });
         log("hub stopped");
       }
     };

@@ -33,8 +33,12 @@ function paths() {
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
     questionsDir: (sid) => (assertSessionId(sid), path.join(home, "questions", sid)),
     namesFile: (sid) => (assertSessionId(sid), path.join(home, "names", `${sid}.json`)),
+    pinsFile: (sid) => (assertSessionId(sid), path.join(home, "pins", `${sid}.json`)),
     metaFile: (sid) => (assertSessionId(sid), path.join(home, "meta", `${sid}.json`)),
+    backgroundsDir: path.join(home, "backgrounds"),
+    backgroundFile: (sid) => (assertSessionId(sid), path.join(home, "backgrounds", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
+    attachmentsDir: path.join(home, "attachments"),
     logDir: path.join(home, "logs")
   };
 }
@@ -257,8 +261,14 @@ async function clearWaiting(sid) {
   await removeFile(paths().waitingFile(sid));
 }
 
+// src/shared/background.ts
+var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
+
+// src/core/attachments.ts
+var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
+
 // src/core/version.ts
-var VERSION = "0.4.7";
+var VERSION = "0.4.8";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -549,7 +559,22 @@ var en_default = {
       label: "Rename session",
       failed: "Couldn't rename"
     },
-    chatMenu: { label: "Conversation actions", rename: "Rename", remove: "Remove from app", confirmRemove: "Remove? Confirm", removeFailed: "Couldn't remove" },
+    pinned: "Pinned",
+    chatMenu: { label: "Conversation actions", rename: "Rename", remove: "Remove from app", confirmRemove: "Remove? Confirm", removeFailed: "Couldn't remove", pin: "Pin to top", unpin: "Unpin", disconnect: "Disconnect", confirmDisconnect: "Disconnect? Confirm", pinFailed: "Couldn't change the pin", disconnectFailed: "Couldn't disconnect" },
+    background: {
+      menu: "Background",
+      title: "Conversation background",
+      colors: "Colors",
+      gradients: "Gradients",
+      image: "Image\u2026",
+      none: "No background",
+      close: "Close",
+      failed: "Couldn't change the background",
+      tooBig: "The image is larger than 5 MB",
+      badType: "Use a PNG, JPEG, WebP or GIF image",
+      color: { rose: "Rose", peach: "Peach", sand: "Sand", mint: "Mint", teal: "Teal", sky: "Sky", lavender: "Lavender", slate: "Slate" },
+      gradient: { sunrise: "Sunrise", ocean: "Ocean", meadow: "Meadow", dusk: "Dusk", aurora: "Aurora", ember: "Ember" }
+    },
     title: "AI Chat Center",
     collapseList: "Collapse list",
     expandList: "Expand list",
@@ -639,7 +664,8 @@ var en_default = {
       messages: "Messages",
       image: "[image]",
       images: "[{n} images]",
-      compacted: "Conversation compacted \xB7 {time}"
+      compacted: "Conversation compacted \xB7 {time}",
+      attachments: "Attached files"
     },
     composer: {
       placeholder: "Message {name}\u2026",
@@ -652,7 +678,15 @@ var en_default = {
       sendOlderVersion: "This session runs an older version of AI Chat Center. Restart it (exit and `claude --resume`) to send messages from the app.",
       sendNewerVersion: "This session runs a newer version of AI Chat Center than this app. Type /cc in that session to update the app, then send again.",
       sendFailed: "Could not send the message.",
-      retry: "Retry"
+      retry: "Retry",
+      attach: "Attach files",
+      attachments: "Files to send",
+      removeAttachment: "Remove {name}",
+      attachTooLarge: "{name} is larger than 20 MB and was not attached.",
+      attachTooMany: "At most {max} files per message.",
+      attachFailed: "Could not upload the attachments. Try again.",
+      uploading: "Uploading attachments\u2026",
+      dropHere: "Drop files to attach them"
     },
     notifications: {
       label: "Browser notifications",
@@ -687,7 +721,22 @@ var pt_BR_default = {
       label: "Renomear sess\xE3o",
       failed: "N\xE3o foi poss\xEDvel renomear"
     },
-    chatMenu: { label: "A\xE7\xF5es da conversa", rename: "Renomear", remove: "Remover do app", confirmRemove: "Remover? Confirmar", removeFailed: "N\xE3o foi poss\xEDvel remover" },
+    pinned: "Fixada",
+    chatMenu: { label: "A\xE7\xF5es da conversa", rename: "Renomear", remove: "Remover do app", confirmRemove: "Remover? Confirmar", removeFailed: "N\xE3o foi poss\xEDvel remover", pin: "Fixar no topo", unpin: "Desafixar", disconnect: "Desconectar", confirmDisconnect: "Desconectar? Confirmar", pinFailed: "N\xE3o foi poss\xEDvel alterar a fixa\xE7\xE3o", disconnectFailed: "N\xE3o foi poss\xEDvel desconectar" },
+    background: {
+      menu: "Fundo",
+      title: "Fundo da conversa",
+      colors: "Cores",
+      gradients: "Gradientes",
+      image: "Imagem\u2026",
+      none: "Sem fundo",
+      close: "Fechar",
+      failed: "N\xE3o foi poss\xEDvel mudar o fundo",
+      tooBig: "A imagem passa de 5 MB",
+      badType: "Use uma imagem PNG, JPEG, WebP ou GIF",
+      color: { rose: "Rosa", peach: "P\xEAssego", sand: "Areia", mint: "Menta", teal: "Verde-\xE1gua", sky: "C\xE9u", lavender: "Lavanda", slate: "Ard\xF3sia" },
+      gradient: { sunrise: "Nascer do sol", ocean: "Oceano", meadow: "Campo", dusk: "Crep\xFAsculo", aurora: "Aurora", ember: "Brasa" }
+    },
     title: "AI Chat Center",
     collapseList: "Recolher lista",
     expandList: "Expandir lista",
@@ -777,7 +826,8 @@ var pt_BR_default = {
       messages: "Mensagens",
       image: "[imagem]",
       images: "[{n} imagens]",
-      compacted: "Conversa compactada \xB7 {time}"
+      compacted: "Conversa compactada \xB7 {time}",
+      attachments: "Arquivos anexados"
     },
     composer: {
       placeholder: "Mensagem para {name}\u2026",
@@ -790,7 +840,15 @@ var pt_BR_default = {
       sendOlderVersion: "Esta sess\xE3o roda uma vers\xE3o mais antiga do AI Chat Center. Reinicie-a (saia e rode `claude --resume`) para enviar mensagens pelo app.",
       sendNewerVersion: "Esta sess\xE3o roda uma vers\xE3o do AI Chat Center mais nova que a deste app. Digite /cc nessa sess\xE3o para atualizar o app e envie de novo.",
       sendFailed: "N\xE3o foi poss\xEDvel enviar a mensagem.",
-      retry: "Tentar de novo"
+      retry: "Tentar de novo",
+      attach: "Anexar arquivos",
+      attachments: "Arquivos a enviar",
+      removeAttachment: "Remover {name}",
+      attachTooLarge: "{name} tem mais de 20 MB e n\xE3o foi anexado.",
+      attachTooMany: "No m\xE1ximo {max} arquivos por mensagem.",
+      attachFailed: "N\xE3o foi poss\xEDvel enviar os anexos. Tente de novo.",
+      uploading: "Enviando anexos\u2026",
+      dropHere: "Solte os arquivos para anex\xE1-los"
     },
     notifications: {
       label: "Notifica\xE7\xF5es do navegador",

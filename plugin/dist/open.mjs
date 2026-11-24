@@ -41,8 +41,12 @@ function paths() {
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
     questionsDir: (sid) => (assertSessionId(sid), path.join(home, "questions", sid)),
     namesFile: (sid) => (assertSessionId(sid), path.join(home, "names", `${sid}.json`)),
+    pinsFile: (sid) => (assertSessionId(sid), path.join(home, "pins", `${sid}.json`)),
     metaFile: (sid) => (assertSessionId(sid), path.join(home, "meta", `${sid}.json`)),
+    backgroundsDir: path.join(home, "backgrounds"),
+    backgroundFile: (sid) => (assertSessionId(sid), path.join(home, "backgrounds", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
+    attachmentsDir: path.join(home, "attachments"),
     logDir: path.join(home, "logs")
   };
 }
@@ -59,7 +63,7 @@ function isAlive(pid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.4.7";
+var VERSION = "0.4.8";
 
 // src/core/healthProof.ts
 import crypto from "node:crypto";

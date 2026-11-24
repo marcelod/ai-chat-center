@@ -32,8 +32,12 @@ function paths() {
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
     questionsDir: (sid) => (assertSessionId(sid), path.join(home, "questions", sid)),
     namesFile: (sid) => (assertSessionId(sid), path.join(home, "names", `${sid}.json`)),
+    pinsFile: (sid) => (assertSessionId(sid), path.join(home, "pins", `${sid}.json`)),
     metaFile: (sid) => (assertSessionId(sid), path.join(home, "meta", `${sid}.json`)),
+    backgroundsDir: path.join(home, "backgrounds"),
+    backgroundFile: (sid) => (assertSessionId(sid), path.join(home, "backgrounds", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
+    attachmentsDir: path.join(home, "attachments"),
     logDir: path.join(home, "logs")
   };
 }
@@ -102,6 +106,12 @@ async function setWaiting(sid, kind) {
 async function clearWaiting(sid) {
   await removeFile(paths().waitingFile(sid));
 }
+
+// src/shared/background.ts
+var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
+
+// src/core/attachments.ts
+var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
 
 // src/core/registry.ts
 function regFile(sid) {

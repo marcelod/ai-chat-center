@@ -96,6 +96,14 @@ O app segue mostrando o indicador de digitação (os três pontos) depois que o 
 - Atalho do Windows e do macOS, manifesto do PWA e ícone de 256: testar depois do push, com alguém usando Windows e macOS (`docs/testing/launcher-windows-macos.md`).
 - Conversa em grupo (0.4.6 e 0.4.7): mensagens dos agentes com nome, iniciais e cor próprios; pedidos do Claude aos agentes como "Claude → agente".
 
+## Entregas da 0.4.8 (2026-11-24), a testar
+
+- Anexos (📎, arrastar, Ctrl+V; 20 MB por arquivo, 10 por mensagem). Ficam em `~/.ai-chat-center/attachments/<sid>/` e somem com a limpeza (30 dias ou sessão apagada).
+  - Testar numa sessão sem modo auto: ler um anexo fora da pasta do projeto pode pedir permissão no terminal e travar quem usa só o app. Se pedir, avaliar liberar essa pasta na sessão ao dar `/cc`.
+  - Sem limite total de espaço por sessão; só a limpeza de 30 dias.
+- Fundo por conversa (8 cores, 6 degradês, imagem até 5 MB). Cores e opacidade do véu (76%) escolhidas sem ver na tela: ajustar olhando nos dois temas.
+- Fixar no topo e Desconectar no menu ⋮.
+
 ## Lembretes de processo
 
 - Toda mudança em `plugin/dist` exige subir a versão (há um teste que compara com a última tag `v*`). Ver `docs/testing/release-checklist.md`.

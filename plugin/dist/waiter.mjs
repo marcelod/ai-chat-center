@@ -32,8 +32,12 @@ function paths() {
     deliveredFile: (sid) => (assertSessionId(sid), path.join(home, "delivered", `${sid}.json`)),
     questionsDir: (sid) => (assertSessionId(sid), path.join(home, "questions", sid)),
     namesFile: (sid) => (assertSessionId(sid), path.join(home, "names", `${sid}.json`)),
+    pinsFile: (sid) => (assertSessionId(sid), path.join(home, "pins", `${sid}.json`)),
     metaFile: (sid) => (assertSessionId(sid), path.join(home, "meta", `${sid}.json`)),
+    backgroundsDir: path.join(home, "backgrounds"),
+    backgroundFile: (sid) => (assertSessionId(sid), path.join(home, "backgrounds", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
+    attachmentsDir: path.join(home, "attachments"),
     logDir: path.join(home, "logs")
   };
 }
@@ -472,8 +476,14 @@ async function recordDelivered(sid, ids) {
   await writeJsonAtomic(paths().deliveredFile(sid), next);
 }
 
+// src/shared/background.ts
+var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
+
+// src/core/attachments.ts
+var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
+
 // src/core/version.ts
-var VERSION = "0.4.7";
+var VERSION = "0.4.8";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
