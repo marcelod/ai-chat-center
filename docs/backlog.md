@@ -58,6 +58,10 @@ Trocar o lápis por um menu de três pontos verticais (⋮) com as ações da co
 
 Cada conversa pode ter um fundo próprio: cor sólida, degradê ou imagem. Serve para identificar a conversa rapidamente e não confundir uma com a outra. O fundo é escolhido pelo menu de ações; manter o contraste do texto legível nos temas claro e escuro.
 
+### Retomar pelo app uma sessão encerrada
+
+Hoje uma sessão sai do app quando o terminal dela fecha. Para continuar no dia seguinte pelo app, seria preciso abrir um terminal com `claude --resume <id>` a partir do app. Pedido ligado ao atalho do Windows e do macOS (2026-11-24); rodada própria.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes.
