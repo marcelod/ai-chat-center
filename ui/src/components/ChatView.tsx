@@ -23,6 +23,10 @@ type Props = {
   onRename?: (name: string) => Promise<{ name: string } | void>;
   /** Removes the session from the app (⋮ menu); rejects when the hub refused. */
   onRemove?: () => Promise<void>;
+  /** Pins/unpins the conversation (⋮ menu). */
+  onPin?: (pinned: boolean) => Promise<void>;
+  /** Disconnects the session from the app, keeping it listed (⋮ menu; only for an active session). */
+  onDisconnect?: () => Promise<void>;
   onBack: () => void;
 };
 
@@ -89,12 +93,16 @@ function SessionTitle({
   onRename,
   onRenamed,
   onRemove,
+  onPin,
+  onDisconnect,
 }: {
   session: SessionView;
   name: string;
   onRename?: (name: string) => Promise<{ name: string } | void>;
   onRenamed: (name: string) => void;
   onRemove?: () => Promise<void>;
+  onPin?: (pinned: boolean) => Promise<void>;
+  onDisconnect?: () => Promise<void>;
 }) {
   const t = useT();
   const [editing, setEditing] = useState(false);
@@ -186,12 +194,12 @@ function SessionTitle({
       >
         {name}
       </h2>
-      <ChatMenu ref={menuButton} onRename={onRename ? open : undefined} onRemove={onRemove} />
+      <ChatMenu ref={menuButton} onRename={onRename ? open : undefined} onRemove={onRemove} onPin={onPin} pinned={!!session.pinned} onDisconnect={session.state === 'disconnected' ? undefined : onDisconnect} />
     </div>
   );
 }
 
-export function ChatView({ session, events, pending, loading, onSend, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove }: Props) {
+export function ChatView({ session, events, pending, loading, onSend, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -272,6 +280,8 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
             onRename={onRename}
             onRenamed={(n) => setOverride({ base: session.name, name: n })}
             onRemove={onRemove}
+            onPin={onPin}
+            onDisconnect={onDisconnect}
           />
           <div data-testid="session-info" className="flex min-w-0 flex-col overflow-hidden font-mono text-xs text-muted md:flex-row md:items-baseline md:gap-1.5">
             <span className="min-w-0 truncate md:min-w-[6ch]">{session.cwd}</span>

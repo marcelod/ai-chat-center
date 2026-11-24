@@ -16,7 +16,8 @@
       "label": "Rename session",
       "failed": "Couldn't rename"
     },
-    "chatMenu": {"label": "Conversation actions", "rename": "Rename", "remove": "Remove from app", "confirmRemove": "Remove? Confirm", "removeFailed": "Couldn't remove"},
+    "pinned": "Pinned",
+    "chatMenu": {"label": "Conversation actions", "rename": "Rename", "remove": "Remove from app", "confirmRemove": "Remove? Confirm", "removeFailed": "Couldn't remove", "pin": "Pin to top", "unpin": "Unpin", "disconnect": "Disconnect", "confirmDisconnect": "Disconnect? Confirm", "pinFailed": "Couldn't change the pin", "disconnectFailed": "Couldn't disconnect"},
     "title": "AI Chat Center",
     "collapseList": "Collapse list",
     "expandList": "Expand list",

@@ -42,6 +42,8 @@ function setup(
     onSend: (text: string) => Promise<void>;
     onRename: (name: string) => Promise<{ name: string } | void>;
     onRemove: () => Promise<void>;
+    onPin: (pinned: boolean) => Promise<void>;
+    onDisconnect: () => Promise<void>;
   }> = {},
 ) {
   const onSend = props.onSend ?? vi.fn(async () => {});
@@ -55,6 +57,8 @@ function setup(
         onSend={onSend}
         onRename={p.onRename}
         onRemove={p.onRemove}
+        onPin={p.onPin}
+        onDisconnect={p.onDisconnect}
         onBack={() => {}}
       />
     </LangProvider>
@@ -576,6 +580,54 @@ describe('ChatView', () => {
       await userEvent.click(screen.getByRole('menuitem', { name: 'Remove? Confirm' }));
       expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't remove");
       expect(screen.getByRole('menu')).toBeInTheDocument();
+    });
+
+    it('Pin to top calls onPin(true) and closes; a pinned session offers Unpin', async () => {
+      const onPin = vi.fn(async () => {});
+      const r = setup({ onPin });
+      await userEvent.click(menuButton());
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Pin to top' }));
+      expect(onPin).toHaveBeenCalledWith(true);
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      r.unmount();
+      const onPin2 = vi.fn(async () => {});
+      setup({ onPin: onPin2, session: { ...session(), pinned: true } });
+      await userEvent.click(menuButton());
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Unpin' }));
+      expect(onPin2).toHaveBeenCalledWith(false);
+    });
+
+    it('says so when pinning fails', async () => {
+      setup({ onPin: vi.fn(async () => { throw new Error('x'); }) });
+      await userEvent.click(menuButton());
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Pin to top' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't change the pin");
+    });
+
+    it('Disconnect asks to confirm in the menu, then calls onDisconnect; never window.confirm', async () => {
+      const onDisconnect = vi.fn(async () => {});
+      const confirm = vi.spyOn(window, 'confirm');
+      setup({ onDisconnect, onRemove: vi.fn(async () => {}) });
+      await userEvent.click(menuButton());
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Disconnect' }));
+      expect(onDisconnect).not.toHaveBeenCalled();
+      // Only one confirmation at a time: Remove is still asking nothing.
+      expect(screen.getByRole('menuitem', { name: 'Remove from app' })).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Disconnect? Confirm' }));
+      expect(onDisconnect).toHaveBeenCalledTimes(1);
+      expect(confirm).not.toHaveBeenCalled();
+      confirm.mockRestore();
+    });
+
+    it('Disconnect is not offered for a disconnected session; failure is said', async () => {
+      const r = setup({ onDisconnect: vi.fn(async () => {}), session: { ...session(), state: 'disconnected' } });
+      expect(screen.queryByRole('button', { name: 'Conversation actions' })).not.toBeInTheDocument();
+      r.unmount();
+      setup({ onDisconnect: vi.fn(async () => { throw new Error('x'); }) });
+      await userEvent.click(menuButton());
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Disconnect' }));
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Disconnect? Confirm' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't disconnect");
     });
 
     it('no ⋮ button without any action', () => {

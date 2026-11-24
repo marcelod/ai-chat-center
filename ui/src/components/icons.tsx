@@ -96,6 +96,12 @@ export const MoreIcon = (p: SVGProps<SVGSVGElement>) => (
     <circle cx="12" cy="19" r="1.4" fill="currentColor" />
   </svg>
 );
+export const PinIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6z" />
+    <path d="M12 14v7" />
+  </svg>
+);
 export const PanelIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base} {...p}>
     <rect x="3" y="4" width="18" height="16" rx="2" />

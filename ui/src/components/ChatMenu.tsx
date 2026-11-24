@@ -7,6 +7,11 @@ type Props = {
   onRename?: () => void;
   /** Removes the session from the app (absent: no Remove item). Rejects when the hub refused. */
   onRemove?: () => Promise<void>;
+  /** Pins or unpins the conversation (absent: no Pin item). Rejects when the hub refused. */
+  onPin?: (pinned: boolean) => Promise<void>;
+  pinned?: boolean;
+  /** Disconnects the session from the app, keeping it listed (absent: no Disconnect item). Rejects when the hub refused. */
+  onDisconnect?: () => Promise<void>;
 };
 
 /**
@@ -14,11 +19,11 @@ type Props = {
  * the button, a click outside closes it, arrow keys move between items. "Remove from app" asks to confirm
  * in place (a second click), never with window.confirm.
  */
-export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({ onRename, onRemove }, button) {
+export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({ onRename, onRemove, onPin, pinned = false, onDisconnect }, button) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [confirming, setConfirming] = useState<'disconnect' | 'remove' | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -32,8 +37,8 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
 
   const close = (refocus: boolean) => {
     setOpen(false);
-    setConfirming(false);
-    setFailed(false);
+    setConfirming(null);
+    setFailed(null);
     if (refocus) ownButton.current?.focus();
   };
 
@@ -62,7 +67,7 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
     };
   }, [open]);
 
-  if (!onRename && !onRemove) return null;
+  if (!onRename && !onRemove && !onPin && !onDisconnect) return null;
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Tab') {
@@ -79,20 +84,34 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
     list[next].focus();
   };
 
-  const remove = async () => {
-    if (!onRemove || busy) return;
-    if (!confirming) {
-      setConfirming(true);
-      setFailed(false);
+  // Disconnect and Remove ask for a second click in place; a refusal is said in the menu.
+  const confirmed = async (which: 'disconnect' | 'remove', act: (() => Promise<void>) | undefined, failKey: string) => {
+    if (!act || busy) return;
+    if (confirming !== which) {
+      setConfirming(which);
+      setFailed(null);
       return;
     }
     setBusy(true);
     try {
-      await onRemove();
+      await act();
       setOpen(false);
-      setConfirming(false);
+      setConfirming(null);
     } catch {
-      setFailed(true);
+      setFailed(failKey);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pin = async () => {
+    if (!onPin || busy) return;
+    setBusy(true);
+    try {
+      await onPin(!pinned);
+      close(false);
+    } catch {
+      setFailed('ui.chatMenu.pinFailed');
     } finally {
       setBusy(false);
     }
@@ -135,17 +154,34 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
               {t('ui.chatMenu.rename')}
             </button>
           )}
+          {onPin && (
+            <button type="button" role="menuitem" tabIndex={-1} aria-disabled={busy || undefined} className={itemCls} onClick={() => void pin()}>
+              {t(pinned ? 'ui.chatMenu.unpin' : 'ui.chatMenu.pin')}
+            </button>
+          )}
+          {onDisconnect && (
+            <ConfirmItem
+              className={`${itemCls} ${confirming === 'disconnect' ? 'font-semibold text-waiting-text' : ''}`}
+              confirming={confirming === 'disconnect'}
+              busy={busy}
+              label="ui.chatMenu.disconnect"
+              confirmLabel="ui.chatMenu.confirmDisconnect"
+              onClick={() => void confirmed('disconnect', onDisconnect, 'ui.chatMenu.disconnectFailed')}
+            />
+          )}
           {onRemove && (
             <ConfirmItem
-              className={`${itemCls} ${confirming ? 'font-semibold text-waiting-text' : ''}`}
-              confirming={confirming}
+              className={`${itemCls} ${confirming === 'remove' ? 'font-semibold text-waiting-text' : ''}`}
+              confirming={confirming === 'remove'}
               busy={busy}
-              onClick={() => void remove()}
+              label="ui.chatMenu.remove"
+              confirmLabel="ui.chatMenu.confirmRemove"
+              onClick={() => void confirmed('remove', onRemove, 'ui.chatMenu.removeFailed')}
             />
           )}
           {failed && (
             <p role="alert" className="px-3 py-1 text-xs text-waiting-text">
-              {t('ui.chatMenu.removeFailed')}
+              {t(failed)}
             </p>
           )}
         </div>
@@ -154,7 +190,7 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
   );
 });
 
-function ConfirmItem({ confirming, busy, className, onClick }: { confirming: boolean; busy: boolean; className: string; onClick: () => void }) {
+function ConfirmItem({ confirming, busy, className, label, confirmLabel, onClick }: { confirming: boolean; busy: boolean; className: string; label: string; confirmLabel: string; onClick: () => void }) {
   const t = useT();
   const self = useRef<HTMLButtonElement>(null);
   // The label changes under the user's focus: keep focus on it so a second Enter confirms.
@@ -163,7 +199,7 @@ function ConfirmItem({ confirming, busy, className, onClick }: { confirming: boo
   }, [confirming]);
   return (
     <button ref={self} type="button" role="menuitem" tabIndex={-1} aria-disabled={busy || undefined} className={className} onClick={onClick}>
-      {t(confirming ? 'ui.chatMenu.confirmRemove' : 'ui.chatMenu.remove')}
+      {t(confirming ? confirmLabel : label)}
     </button>
   );
 }

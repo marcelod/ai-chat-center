@@ -16,7 +16,8 @@
       "label": "Renomear sessão",
       "failed": "Não foi possível renomear"
     },
-    "chatMenu": {"label": "Ações da conversa", "rename": "Renomear", "remove": "Remover do app", "confirmRemove": "Remover? Confirmar", "removeFailed": "Não foi possível remover"},
+    "pinned": "Fixada",
+    "chatMenu": {"label": "Ações da conversa", "rename": "Renomear", "remove": "Remover do app", "confirmRemove": "Remover? Confirmar", "removeFailed": "Não foi possível remover", "pin": "Fixar no topo", "unpin": "Desafixar", "disconnect": "Desconectar", "confirmDisconnect": "Desconectar? Confirmar", "pinFailed": "Não foi possível alterar a fixação", "disconnectFailed": "Não foi possível desconectar"},
     "title": "AI Chat Center",
     "collapseList": "Recolher lista",
     "expandList": "Expandir lista",

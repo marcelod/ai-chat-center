@@ -244,6 +244,14 @@ export const renameSession = (sid: string, name: string) =>
 export async function removeSession(sid: string): Promise<void> {
   await request<unknown>(`/api/sessions/${encodeURIComponent(sid)}/remove`, { method: 'POST' });
 }
+/** Pins or unpins the conversation at the top of the list, for every window. */
+export async function pinSession(sid: string, pinned: boolean): Promise<void> {
+  await request<unknown>(`/api/sessions/${encodeURIComponent(sid)}/pin`, { method: 'PUT', body: JSON.stringify({ pinned }) });
+}
+/** Disconnects an active session like /cc off; it stays in the list as disconnected. */
+export async function disconnectSession(sid: string): Promise<void> {
+  await request<unknown>(`/api/sessions/${encodeURIComponent(sid)}/disconnect`, { method: 'POST' });
+}
 export const getConfig = () => request<UiConfig>('/api/config');
 export const setConfig = (c: Pick<UiConfig, 'language'>) =>
   request<UiConfig>('/api/config', { method: 'PUT', body: JSON.stringify(c) });

@@ -80,6 +80,14 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
             onRelease={(id) => api.releaseQuestion(selected.sessionId, id)}
             onRename={(name) => api.renameSession(selected.sessionId, name)}
             onRemove={() => live.remove(selected.sessionId)}
+            onPin={async (pinned) => {
+              await api.pinSession(selected.sessionId, pinned);
+              await live.refresh();
+            }}
+            onDisconnect={async () => {
+              await api.disconnectSession(selected.sessionId);
+              await live.refresh();
+            }}
             onBack={() => select(null)}
           />
         ) : (

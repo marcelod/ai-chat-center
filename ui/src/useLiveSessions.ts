@@ -458,5 +458,5 @@ export function useLiveSessions() {
     setNotify(await setNotificationsEnabled(on));
   }, []);
 
-  return { data, eventsById, pending, unread, selectedId, select, send, retry, remove, error, loading, notify, setNotifications };
+  return { data, eventsById, pending, unread, selectedId, select, send, retry, remove, refresh, error, loading, notify, setNotifications };
 }

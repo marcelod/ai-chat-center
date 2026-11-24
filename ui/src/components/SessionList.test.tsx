@@ -109,3 +109,25 @@ describe('collapsible session list', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('pinned conversations', () => {
+  const rowsOf = () => Array.from(document.querySelectorAll('[data-session]')).map((e) => e.getAttribute('data-session'));
+  it('come first, keep the order inside each group, and show a pin', () => {
+    const pinned = (id: string, name: string) => ({ ...s(id, name), pinned: true as const });
+    render(
+      <LangProvider lang="en">
+        <SessionList
+          connected={[s('a', 'Alpha'), pinned('b', 'Beta'), s('c', 'Gamma'), pinned('d', 'Delta')]}
+          others={[]}
+          unread={{}}
+          selectedId={null}
+          onSelect={() => {}}
+          onLanguage={() => {}}
+        />
+      </LangProvider>,
+    );
+    expect(rowsOf()).toEqual(['b', 'd', 'a', 'c']);
+    expect(document.querySelector('[data-session="b"]')).toHaveTextContent('Pinned');
+    expect(document.querySelector('[data-session="a"]')).not.toHaveTextContent('Pinned');
+  });
+});

@@ -3,7 +3,7 @@ import type { LiveSession, SessionView } from '@shared/types';
 import { formatTime, initials, previewText } from '../format';
 import { useLang, useT } from '../i18n';
 import { Logo } from './Logo';
-import { ChevronIcon, PanelIcon, SearchIcon } from './icons';
+import { ChevronIcon, PanelIcon, PinIcon, SearchIcon } from './icons';
 import { SettingsMenu, type NotificationsControl } from './SettingsMenu';
 import type { Language } from '../api';
 
@@ -33,9 +33,11 @@ export function SessionList({ connected, others, unread, selectedId, onSelect, o
   const [query, setQuery] = useState('');
   const [showOthers, setShowOthers] = useState(false);
   const q = query.trim().toLowerCase();
-  const rows = q && !collapsed
+  const found = q && !collapsed
     ? connected.filter((s) => s.name.toLowerCase().includes(q) || s.cwd.toLowerCase().includes(q))
     : connected;
+  // Pinned first; the hub's order holds inside each group.
+  const rows = [...found.filter((s) => s.pinned), ...found.filter((s) => !s.pinned)];
 
   return (
     <div className="flex h-full flex-col bg-surface">
@@ -116,6 +118,12 @@ export function SessionList({ connected, others, unread, selectedId, onSelect, o
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-2">
                     <span className="flex-1 truncate text-[15px] font-bold">{s.name}</span>
+                    {s.pinned && (
+                      <>
+                        <PinIcon width={14} height={14} className="shrink-0 text-muted" />
+                        <span className="sr-only">{t('ui.pinned')}</span>
+                      </>
+                    )}
                     {s.lastEvent && (
                       <time dateTime={s.lastEvent.ts} className="shrink-0 text-xs text-muted">{formatTime(s.lastEvent.ts, lang, t)}</time>
                     )}
