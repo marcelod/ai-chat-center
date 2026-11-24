@@ -16,6 +16,7 @@
       "label": "Rename session",
       "failed": "Couldn't rename"
     },
+    "chatMenu": {"label": "Conversation actions", "rename": "Rename", "remove": "Remove from app", "confirmRemove": "Remove? Confirm", "removeFailed": "Couldn't remove"},
     "title": "AI Chat Center",
     "collapseList": "Collapse list",
     "expandList": "Expand list",

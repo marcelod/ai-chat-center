@@ -408,9 +408,31 @@ export function useLiveSessions() {
     };
   }, []);
 
+  /** Removes the session from the app (hub first), drops it from the list now and selects a neighbour if it was open. */
+  const remove = useCallback(
+    async (sid: string) => {
+      await api.removeSession(sid);
+      const list = dataRef.current.connected;
+      const at = list.findIndex((s) => s.sessionId === sid);
+      const rest = list.filter((s) => s.sessionId !== sid);
+      const next = { ...dataRef.current, connected: rest };
+      dataRef.current = next;
+      setData(next);
+      fetched.current.delete(sid);
+      if (selectedRef.current === sid) {
+        const neighbour = rest[Math.min(Math.max(at, 0), rest.length - 1)];
+        select(neighbour ? neighbour.sessionId : null);
+      }
+      // A refresh already in flight may have read the list before the removal: drop its answer, read again.
+      seq.current++;
+      void refresh();
+    },
+    [refresh, select],
+  );
+
   const setNotifications = useCallback(async (on: boolean) => {
     setNotify(await setNotificationsEnabled(on));
   }, []);
 
-  return { data, eventsById, pending, unread, selectedId, select, send, retry, error, loading, notify, setNotifications };
+  return { data, eventsById, pending, unread, selectedId, select, send, retry, remove, error, loading, notify, setNotifications };
 }

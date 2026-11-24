@@ -6,7 +6,8 @@ import type { PendingMessage } from '../useLiveSessions';
 import { ActionsGroup } from './ActionsGroup';
 import { QuestionCard } from './QuestionCard';
 import { Composer } from './Composer';
-import { BackIcon, PencilIcon, WarningIcon } from './icons';
+import { BackIcon, WarningIcon } from './icons';
+import { ChatMenu } from './ChatMenu';
 import { AssistantBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
 
 type Props = {
@@ -20,6 +21,8 @@ type Props = {
   onAnswer?: (toolUseId: string, answers: Record<string, string>) => Promise<void>;
   onRelease?: (toolUseId: string) => Promise<void>;
   onRename?: (name: string) => Promise<{ name: string } | void>;
+  /** Removes the session from the app (⋮ menu); rejects when the hub refused. */
+  onRemove?: () => Promise<void>;
   onBack: () => void;
 };
 
@@ -85,11 +88,13 @@ function SessionTitle({
   name,
   onRename,
   onRenamed,
+  onRemove,
 }: {
   session: SessionView;
   name: string;
   onRename?: (name: string) => Promise<{ name: string } | void>;
   onRenamed: (name: string) => void;
+  onRemove?: () => Promise<void>;
 }) {
   const t = useT();
   const [editing, setEditing] = useState(false);
@@ -97,7 +102,7 @@ function SessionTitle({
   const [failed, setFailed] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const done = useRef(false);
-  const pencil = useRef<HTMLButtonElement>(null);
+  const menuButton = useRef<HTMLButtonElement>(null);
   const refocus = useRef(false);
 
   const open = () => {
@@ -114,7 +119,7 @@ function SessionTitle({
     }
     if (!editing && refocus.current) {
       refocus.current = false;
-      pencil.current?.focus();
+      menuButton.current?.focus();
     }
   }, [editing]);
 
@@ -181,22 +186,12 @@ function SessionTitle({
       >
         {name}
       </h2>
-      {onRename && (
-        <button
-          type="button"
-          ref={pencil}
-          aria-label={t('ui.rename.label')}
-          onClick={open}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted hover:bg-field"
-        >
-          <PencilIcon width={16} height={16} />
-        </button>
-      )}
+      <ChatMenu ref={menuButton} onRename={onRename ? open : undefined} onRemove={onRemove} />
     </div>
   );
 }
 
-export function ChatView({ session, events, pending, loading, onSend, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename }: Props) {
+export function ChatView({ session, events, pending, loading, onSend, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -272,6 +267,7 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
             name={shownName}
             onRename={onRename}
             onRenamed={(n) => setOverride({ base: session.name, name: n })}
+            onRemove={onRemove}
           />
           <div data-testid="session-info" className="flex min-w-0 flex-col overflow-hidden font-mono text-xs text-muted md:flex-row md:items-baseline md:gap-1.5">
             <span className="min-w-0 truncate md:min-w-[6ch]">{session.cwd}</span>

@@ -79,6 +79,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
             onAnswer={(id, answers) => api.answerQuestion(selected.sessionId, id, answers)}
             onRelease={(id) => api.releaseQuestion(selected.sessionId, id)}
             onRename={(name) => api.renameSession(selected.sessionId, name)}
+            onRemove={() => live.remove(selected.sessionId)}
             onBack={() => select(null)}
           />
         ) : (

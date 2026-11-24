@@ -41,6 +41,7 @@ function setup(
     pending: PendingMessage[];
     onSend: (text: string) => Promise<void>;
     onRename: (name: string) => Promise<{ name: string } | void>;
+    onRemove: () => Promise<void>;
   }> = {},
 ) {
   const onSend = props.onSend ?? vi.fn(async () => {});
@@ -53,6 +54,7 @@ function setup(
         loading={false}
         onSend={onSend}
         onRename={p.onRename}
+        onRemove={p.onRemove}
         onBack={() => {}}
       />
     </LangProvider>
@@ -352,10 +354,14 @@ describe('ChatView', () => {
   });
 
   describe('rename', () => {
+    const openRename = async () => {
+      await userEvent.click(screen.getByRole('button', { name: 'Conversation actions' }));
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    };
     it('opens an input from the pencil and saves on Enter', async () => {
       const onRename = vi.fn(async () => {});
       setup({ onRename });
-      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      await openRename();
       const input = screen.getByRole('textbox', { name: 'Rename session' });
       expect(input).toHaveValue('billing-api');
       expect(input).toHaveFocus();
@@ -367,7 +373,7 @@ describe('ChatView', () => {
     it('Escape cancels without saving', async () => {
       const onRename = vi.fn(async () => {});
       setup({ onRename });
-      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      await openRename();
       await userEvent.type(screen.getByRole('textbox', { name: 'Rename session' }), 'x{Escape}');
       expect(onRename).not.toHaveBeenCalled();
       expect(screen.queryByRole('textbox', { name: 'Rename session' })).not.toBeInTheDocument();
@@ -376,7 +382,7 @@ describe('ChatView', () => {
     it('saves an empty name as "" to restore the original', async () => {
       const onRename = vi.fn(async () => {});
       setup({ onRename });
-      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      await openRename();
       await userEvent.clear(screen.getByRole('textbox', { name: 'Rename session' }));
       await userEvent.keyboard('{Enter}');
       expect(onRename).toHaveBeenCalledWith('');
@@ -387,7 +393,7 @@ describe('ChatView', () => {
         throw new Error('boom');
       });
       setup({ onRename });
-      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      await openRename();
       await userEvent.type(screen.getByRole('textbox', { name: 'Rename session' }), 'x{Enter}');
       expect(await screen.findByText("Couldn't rename")).toBeInTheDocument();
       expect(screen.getByRole('textbox', { name: 'Rename session' })).toBeInTheDocument();
@@ -401,18 +407,18 @@ describe('ChatView', () => {
     it('shows the new name right after saving, before the session updates', async () => {
       const onRename = vi.fn(async (n: string) => ({ name: n }));
       setup({ onRename });
-      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      await openRename();
       const input = screen.getByRole('textbox', { name: 'Rename session' });
       await userEvent.clear(input);
       await userEvent.type(input, 'Novo{Enter}');
       expect(await screen.findByRole('heading', { name: 'Novo' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Rename session' })).toHaveFocus();
+      expect(screen.getByRole('button', { name: 'Conversation actions' })).toHaveFocus();
     });
 
     it('drops the override once the session moved on, so a rename back to the base shows', async () => {
       const onRename = vi.fn(async (n: string) => ({ name: n }));
       const { rerenderWith } = setup({ session: session({ name: 'A' }), onRename });
-      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      await openRename();
       const input = screen.getByRole('textbox', { name: 'Rename session' });
       await userEvent.clear(input);
       await userEvent.type(input, 'B{Enter}');
@@ -426,7 +432,7 @@ describe('ChatView', () => {
     it('labels the section with the displayed name', async () => {
       const onRename = vi.fn(async (n: string) => ({ name: n }));
       setup({ session: session({ name: 'A' }), onRename });
-      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      await openRename();
       const input = screen.getByRole('textbox', { name: 'Rename session' });
       await userEvent.clear(input);
       await userEvent.type(input, 'B{Enter}');
@@ -436,7 +442,7 @@ describe('ChatView', () => {
     it('saves on blur', async () => {
       const onRename = vi.fn(async () => {});
       setup({ onRename });
-      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      await openRename();
       await userEvent.type(screen.getByRole('textbox', { name: 'Rename session' }), 'x');
       await userEvent.tab();
       expect(onRename).toHaveBeenCalledWith('billing-apix');
@@ -445,7 +451,7 @@ describe('ChatView', () => {
     it('does not save when the name is unchanged', async () => {
       const onRename = vi.fn(async () => {});
       setup({ onRename });
-      await userEvent.click(screen.getByRole('button', { name: 'Rename session' }));
+      await openRename();
       await userEvent.keyboard('{Enter}');
       expect(onRename).not.toHaveBeenCalled();
       expect(screen.queryByRole('textbox', { name: 'Rename session' })).not.toBeInTheDocument();
@@ -456,6 +462,105 @@ describe('ChatView', () => {
       await userEvent.click(screen.getByRole('heading', { name: 'billing-api' }));
       const input = screen.getByRole('textbox', { name: 'Rename session' });
       expect(input).toHaveAttribute('maxlength', '80');
+    });
+  });
+
+  describe('conversation menu', () => {
+    const menuButton = () => screen.getByRole('button', { name: 'Conversation actions' });
+
+    it('replaces the pencil with a ⋮ button that opens a menu with Rename and Remove from app', async () => {
+      setup({ onRename: vi.fn(async () => {}), onRemove: vi.fn(async () => {}) });
+      expect(screen.queryByRole('button', { name: 'Rename session' })).not.toBeInTheDocument();
+      expect(menuButton()).toHaveAttribute('aria-haspopup', 'menu');
+      expect(menuButton()).toHaveAttribute('aria-expanded', 'false');
+      await userEvent.click(menuButton());
+      expect(menuButton()).toHaveAttribute('aria-expanded', 'true');
+      const menu = screen.getByRole('menu', { name: 'Conversation actions' });
+      expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Rename', 'Remove from app']);
+      expect(within(menu).getByRole('menuitem', { name: 'Rename' })).toHaveFocus();
+    });
+
+    it('Escape closes the menu and returns focus to the ⋮ button', async () => {
+      setup({ onRename: vi.fn(async () => {}), onRemove: vi.fn(async () => {}) });
+      await userEvent.click(menuButton());
+      await userEvent.keyboard('{Escape}');
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      expect(menuButton()).toHaveFocus();
+    });
+
+    it('a click outside closes the menu', async () => {
+      setup({ onRename: vi.fn(async () => {}), onRemove: vi.fn(async () => {}) });
+      await userEvent.click(menuButton());
+      await userEvent.click(screen.getByRole('log'));
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+
+    it('arrow keys move between the items', async () => {
+      setup({ onRename: vi.fn(async () => {}), onRemove: vi.fn(async () => {}) });
+      await userEvent.click(menuButton());
+      await userEvent.keyboard('{ArrowDown}');
+      expect(screen.getByRole('menuitem', { name: 'Remove from app' })).toHaveFocus();
+      await userEvent.keyboard('{ArrowDown}');
+      expect(screen.getByRole('menuitem', { name: 'Rename' })).toHaveFocus();
+      await userEvent.keyboard('{ArrowUp}');
+      expect(screen.getByRole('menuitem', { name: 'Remove from app' })).toHaveFocus();
+    });
+
+    it('Rename from the keyboard opens the same input as before', async () => {
+      const onRename = vi.fn(async () => {});
+      setup({ onRename, onRemove: vi.fn(async () => {}) });
+      menuButton().focus();
+      await userEvent.keyboard('{Enter}');
+      await userEvent.keyboard('{Enter}');
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      const input = screen.getByRole('textbox', { name: 'Rename session' });
+      expect(input).toHaveFocus();
+      await userEvent.type(input, 'x{Escape}');
+      expect(onRename).not.toHaveBeenCalled();
+      expect(menuButton()).toHaveFocus();
+    });
+
+    it('Remove from app asks to confirm in the menu, then calls onRemove', async () => {
+      const onRemove = vi.fn(async () => {});
+      const confirm = vi.spyOn(window, 'confirm');
+      setup({ onRename: vi.fn(async () => {}), onRemove });
+      await userEvent.click(menuButton());
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Remove from app' }));
+      expect(onRemove).not.toHaveBeenCalled();
+      const sure = screen.getByRole('menuitem', { name: 'Remove? Confirm' });
+      expect(sure).toHaveFocus();
+      await userEvent.click(sure);
+      expect(onRemove).toHaveBeenCalledTimes(1);
+      expect(confirm).not.toHaveBeenCalled();
+      confirm.mockRestore();
+    });
+
+    it('closing the menu forgets a pending confirmation', async () => {
+      const onRemove = vi.fn(async () => {});
+      setup({ onRename: vi.fn(async () => {}), onRemove });
+      await userEvent.click(menuButton());
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Remove from app' }));
+      await userEvent.keyboard('{Escape}');
+      await userEvent.click(menuButton());
+      expect(screen.getByRole('menuitem', { name: 'Remove from app' })).toBeInTheDocument();
+      expect(onRemove).not.toHaveBeenCalled();
+    });
+
+    it('says so when removing fails and keeps the menu open', async () => {
+      const onRemove = vi.fn(async () => {
+        throw new Error('boom');
+      });
+      setup({ onRename: vi.fn(async () => {}), onRemove });
+      await userEvent.click(menuButton());
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Remove from app' }));
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Remove? Confirm' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't remove");
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+    });
+
+    it('no ⋮ button without any action', () => {
+      setup();
+      expect(screen.queryByRole('button', { name: 'Conversation actions' })).not.toBeInTheDocument();
     });
   });
 });

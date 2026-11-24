@@ -89,6 +89,13 @@ export const PencilIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="m13.5 6.5 4 4" />
   </svg>
 );
+export const MoreIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <circle cx="12" cy="5" r="1.4" fill="currentColor" />
+    <circle cx="12" cy="12" r="1.4" fill="currentColor" />
+    <circle cx="12" cy="19" r="1.4" fill="currentColor" />
+  </svg>
+);
 export const PanelIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base} {...p}>
     <rect x="3" y="4" width="18" height="16" rx="2" />
