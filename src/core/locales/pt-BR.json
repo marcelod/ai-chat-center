@@ -92,6 +92,10 @@
       "waitingInputBanner": "O Claude está esperando sua resposta no terminal",
       "waitingBannerHint": "Aprovar pelo app chega em uma versão futura.",
       "deliveryStalled": "Há mensagens esperando, mas a entrega para esta sessão está pausada: envie qualquer mensagem no terminal para retomar a entrega.",
+      "transcriptMissing": {
+        "title": "Esta sessão não salva o histórico",
+        "body": "O Claude Code não está gravando o transcript desta sessão, então o app não consegue mostrar suas mensagens nem as respostas (as mensagens enviadas daqui ainda chegam ao terminal). Isso acontece quando o claude é iniciado num terminal aberto por outra sessão do Claude Code, que repassa as variáveis CLAUDE_CODE_*. Abra um terminal novo, inicie o claude nele e digite /cc."
+      },
       "undeliveredUnsigned": "Uma mensagem de uma versão anterior do AI Chat Center não foi entregue. Envie-a de novo por aqui.",
       "messages": "Mensagens",
       "image": "[imagem]",

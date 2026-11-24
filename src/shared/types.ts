@@ -69,6 +69,11 @@ export type SessionView = {
   /** App messages are queued for this idle session and no waiter is running: a terminal prompt resumes delivery. */
   deliveryStalled?: boolean;
   /**
+   * Claude Code is not writing this session's transcript: app messages still reach it, but the app cannot show
+   * them or the replies. Typically a claude started in a terminal that inherited another session's variables.
+   */
+  transcriptMissing?: boolean;
+  /**
    * App messages that failed the signature check (sent through an older version's hub, typically) and were
    * kept aside, not delivered. The app says so.
    */

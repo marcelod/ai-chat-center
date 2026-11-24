@@ -327,6 +327,19 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
             <p className="text-sm">{t('ui.chat.deliveryStalled')}</p>
           </div>
         )}
+        {session.transcriptMissing && state !== 'disconnected' && (
+          <div
+            data-testid="transcript-missing"
+            role="status"
+            className="flex items-start gap-3 self-stretch rounded-xl border border-banner-border bg-banner-bg p-3.5 text-waiting-text"
+          >
+            <WarningIcon className="mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold">{t('ui.chat.transcriptMissing.title')}</p>
+              <p className="mt-1 text-sm">{t('ui.chat.transcriptMissing.body')}</p>
+            </div>
+          </div>
+        )}
         {(session.undeliveredUnsigned ?? 0) > 0 && state !== 'disconnected' && (
           <div
             data-testid="undelivered-unsigned"

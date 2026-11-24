@@ -469,7 +469,7 @@ async function clearDelivered(sid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.4.0";
+var VERSION = "0.4.2";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -1057,11 +1057,13 @@ var STALE_BUSY_MS = 1e4;
 var GRACE_MS = 15e3;
 var WAITER_HEARTBEAT_STALE_MS = 3e4;
 var STALLED_AFTER_MS = 15e3;
+var TRANSCRIPT_MISSING_AFTER_MS = 15e3;
 var MISSES_TO_EXIT = 3;
 var ClaudeCodeProvider = class {
   constructor(listLive = queryLiveSessions, opts = {}) {
     this.listLive = listLive;
     this.now = opts.now ?? Date.now;
+    this.alive = opts.isAlive ?? isAlive;
   }
   listLive;
   readers = /* @__PURE__ */ new Map();
@@ -1077,6 +1079,7 @@ var ClaudeCodeProvider = class {
   lastGood = null;
   lastSignature = null;
   now;
+  alive;
   async live(force = false) {
     const t = this.now();
     if (!force && this.liveCache && t >= this.liveCache.at && t - this.liveCache.at < LIVE_TTL_MS) {
@@ -1134,6 +1137,10 @@ var ClaudeCodeProvider = class {
       this.misses.set(sid, m);
     }
     if (!live.ok) return false;
+    if (reg.pid !== null && this.alive(reg.pid) && !live.list.some((l) => l.pid === reg.pid)) {
+      m.count = 0;
+      return false;
+    }
     if (live.fresh) m.count++;
     const age = this.now() - (Date.parse(connectedAt) || 0);
     return m.count >= MISSES_TO_EXIT && age > GRACE_MS;
@@ -1150,6 +1157,21 @@ var ClaudeCodeProvider = class {
       return this.now() - (await fs9.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
     } catch {
       return true;
+    }
+  }
+  /**
+   * The session's transcript does not exist some time after it connected: Claude Code is not writing it
+   * (a claude started from a terminal that inherited another session's CLAUDE_CODE_* variables runs as a
+   * child session and keeps no transcript). Messages are still delivered, but the app sees neither them nor
+   * the replies, so it says why instead of showing them as not delivered.
+   */
+  async transcriptMissing(transcriptPath, connectedAt) {
+    if (this.now() - (Date.parse(connectedAt) || 0) < TRANSCRIPT_MISSING_AFTER_MS) return false;
+    try {
+      await fs9.stat(transcriptPath);
+      return false;
+    } catch (err) {
+      return err.code === "ENOENT";
     }
   }
   async dropStaleBusy(sid) {
@@ -1244,6 +1266,7 @@ var ClaudeCodeProvider = class {
       if (waitingKind) view.waitingKind = waitingKind;
       if (pendingQuestion) view.pendingQuestion = pendingQuestion;
       if (state === "idle" && await this.deliveryStalled(sid, queued)) view.deliveryStalled = true;
+      if (!disconnected && await this.transcriptMissing(reg.transcriptPath, reg.connectedAt)) view.transcriptMissing = true;
       const unsigned = disconnected ? 0 : await countUnsigned(sid);
       if (unsigned > 0) view.undeliveredUnsigned = unsigned;
       if (lastEvent) view.lastEvent = lastEvent;
@@ -1317,6 +1340,7 @@ var ClaudeCodeProvider = class {
         s.lastEvent?.id ?? null,
         s.pendingAppMessageIds,
         s.deliveryStalled ?? false,
+        s.transcriptMissing ?? false,
         s.undeliveredUnsigned ?? 0,
         s.branch ?? null,
         s.model ?? null,
@@ -1411,6 +1435,9 @@ function createPairing(now = Date.now) {
 var MAX_BODY = 64 * 1024;
 var MAX_TEXT = 32e3;
 var HEARTBEAT_MS = 15e3;
+var WINDOW_FRESH_MS = 15e4;
+var MAX_WINDOWS = 20;
+var WINDOW_ID_RE = /^[0-9a-f]{32}$/;
 var LANGS2 = ["en", "pt-BR"];
 var CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'";
 var MIME = {
@@ -1490,6 +1517,14 @@ async function createHub(opts) {
   });
   let port = opts.port;
   const pairing = createPairing();
+  const now = opts.now ?? Date.now;
+  const windows = /* @__PURE__ */ new Map();
+  let focus = null;
+  const liveWindows = () => {
+    const t = now();
+    for (const [id, at] of windows) if (t - at >= WINDOW_FRESH_MS) windows.delete(id);
+    return windows.size;
+  };
   const clients = /* @__PURE__ */ new Set();
   let pollTimer = null;
   let heartbeat = null;
@@ -1645,8 +1680,32 @@ data: ${JSON.stringify(c)}
       return;
     }
     if (p === "/api/pair-code" && method === "POST") {
-      req.resume();
+      const json = String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json");
+      const body = json ? await readJsonBody(req) : (req.resume(), null);
+      const sid = body && typeof body === "object" && !Array.isArray(body) ? body.sessionId : void 0;
+      if (liveWindows() > 0) {
+        if (typeof sid === "string") {
+          try {
+            assertSessionId(sid);
+            focus = { seq: (focus?.seq ?? 0) + 1, sessionId: sid };
+          } catch {
+          }
+        }
+        return sendJson(res, 200, { live: true });
+      }
       return sendJson(res, 200, { code: pairing.issue() });
+    }
+    if (p === "/api/window" && method === "POST") {
+      const body = await readJsonBody(req);
+      const id = body && typeof body === "object" && !Array.isArray(body) ? body.id : void 0;
+      if (typeof id !== "string" || !WINDOW_ID_RE.test(id)) throw new HttpError(400, "invalid window id");
+      windows.delete(id);
+      if (body.closing !== true) {
+        liveWindows();
+        while (windows.size >= MAX_WINDOWS) windows.delete(windows.keys().next().value);
+        windows.set(id, now());
+      }
+      return sendJson(res, 200, { focus });
     }
     if (p === "/api/sessions" && method === "GET") return sendJson(res, 200, await provider.listSessions());
     if (p === "/api/config" && method === "GET") return sendJson(res, 200, await loadConfig());
@@ -1773,6 +1832,7 @@ data: ${JSON.stringify(c)}
   return {
     url: `http://127.0.0.1:${port}`,
     clients: () => clients.size,
+    windows: () => liveWindows(),
     server,
     close: () => new Promise((resolve) => {
       closed = true;
@@ -1940,7 +2000,7 @@ async function startHub(opts = {}) {
     let idleFired = false;
     const idleTimer = setInterval(async () => {
       try {
-        let held = started.clients() > 0;
+        let held = started.clients() > 0 || (started.windows?.() ?? 0) > 0;
         for (const r of held ? [] : await listRegistrations()) if (held = await holdsHub(r)) break;
         if (held) {
           lastUsed = Date.now();

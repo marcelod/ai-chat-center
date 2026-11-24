@@ -54,6 +54,8 @@ const GRACE_MS = 15_000;
 const WAITER_HEARTBEAT_STALE_MS = 30_000;
 /** Queued this long for an idle session with no live waiter: delivery is stalled (see deliveryStalled). */
 const STALLED_AFTER_MS = 15_000;
+/** Claude Code creates the transcript with the /cc prompt: still missing this long after connecting, it is not written. */
+const TRANSCRIPT_MISSING_AFTER_MS = 15_000;
 const MISSES_TO_EXIT = 3;
 
 export type ProviderOptions = {
@@ -175,6 +177,22 @@ export class ClaudeCodeProvider implements Provider {
     }
   }
 
+  /**
+   * The session's transcript does not exist some time after it connected: Claude Code is not writing it
+   * (a claude started from a terminal that inherited another session's CLAUDE_CODE_* variables runs as a
+   * child session and keeps no transcript). Messages are still delivered, but the app sees neither them nor
+   * the replies, so it says why instead of showing them as not delivered.
+   */
+  private async transcriptMissing(transcriptPath: string, connectedAt: string): Promise<boolean> {
+    if (this.now() - (Date.parse(connectedAt) || 0) < TRANSCRIPT_MISSING_AFTER_MS) return false;
+    try {
+      await fs.stat(transcriptPath);
+      return false;
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === 'ENOENT';
+    }
+  }
+
   private async dropStaleBusy(sid: string): Promise<void> {
     const age = await busyAge(sid, this.now());
     if (age !== null && age > STALE_BUSY_MS) await clearBusy(sid);
@@ -274,6 +292,7 @@ export class ClaudeCodeProvider implements Provider {
       if (waitingKind) view.waitingKind = waitingKind;
       if (pendingQuestion) view.pendingQuestion = pendingQuestion;
       if (state === 'idle' && (await this.deliveryStalled(sid, queued))) view.deliveryStalled = true;
+      if (!disconnected && (await this.transcriptMissing(reg.transcriptPath, reg.connectedAt))) view.transcriptMissing = true;
       const unsigned = disconnected ? 0 : await countUnsigned(sid);
       if (unsigned > 0) view.undeliveredUnsigned = unsigned;
       if (lastEvent) view.lastEvent = lastEvent;
@@ -353,6 +372,7 @@ export class ClaudeCodeProvider implements Provider {
         s.lastEvent?.id ?? null,
         s.pendingAppMessageIds,
         s.deliveryStalled ?? false,
+        s.transcriptMissing ?? false,
         s.undeliveredUnsigned ?? 0,
         s.branch ?? null,
         s.model ?? null,

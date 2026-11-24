@@ -198,6 +198,11 @@ describe('ChatView', () => {
     expect(screen.queryByText('Approving from the app comes in a later version.')).not.toBeInTheDocument();
   });
 
+  it('transcript missing says why the app shows nothing and how to fix it', () => {
+    setup({ session: session({ state: 'idle', transcriptMissing: true }) });
+    expect(screen.getByTestId('transcript-missing').textContent).toContain('Open a new terminal, start claude there');
+  });
+
   // Audit R3-F1 (b): queued messages with no waiter to deliver them: say what resumes delivery.
   it('delivery stalled shows how to resume it, in the user language', () => {
     setup({ session: session({ state: 'idle', deliveryStalled: true, pendingAppMessageIds: ['p1'] }) });

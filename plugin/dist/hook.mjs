@@ -2,8 +2,8 @@ import { createRequire as __acc_createRequire } from 'node:module';
 const require = __acc_createRequire(import.meta.url);
 
 // src/hooks/hook.ts
-import fs6 from "node:fs";
-import path8 from "node:path";
+import fs8 from "node:fs";
+import path9 from "node:path";
 import crypto5 from "node:crypto";
 
 // src/core/paths.ts
@@ -258,7 +258,7 @@ async function clearWaiting(sid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.4.0";
+var VERSION = "0.4.2";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -540,7 +540,9 @@ var en_default = {
     answersOff: "AI Chat Center: multiple-choice questions are answered only in the terminal again.",
     windowOn: "AI Chat Center: the app will open in its own window when you connect. To turn off: /ai-chat-center:cc window off",
     windowOff: "AI Chat Center: the app will no longer open in its own window.",
-    windowNoBrowser: "No Chrome, Chromium or Edge found: the link is still shown."
+    windowNoBrowser: "No Chrome, Chromium or Edge found: the link is still shown.",
+    windowLauncher: "The \u201CAI Chat Center\u201D icon was added to your app launcher: it opens the app (and starts the hub if needed).",
+    launcherComment: "Follow and answer your Claude Code sessions"
   },
   ui: {
     rename: {
@@ -623,6 +625,10 @@ var en_default = {
       waitingInputBanner: "Claude is waiting for your answer in the terminal",
       waitingBannerHint: "Approving from the app comes in a later version.",
       deliveryStalled: "Messages are waiting, but delivery to this session is paused: send any prompt in the terminal to resume delivery.",
+      transcriptMissing: {
+        title: "This session does not save its history",
+        body: "Claude Code is not writing this session's transcript, so the app cannot show your messages or the replies (messages sent from here still reach the terminal). This happens when claude is started in a terminal opened by another Claude Code session, which passes its CLAUDE_CODE_* variables on. Open a new terminal, start claude there and type /cc."
+      },
       undeliveredUnsigned: "A message from an older version of AI Chat Center was not delivered. Send it again from here.",
       messages: "Messages",
       image: "[image]",
@@ -666,7 +672,9 @@ var pt_BR_default = {
     answersOff: "AI Chat Center: perguntas de m\xFAltipla escolha voltam a ser respondidas s\xF3 no terminal.",
     windowOn: "AI Chat Center: o app vai abrir em janela pr\xF3pria ao conectar. Para desligar: /ai-chat-center:cc window off",
     windowOff: "AI Chat Center: o app n\xE3o abre mais em janela pr\xF3pria.",
-    windowNoBrowser: "Nenhum Chrome, Chromium ou Edge encontrado: o link continua sendo mostrado."
+    windowNoBrowser: "Nenhum Chrome, Chromium ou Edge encontrado: o link continua sendo mostrado.",
+    windowLauncher: "O atalho \u201CAI Chat Center\u201D foi adicionado ao menu de aplicativos: ele abre o app (e inicia o hub, se preciso).",
+    launcherComment: "Acompanhe e responda suas sess\xF5es do Claude Code"
   },
   ui: {
     rename: {
@@ -749,6 +757,10 @@ var pt_BR_default = {
       waitingInputBanner: "O Claude est\xE1 esperando sua resposta no terminal",
       waitingBannerHint: "Aprovar pelo app chega em uma vers\xE3o futura.",
       deliveryStalled: "H\xE1 mensagens esperando, mas a entrega para esta sess\xE3o est\xE1 pausada: envie qualquer mensagem no terminal para retomar a entrega.",
+      transcriptMissing: {
+        title: "Esta sess\xE3o n\xE3o salva o hist\xF3rico",
+        body: "O Claude Code n\xE3o est\xE1 gravando o transcript desta sess\xE3o, ent\xE3o o app n\xE3o consegue mostrar suas mensagens nem as respostas (as mensagens enviadas daqui ainda chegam ao terminal). Isso acontece quando o claude \xE9 iniciado num terminal aberto por outra sess\xE3o do Claude Code, que repassa as vari\xE1veis CLAUDE_CODE_*. Abra um terminal novo, inicie o claude nele e digite /cc."
+      },
       undeliveredUnsigned: "Uma mensagem de uma vers\xE3o anterior do AI Chat Center n\xE3o foi entregue. Envie-a de novo por aqui.",
       messages: "Mensagens",
       image: "[imagem]",
@@ -846,8 +858,33 @@ async function resolveClaudePid(sessionId, opts = {}) {
   return r.ok ? r.pid : null;
 }
 
-// src/hooks/openWindow.ts
+// src/hooks/parentClaude.ts
 import fs5 from "node:fs";
+import { execFileSync } from "node:child_process";
+function isClaudeArgv(argv) {
+  const base = (s) => s.split(/[\\/]/).pop() ?? "";
+  if (/^claude(\.exe)?$/i.test(base(argv[0] ?? ""))) return true;
+  return /^node(\.exe)?$/i.test(base(argv[0] ?? "")) && /[\\/]@anthropic-ai[\\/]claude-code[\\/]/.test(argv[1] ?? "");
+}
+function parentClaudePid(ppid = process.ppid, platform = process.platform, readArgv = (p) => readProcessArgv(p, platform)) {
+  if (!Number.isInteger(ppid) || ppid <= 1 || platform === "win32") return null;
+  const argv = readArgv(ppid);
+  return argv && isClaudeArgv(argv) ? ppid : null;
+}
+function readProcessArgv(pid, platform) {
+  try {
+    if (platform === "linux") {
+      return fs5.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
+    }
+    const out = execFileSync("ps", ["-o", "args=", "-p", String(pid)], { encoding: "utf8", timeout: 2e3, stdio: ["ignore", "pipe", "ignore"] });
+    return out.trim().split(/\s+/).filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+// src/hooks/openWindow.ts
+import fs6 from "node:fs";
 import path7 from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 var LINUX_NAMES = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge", "microsoft-edge-stable"];
@@ -862,11 +899,11 @@ var WIN_EXES = [
 ];
 var WIN_BASES = ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"];
 function isExecutableFile(p, platform = process.platform, checks = {}) {
-  const stat = checks.stat ?? fs5.statSync;
-  const access = checks.access ?? fs5.accessSync;
+  const stat = checks.stat ?? fs6.statSync;
+  const access = checks.access ?? fs6.accessSync;
   try {
     if (!stat(p).isFile()) return false;
-    if (platform !== "win32") access(p, fs5.constants.X_OK);
+    if (platform !== "win32") access(p, fs6.constants.X_OK);
     return true;
   } catch {
     return false;
@@ -908,7 +945,7 @@ function openAppWindow(browser, url, deps = {}) {
   }
 }
 var CODE_RE = /^[0-9a-f]{64}$/;
-async function launchAppWindow(hubUrl, deps = {}) {
+async function launchAppWindow(hubUrl, deps = {}, sessionId) {
   const browser = (deps.findBrowser ?? (() => findBrowser()))();
   if (!browser) return false;
   const u = new URL(hubUrl);
@@ -917,19 +954,89 @@ async function launchAppWindow(hubUrl, deps = {}) {
   const doFetch = deps.fetch ?? fetch;
   const res = await doFetch(`${u.origin}/api/pair-code`, {
     method: "POST",
-    headers: { authorization: `Bearer ${token}` },
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(sessionId ? { sessionId } : {}),
     signal: AbortSignal.timeout(deps.timeoutMs ?? 2e3)
   });
   if (!res.ok) throw new Error(`app window: pair-code answered ${res.status}`);
-  let code2;
+  let answer;
   try {
-    code2 = (await res.json())?.code;
+    answer = await res.json();
   } catch {
     throw new Error("app window: pair-code answer is not JSON");
   }
+  if (answer?.live === true) return "reused";
+  const code2 = answer?.code;
   if (typeof code2 !== "string" || !CODE_RE.test(code2)) throw new Error("app window: pair-code answer has no valid code");
   if (!openAppWindow(browser, `${u.origin}/#pair=${code2}`, deps)) throw new Error(`app window: could not start ${browser}`);
+  return "opened";
+}
+
+// src/hooks/launcher.ts
+import fs7 from "node:fs";
+import os5 from "node:os";
+import path8 from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+var DESKTOP_ID = "ai-chat-center";
+var APP_WM_CLASS = "chrome-127.0.0.1__-Default";
+function launcherPaths(env = process.env, home = os5.homedir()) {
+  const data = env.XDG_DATA_HOME && path8.isAbsolute(env.XDG_DATA_HOME) ? env.XDG_DATA_HOME : path8.join(home, ".local", "share");
+  return {
+    desktopFile: path8.join(data, "applications", `${DESKTOP_ID}.desktop`),
+    iconFile: path8.join(data, "icons", "hicolor", "512x512", "apps", `${DESKTOP_ID}.png`)
+  };
+}
+function quoteExecArg(a) {
+  return `"${a.replace(/[\\"`$]/g, (c) => `\\${c}`).replace(/%/g, "%%")}"`;
+}
+var value = (s) => s.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/\t/g, "\\t").replace(/\r/g, "\\r");
+function desktopEntry(o) {
+  return [
+    "[Desktop Entry]",
+    "Type=Application",
+    "Version=1.0",
+    "Name=AI Chat Center",
+    `Comment=${value(o.comment)}`,
+    `Exec=${quoteExecArg(o.node)} ${quoteExecArg(o.openScript)}`,
+    `Icon=${value(o.icon)}`,
+    "Terminal=false",
+    "Categories=Development;Utility;",
+    `StartupWMClass=${APP_WM_CLASS}`,
+    "StartupNotify=false",
+    ""
+  ].join("\n");
+}
+var defaultDist = () => path8.dirname(fileURLToPath2(import.meta.url));
+function installLauncher(o = {}) {
+  if ((o.platform ?? process.platform) !== "linux") return false;
+  const dist = o.distDir ?? defaultDist();
+  const p = launcherPaths(o.env, o.home);
+  const iconSrc = path8.join(dist, "ui", "icons", "icon-512.png");
+  const icon = fs7.readFileSync(iconSrc);
+  writeIfChanged(p.iconFile, icon);
+  const entry = desktopEntry({
+    node: o.node ?? process.execPath,
+    openScript: path8.join(dist, "open.mjs"),
+    icon: p.iconFile,
+    comment: o.comment ?? "Follow and answer your Claude Code sessions"
+  });
+  writeIfChanged(p.desktopFile, Buffer.from(entry, "utf8"));
   return true;
+}
+function removeLauncher(o = {}) {
+  if ((o.platform ?? process.platform) !== "linux") return;
+  const p = launcherPaths(o.env, o.home);
+  for (const f of [p.desktopFile, p.iconFile]) fs7.rmSync(f, { force: true });
+}
+function writeIfChanged(file, data) {
+  try {
+    if (fs7.readFileSync(file).equals(data)) return;
+  } catch {
+  }
+  fs7.mkdirSync(path8.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs7.writeFileSync(tmp, data, { mode: 420 });
+  fs7.renameSync(tmp, file);
 }
 
 // src/hooks/hook.ts
@@ -951,7 +1058,7 @@ var output = (context, systemMessage) => ({
 async function tightenHome() {
   try {
     await ensureDir(paths().home);
-    await fs6.promises.chmod(paths().home, DIR_MODE);
+    await fs8.promises.chmod(paths().home, DIR_MODE);
   } catch {
   }
 }
@@ -960,7 +1067,7 @@ async function connect(input, resolve, ctx) {
   const prev = await getRegistration(sid);
   const keep = prev && isActive(prev);
   await tightenHome();
-  const pid = await resolve(sid);
+  const pid = await resolve(sid) ?? (ctx.parentClaudePid ?? parentClaudePid)();
   const previousKeys = [...prev?.previousKeys ?? [], ...prev?.key && !keep ? [prev.key] : []].slice(-MAX_PREVIOUS_KEYS);
   const reg = await register({
     sessionId: sid,
@@ -978,7 +1085,7 @@ async function connect(input, resolve, ctx) {
   await clearBusy(sid);
   await clearWaiting(sid);
   await clearTurnOrigin(sid);
-  await fs6.promises.rm(paths().questionsDir(sid), { recursive: true, force: true });
+  await fs8.promises.rm(paths().questionsDir(sid), { recursive: true, force: true });
   const { language, openWindow } = await loadConfig();
   let status;
   let shown;
@@ -991,10 +1098,13 @@ async function connect(input, resolve, ctx) {
     const url = await ctx.ensureHub(notice);
     shown = t(language, "hook.ready", { url });
     status = CONNECTED;
-    if (openWindow) await openWindowQuietly(url, ctx);
+    if (openWindow) {
+      refreshLauncher(ctx, language);
+      await openWindowQuietly(url, ctx, sid);
+    }
   } catch (e) {
     logError(e);
-    const log = path8.join(paths().logDir, "hook.log");
+    const log = path9.join(paths().logDir, "hook.log");
     status = `AI Chat Center: the hub failed to start. See ${log}`;
     shown = t(language, "hook.hubFailed", { log });
   }
@@ -1002,14 +1112,22 @@ async function connect(input, resolve, ctx) {
   if (pid === null) lines.push(PID_UNKNOWN);
   return output(lines.join("\n"), [shown, ...notices].join("\n"));
 }
-async function openWindowQuietly(url, ctx) {
+function refreshLauncher(ctx, language) {
+  try {
+    return ctx.launcher?.install(t(language, "hook.launcherComment")) ?? false;
+  } catch (e) {
+    logError(e);
+    return false;
+  }
+}
+async function openWindowQuietly(url, ctx, sid) {
   try {
     await launchAppWindow(url, {
       findBrowser: ctx.findBrowser ?? (() => findBrowser()),
       ...ctx.fetch ? { fetch: ctx.fetch } : {},
       ...ctx.spawn ? { spawn: ctx.spawn } : {},
       onError: (msg) => logError(msg)
-    });
+    }, sid);
   } catch (e) {
     logError(e instanceof Error ? e.message : String(e));
   }
@@ -1031,8 +1149,18 @@ async function handleHook(event, input, ctx) {
       const on = cmd === "window-on";
       const { language } = await saveConfig({ openWindow: on });
       const find = ctx.findBrowser ?? (() => findBrowser());
-      const note = on && find() === null ? `
+      const browser = on ? find() : null;
+      let note = on && browser === null ? `
 ${t(language, "hook.windowNoBrowser")}` : "";
+      if (on && browser !== null && refreshLauncher(ctx, language)) note += `
+${t(language, "hook.windowLauncher")}`;
+      if (!on) {
+        try {
+          ctx.launcher?.remove();
+        } catch (e) {
+          logError(e);
+        }
+      }
       answersResult = output(on ? WINDOW_ON : WINDOW_OFF, t(language, on ? "hook.windowOn" : "hook.windowOff") + note);
     }
     if (cmd === "answers-on" || cmd === "answers-off") {
@@ -1078,9 +1206,9 @@ async function readStdin() {
 function logError(e) {
   try {
     const dir = paths().logDir;
-    fs6.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
-    fs6.appendFileSync(
-      path8.join(dir, "hook.log"),
+    fs8.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+    fs8.appendFileSync(
+      path9.join(dir, "hook.log"),
       `${(/* @__PURE__ */ new Date()).toISOString()} ${e instanceof Error ? e.stack ?? e.message : String(e)}
 `
     );
@@ -1093,7 +1221,10 @@ async function main() {
     const event = process.argv[2];
     if (event !== "prompt-submit" && event !== "notification") return;
     const input = JSON.parse(await readStdin());
-    result = await handleHook(event, input, { ensureHub: (notice) => ensureHub({ notice }) });
+    result = await handleHook(event, input, {
+      ensureHub: (notice) => ensureHub({ notice }),
+      launcher: { install: (comment) => installLauncher({ comment }), remove: () => removeLauncher() }
+    });
   } catch (e) {
     logError(e);
   }

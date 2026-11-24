@@ -495,6 +495,31 @@ describe('provider: delivery stalled', () => {
   });
 });
 
+// A claude started in a terminal that inherited another session's CLAUDE_CODE_* variables runs as a child
+// session and writes no transcript: messages are delivered but the app sees nothing. The hub says why.
+describe('provider: transcript missing', () => {
+  it('is flagged once the session connected a while ago and its transcript does not exist', async () => {
+    await reg();
+    const connectedAt = Date.parse((await getRegistration('s1'))!.connectedAt);
+    let t = connectedAt + 5_000;
+    const p = new ClaudeCodeProvider(async () => [live()], { now: () => t });
+    fs.rmSync(transcript);
+    expect((await p.listSessions()).connected[0].transcriptMissing).toBeUndefined(); // just connected
+    t = connectedAt + 60_000;
+    expect((await p.listSessions()).connected[0].transcriptMissing).toBe(true);
+    fs.writeFileSync(transcript, '');
+    expect((await p.listSessions()).connected[0].transcriptMissing).toBeUndefined();
+  });
+  it('a change shows up as a sessions change', async () => {
+    await reg();
+    const connectedAt = Date.parse((await getRegistration('s1'))!.connectedAt);
+    const p = new ClaudeCodeProvider(async () => [live()], { now: () => connectedAt + 60_000 });
+    await p.poll();
+    fs.rmSync(transcript);
+    expect(await p.poll()).toContainEqual({ type: 'sessions' });
+  });
+});
+
 describe('provider: messages kept aside as unsigned (audit R4-M2)', () => {
   it('counts them for an active session, and a change shows up as a sessions change', async () => {
     await reg();
