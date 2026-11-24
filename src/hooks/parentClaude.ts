@@ -35,3 +35,28 @@ function readProcessArgv(pid: number, platform: NodeJS.Platform): string[] | nul
     return null;
   }
 }
+
+/**
+ * True when `pid` runs and is still Claude Code. The hub keeps an unlisted session alive on its pid
+ * (provider.shouldMarkExited); after claude exits the system may give that pid to another program, which
+ * must not keep the session "connected" forever. Answers are cached a few seconds (macOS runs `ps`).
+ */
+export function createClaudeProcessCheck(
+  platform: NodeJS.Platform = process.platform,
+  readArgv: (pid: number) => string[] | null = (p) => readProcessArgv(p, platform),
+  now: () => number = Date.now,
+  ttlMs = 10_000,
+): (pid: number) => boolean {
+  const cache = new Map<number, { at: number; ok: boolean }>();
+  return (pid) => {
+    if (!Number.isInteger(pid) || pid <= 1 || platform === 'win32') return false;
+    const t = now();
+    const hit = cache.get(pid);
+    if (hit && t - hit.at < ttlMs) return hit.ok;
+    const argv = readArgv(pid);
+    const ok = argv !== null && isClaudeArgv(argv);
+    if (cache.size > 256) cache.clear();
+    cache.set(pid, { at: t, ok });
+    return ok;
+  };
+}

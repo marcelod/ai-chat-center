@@ -13,7 +13,7 @@ import { paths } from '../core/paths.js';
 import { TranscriptReader } from './transcript/reader.js';
 import { queryLiveSessions } from './status.js';
 import { PROTOCOL } from '../core/version.js';
-import { isAlive } from '../core/lock.js';
+import { createClaudeProcessCheck } from '../hooks/parentClaude.js';
 
 export type { LiveSession, SessionView, ProviderChange };
 
@@ -60,7 +60,7 @@ const MISSES_TO_EXIT = 3;
 
 export type ProviderOptions = {
   now?: () => number;
-  /** For tests: whether a process is alive. Default: isAlive (src/core/lock.ts). */
+  /** For tests: whether a pid runs and is still claude. Default: createClaudeProcessCheck (src/hooks/parentClaude.ts). */
   isAlive?: (pid: number) => boolean;
 };
 
@@ -84,7 +84,7 @@ export class ClaudeCodeProvider implements Provider {
     opts: ProviderOptions = {},
   ) {
     this.now = opts.now ?? Date.now;
-    this.alive = opts.isAlive ?? isAlive;
+    this.alive = opts.isAlive ?? createClaudeProcessCheck();
   }
 
   private async live(force = false): Promise<Live> {
