@@ -81,6 +81,53 @@ describe('macOS launcher', () => {
     expect(fs.existsSync(path.join(p2.app, 'x'))).toBe(true);
   });
 
+  it('a bundle left half-written (no Info.plist, only our files or none) is ours to rewrite and remove', () => {
+    const cases: ((p: ReturnType<typeof macLauncherPaths>) => void)[] = [
+      (p) => fs.mkdirSync(p.app, { recursive: true }), // empty
+      (p) => fs.mkdirSync(path.dirname(p.plist), { recursive: true }), // only Contents
+      (p) => {
+        // the executable and the icon written, Info.plist lost
+        fs.mkdirSync(path.dirname(p.exec), { recursive: true });
+        fs.writeFileSync(p.exec, launchScript('/old/node', '/old/open.mjs'));
+        fs.mkdirSync(path.dirname(p.icon), { recursive: true });
+        fs.writeFileSync(p.icon, 'icns');
+      },
+    ];
+    for (const make of cases) {
+      const home = tmpDir();
+      const p = macLauncherPaths(home);
+      make(p);
+      expect(installLauncher({ platform: 'darwin', env: {}, home, node: '/n', distDir: fakeDist() })).toBe(true);
+      expect(fs.readFileSync(p.plist, 'utf8')).toBe(infoPlist());
+      expect(fs.readFileSync(p.exec, 'utf8')).toContain("exec '/n'");
+      fs.rmSync(p.plist);
+      removeLauncher({ platform: 'darwin', env: {}, home });
+      expect(fs.existsSync(p.app)).toBe(false);
+    }
+  });
+
+  it('a folder without Info.plist holding anything else, or an executable that is not our script, is not ours', () => {
+    const makers: ((p: ReturnType<typeof macLauncherPaths>) => void)[] = [
+      (p) => {
+        fs.mkdirSync(path.dirname(p.exec), { recursive: true });
+        fs.writeFileSync(path.join(path.dirname(p.exec), 'other'), 'x');
+      },
+      (p) => {
+        fs.mkdirSync(path.dirname(p.exec), { recursive: true });
+        fs.writeFileSync(p.exec, '\xcf\xfa\xed\xfe binary');
+      },
+    ];
+    for (const make of makers) {
+      const home = tmpDir();
+      const p = macLauncherPaths(home);
+      make(p);
+      expect(() => installLauncher({ platform: 'darwin', env: {}, home, distDir: fakeDist() })).toThrow(/not ours/);
+      removeLauncher({ platform: 'darwin', env: {}, home });
+      expect(fs.existsSync(p.app)).toBe(true);
+      expect(fs.existsSync(p.plist)).toBe(false);
+    }
+  });
+
   it('never puts the token in the bundle', () => {
     const home = tmpDir();
     installLauncher({ platform: 'darwin', env: { AI_CHAT_CENTER_HOME: '/x' }, home, node: '/n', distDir: fakeDist() });

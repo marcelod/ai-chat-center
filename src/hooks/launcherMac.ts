@@ -1,7 +1,8 @@
 // "AI Chat Center.app" in ~/Applications (spec 2026-11-24-launcher-windows-macos §3.2): a minimal bundle
 // whose executable is a shell script that execs `node open.mjs`. ~/Applications needs no admin password and
 // shows in Launchpad and Spotlight. A locally written bundle gets no quarantine attribute, so Gatekeeper lets
-// it run unsigned. Only a bundle carrying our identifier is ever rewritten or removed.
+// it run unsigned. Only a bundle carrying our identifier, or one without Info.plist that holds nothing but
+// our own files (an install cut short), is ever rewritten or removed.
 import fs from 'node:fs';
 import path from 'node:path';
 import { pngToIcns, writeIfChanged } from './launcherFiles.js';
@@ -55,14 +56,64 @@ export function infoPlist(): string {
   ].join('\n');
 }
 
-/** Missing bundle: 'none'; a bundle with our identifier: 'ours'; anything else at that path: 'foreign'. */
-function ownership(p: MacLauncherPaths): 'none' | 'ours' | 'foreign' {
-  if (!fs.existsSync(p.app)) return 'none';
+/** What a bundle of ours may hold besides Info.plist: directories and files, by path inside the .app. */
+const OUR_DIRS = new Set(['Contents', path.join('Contents', 'MacOS'), path.join('Contents', 'Resources')]);
+const OUR_EXEC = path.join('Contents', 'MacOS', EXECUTABLE);
+const OUR_ICON = path.join('Contents', 'Resources', 'icon.icns');
+
+/**
+ * True when the folder holds nothing but (part of) what installMacLauncher writes, minus Info.plist: an
+ * install cut short, or an Info.plist lost. Symbolic links, other files and an executable that is not our
+ * launch script make it someone else's.
+ */
+function onlyOurFiles(app: string): boolean {
+  const walk = (rel: string): boolean => {
+    for (const e of fs.readdirSync(path.join(app, rel), { withFileTypes: true })) {
+      const r = rel ? path.join(rel, e.name) : e.name;
+      if (e.isDirectory()) {
+        if (!OUR_DIRS.has(r) || !walk(r)) return false;
+      } else if (!e.isFile()) {
+        return false;
+      } else if (r === OUR_EXEC) {
+        const st = fs.statSync(path.join(app, r));
+        if (st.size > 64 * 1024 || !fs.readFileSync(path.join(app, r), 'utf8').startsWith('#!/bin/sh\nexec ')) return false;
+      } else if (r !== OUR_ICON) {
+        return false;
+      }
+    }
+    return true;
+  };
   try {
-    const plist = fs.readFileSync(p.plist, 'utf8');
-    return /<key>CFBundleIdentifier<\/key>\s*<string>com\.ai-chat-center\.launcher<\/string>/.test(plist) ? 'ours' : 'foreign';
+    return fs.lstatSync(app).isDirectory() && walk('');
   } catch {
-    return 'foreign';
+    return false;
+  }
+}
+
+/**
+ * Missing bundle: 'none'; a bundle with our identifier: 'ours'; a folder without Info.plist that holds only
+ * our files (or nothing): 'partial', ours to rewrite or remove; anything else at that path: 'foreign'. An
+ * Info.plist with another identifier, or one that cannot be read, is never ours.
+ */
+function ownership(p: MacLauncherPaths): 'none' | 'ours' | 'partial' | 'foreign' {
+  if (!fs.existsSync(p.app)) return 'none';
+  let plist: string;
+  try {
+    plist = fs.readFileSync(p.plist, 'utf8');
+  } catch (e) {
+    const missing = (e as NodeJS.ErrnoException).code === 'ENOENT' && !lexists(p.plist);
+    return missing && onlyOurFiles(p.app) ? 'partial' : 'foreign';
+  }
+  return /<key>CFBundleIdentifier<\/key>\s*<string>com\.ai-chat-center\.launcher<\/string>/.test(plist) ? 'ours' : 'foreign';
+}
+
+/** True when something (even a dangling link) sits at the path. */
+function lexists(f: string): boolean {
+  try {
+    fs.lstatSync(f);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -84,5 +135,6 @@ export function installMacLauncher(o: MacInstallOptions): true {
 
 export function removeMacLauncher(home: string): void {
   const p = macLauncherPaths(home);
-  if (ownership(p) === 'ours') fs.rmSync(p.app, { recursive: true, force: true });
+  const owner = ownership(p);
+  if (owner === 'ours' || owner === 'partial') fs.rmSync(p.app, { recursive: true, force: true });
 }
