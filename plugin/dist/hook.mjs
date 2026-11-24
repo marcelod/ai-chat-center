@@ -258,7 +258,7 @@ async function clearWaiting(sid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.4.5";
+var VERSION = "0.4.6";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -618,6 +618,8 @@ var en_default = {
       connectedAt: "Connected to AI Chat Center \xB7 {time}",
       disconnectedAt: "Disconnected \xB7 {time}",
       typing: "Claude is working",
+      agent: "Agent",
+      agentFrom: "Agent {name}",
       branch: "Branch",
       model: "Model",
       effort: "Reasoning level",
@@ -751,6 +753,8 @@ var pt_BR_default = {
       connectedAt: "Conectada ao AI Chat Center \xB7 {time}",
       disconnectedAt: "Desconectada \xB7 {time}",
       typing: "Claude est\xE1 trabalhando",
+      agent: "Agente",
+      agentFrom: "Agente {name}",
       branch: "Branch",
       model: "Modelo",
       effort: "N\xEDvel de racioc\xEDnio",

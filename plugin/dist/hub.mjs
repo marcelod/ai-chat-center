@@ -477,7 +477,7 @@ async function clearDelivered(sid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.4.5";
+var VERSION = "0.4.6";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -697,6 +697,41 @@ var SUMMARY_MAX = 120;
 var truncate = (s, max) => s.length > max ? s.slice(0, max) : s;
 var WRAPPER_TAGS = /<\/?(?:pasted_content|teammate-message)(?:\s+[\w-]+="[^"]*")*\s*>/g;
 var unwrapPrompt = (text) => text.replace(WRAPPER_TAGS, "");
+var AGENT_MESSAGE_PREFIX = "Another Claude session sent a message:";
+var AGENT_BLOCK = /<(teammate-message|agent-message)((?:\s+[\w-]+="[^"]*")*)\s*>\n?([\s\S]*?)<\/\1>/g;
+function attr(attrs, name) {
+  return new RegExp(`\\s${name}="([^"]*)"`).exec(attrs)?.[1];
+}
+function agentMessages(content, names = /* @__PURE__ */ new Map()) {
+  const out = [];
+  for (const m of content.matchAll(AGENT_BLOCK)) {
+    const [, tag2, attrs, rawBody] = m;
+    let text = rawBody.trim();
+    let from;
+    if (tag2 === "teammate-message") {
+      from = attr(attrs, "teammate_id") ?? "";
+      if (text.startsWith("{")) {
+        try {
+          const j = JSON.parse(text);
+          const said = [j.result, j.message, j.content].find((v) => typeof v === "string" && v.trim() !== "");
+          text = typeof said === "string" ? said.trim() : "";
+          if (!from && typeof j.from === "string") from = j.from;
+        } catch {
+        }
+      }
+    } else {
+      const id = attr(attrs, "from") ?? "";
+      from = names.get(id) ?? "";
+      const marker = "The report follows:";
+      const at = rawBody.indexOf(marker);
+      if (at >= 0) {
+        text = rawBody.slice(at + marker.length).replace(/^\n/, "").split("\n").map((l) => l.startsWith("  ") ? l.slice(2) : l).join("\n").trim();
+      }
+    }
+    if (text) out.push({ from, text: truncate(text, RESULT_MAX * 4) });
+  }
+  return out;
+}
 function isRecord(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -743,6 +778,8 @@ var TranscriptParser = class {
   open = null;
   byToolUse = /* @__PURE__ */ new Map();
   questions = /* @__PURE__ */ new Map();
+  /** Subagent id → its description (from the Agent tool result), to name a subagent's hand-back. */
+  agentNames = /* @__PURE__ */ new Map();
   /** Queued prompts already shown, to skip a later identical user entry. */
   queued = [];
   /** The last `!` command, for the output entry that follows it. */
@@ -763,6 +800,10 @@ var TranscriptParser = class {
       const model = message.model;
       if (typeof model === "string" && model && model !== "<synthetic>") this.model = model;
       return this.assistant(uuid, ts, message.content);
+    }
+    if (entry.type === "user") {
+      const fromAgent = this.peer(uuid, ts, entry.origin, message.content);
+      if (fromAgent) return fromAgent;
     }
     if (entry.type === "user" && entry.isMeta !== true) {
       if (entry.isCompactSummary === true) return [{ kind: "notice", id: uuid, ts, code: "compacted" }];
@@ -885,9 +926,7 @@ var TranscriptParser = class {
       return [{ kind: "actions", id: uuid, ts, items: [item] }];
     }
     const t = content.trimStart();
-    if (t.startsWith("<command-") || t.startsWith("<local-command-") || t.startsWith("<task-notification>") || t.startsWith("<system-reminder>") || // A teammate's or subagent's message (agent teams, SendMessage): Claude Code stores it as a user
-    // entry, but nobody typed it.
-    t.startsWith("Another Claude session sent a message:")) {
+    if (t.startsWith("<command-") || t.startsWith("<local-command-") || t.startsWith("<task-notification>") || t.startsWith("<system-reminder>")) {
       return [];
     }
     const text = unwrapPrompt(content);
@@ -895,6 +934,29 @@ var TranscriptParser = class {
     if (this.takeQueued(text, ts)) return [];
     this.open = null;
     return [{ kind: "user", id: uuid, ts, text, origin: "terminal" }];
+  }
+  /**
+   * A teammate's or subagent's message (agent teams, SendMessage, a subagent's hand-back): Claude Code
+   * stores it as a user entry (older versions without `isMeta`), but the user did not type it. Shown as the
+   * agent's, with only what it said. Newer versions add `origin: {kind: 'peer', name, handbackReportText}`.
+   * Null when the entry is not one.
+   */
+  peer(uuid, ts, origin, content) {
+    const text = typeof content === "string" ? content : promptParts(content).text;
+    const isPeer = isRecord(origin) && origin.kind === "peer";
+    if (!isPeer && !text.trimStart().startsWith(AGENT_MESSAGE_PREFIX)) return null;
+    let msgs = agentMessages(text, this.agentNames);
+    if (isPeer) {
+      const name = typeof origin.name === "string" && origin.name ? origin.name : void 0;
+      const report = typeof origin.handbackReportText === "string" ? origin.handbackReportText.trim() : "";
+      if (msgs.length === 0 && report) msgs = [{ from: "", text: truncate(report, RESULT_MAX * 4) }];
+      if (msgs.length === 1) {
+        if (report) msgs[0].text = truncate(report, RESULT_MAX * 4);
+        if (name && !msgs[0].from) msgs[0].from = name;
+      }
+    }
+    this.open = null;
+    return msgs.map((m, i, all) => ({ kind: "agent", id: all.length > 1 ? `${uuid}#${i}` : uuid, ts, ...m }));
   }
   toolResults(blocks, toolUseResult) {
     const out = /* @__PURE__ */ new Map();
@@ -916,7 +978,12 @@ var TranscriptParser = class {
       const ev = this.byToolUse.get(block.tool_use_id);
       const item = ev?.items.find((i) => i.toolUseId === block.tool_use_id);
       if (!ev || !item) continue;
-      item.result = truncate(resultText(block.content), RESULT_MAX);
+      const full = resultText(block.content);
+      if (item.name === "Agent" || item.name === "Task") {
+        const id = /agentId:\s*([\w-]+)/.exec(full)?.[1];
+        if (id && item.summary) this.agentNames.set(id, item.summary);
+      }
+      item.result = truncate(full, RESULT_MAX);
       if (block.is_error === true) item.isError = true;
       this.byToolUse.delete(block.tool_use_id);
       out.set(ev.id, snapshot(ev));
