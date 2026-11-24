@@ -416,6 +416,7 @@ export class ClaudeCodeProvider implements Provider {
         s.model ?? null,
         s.effort ?? null,
         s.background ?? null,
+        s.pinned ?? false,
       ]),
     });
     if (signature !== this.lastSignature) {

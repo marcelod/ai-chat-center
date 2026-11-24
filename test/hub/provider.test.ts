@@ -737,3 +737,17 @@ describe('provider: sessions removed from the app', () => {
     await expect(p.send('s1', 'hi')).rejects.toBeInstanceOf(SessionDisconnectedError);
   });
 });
+
+describe('provider: pinning changes the sessions signature', () => {
+  it('poll emits sessions when a session is pinned or unpinned', async () => {
+    await reg();
+    const p = new ClaudeCodeProvider(async () => [live({ status: 'busy' })]);
+    await p.poll();
+    expect((await p.poll()).map((c) => c.type)).toEqual([]);
+    await setPinned('s1', true);
+    expect((await p.poll()).map((c) => c.type)).toEqual(['sessions']);
+    expect((await p.poll()).map((c) => c.type)).toEqual([]);
+    await setPinned('s1', false);
+    expect((await p.poll()).map((c) => c.type)).toEqual(['sessions']);
+  });
+});
