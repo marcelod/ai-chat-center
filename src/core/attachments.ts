@@ -7,8 +7,9 @@ import { DIR_MODE, FILE_MODE, ensureDir } from './fsAtomic.js';
 
 /** Attachments older than this are deleted at the next cleanup (hub start, registration pruning). */
 export const ATTACHMENT_MAX_AGE_MS = 30 * 86_400_000;
-const NAME_MAX = 100;
-const EXT_MAX = 20;
+/** In UTF-8 bytes: with the 17-byte random prefix it stays well under the usual 255-byte file name limit. */
+const NAME_MAX_BYTES = 200;
+const EXT_MAX_BYTES = 20;
 
 export class AttachmentTooLargeError extends Error {
   constructor() {
@@ -24,7 +25,8 @@ export function sessionAttachmentsDir(sid: string): string {
 
 /**
  * A safe file name from what the browser sent: the base name only, without control characters, path
- * separators or leading dots, at most NAME_MAX characters with the extension kept. Never empty.
+ * separators or leading dots, at most NAME_MAX_BYTES UTF-8 bytes (cut on whole code points) with the
+ * extension kept. Never empty.
  */
 export function sanitizeFileName(raw: string): string {
   const base = (raw.split(/[\\/]/).pop() ?? '')
@@ -35,10 +37,23 @@ export function sanitizeFileName(raw: string): string {
     .replace(/^\.+/, '')
     .trim();
   if (!base) return 'file';
-  if (base.length <= NAME_MAX) return base;
+  if (Buffer.byteLength(base) <= NAME_MAX_BYTES) return base;
   const dot = base.lastIndexOf('.');
-  const ext = dot > 0 && base.length - dot <= EXT_MAX ? base.slice(dot) : '';
-  return base.slice(0, NAME_MAX - ext.length) + ext;
+  const ext = dot > 0 && Buffer.byteLength(base.slice(dot)) <= EXT_MAX_BYTES ? base.slice(dot) : '';
+  return truncateUtf8(base.slice(0, base.length - ext.length), NAME_MAX_BYTES - Buffer.byteLength(ext)) + ext;
+}
+
+/** The longest prefix of `s` made of whole code points that fits in `max` UTF-8 bytes. */
+function truncateUtf8(s: string, max: number): string {
+  let out = '';
+  let bytes = 0;
+  for (const ch of s) {
+    const n = Buffer.byteLength(ch);
+    if (bytes + n > max) break;
+    out += ch;
+    bytes += n;
+  }
+  return out;
 }
 
 /**

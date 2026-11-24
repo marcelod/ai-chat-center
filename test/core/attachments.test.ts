@@ -33,9 +33,25 @@ describe('sanitizeFileName', () => {
   });
   it('caps the length and keeps the extension', () => {
     const s = sanitizeFileName(`${'x'.repeat(500)}.png`);
-    expect(s.length).toBeLessThanOrEqual(100);
+    expect(Buffer.byteLength(s)).toBeLessThanOrEqual(200);
     expect(s.endsWith('.png')).toBe(true);
-    expect(sanitizeFileName('y'.repeat(300)).length).toBeLessThanOrEqual(100);
+    expect(Buffer.byteLength(sanitizeFileName('y'.repeat(300)))).toBeLessThanOrEqual(200);
+  });
+  it('caps by UTF-8 bytes without splitting characters', () => {
+    const emoji = sanitizeFileName(`${'\u{1F600}'.repeat(150)}.png`); // 4 bytes and 2 UTF-16 units each
+    expect(Buffer.byteLength(emoji)).toBeLessThanOrEqual(200);
+    expect(emoji.endsWith('.png')).toBe(true);
+    expect([...emoji.slice(0, -4)].every((c) => c === '\u{1F600}')).toBe(true);
+    const cjk = sanitizeFileName('\u65e5'.repeat(100)); // 3 bytes each, 100 UTF-16 units
+    expect(Buffer.byteLength(cjk)).toBeLessThanOrEqual(200);
+    expect([...cjk].every((c) => c === '\u65e5')).toBe(true);
+    const ext = sanitizeFileName(`${'a'.repeat(300)}.\u00e9\u00e9\u00e9`);
+    expect(Buffer.byteLength(ext)).toBeLessThanOrEqual(200);
+    expect(ext.endsWith('.\u00e9\u00e9\u00e9')).toBe(true);
+  });
+  it('stores a long non-ASCII name', async () => {
+    const p = await storeAttachment('s1', `${'\u65e5'.repeat(120)}.txt`, Readable.from([Buffer.from('x')]), 100);
+    expect(fs.readFileSync(p, 'utf8')).toBe('x');
   });
 });
 
