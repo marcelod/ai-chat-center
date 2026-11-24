@@ -321,7 +321,7 @@ describe('Composer attachments', () => {
     expect(onSend).not.toHaveBeenCalled();
     box().focus();
     await user.keyboard('{Enter}');
-    expect(onUpload.mock.calls.map(([f]) => f.name)).toEqual(['a.txt', 'b.txt', 'b.txt']);
+    expect(onUpload!.mock.calls.map(([f]) => f.name)).toEqual(['a.txt', 'b.txt', 'b.txt']);
     expect(onSend).toHaveBeenCalledWith('hey\n[Attachment: /h/a.txt]\n[Attachment: /h/b.txt]');
   });
 
