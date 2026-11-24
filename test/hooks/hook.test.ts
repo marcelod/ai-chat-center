@@ -5,6 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { handleHook, isCcCommand, type HookInput } from '../../src/hooks/hook.js';
+import { runWaiter, type PidLookup, type WaiterOptions } from '../../src/hooks/waiter.js';
 import { ensureHub, checkHealth, hubSpawnOptions } from '../../src/hooks/ensureHub.js';
 import { PROTOCOL, VERSION } from '../../src/core/version.js';
 import { register, getRegistration, markDisconnected, markRemoved, isActive, isRemoved } from '../../src/core/registry.js';
@@ -162,6 +163,7 @@ describe('hook', () => {
     expect(fs.readdirSync(paths().home)).toEqual([]);
     await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
     const before = await getRegistration('s1');
+    fs.rmSync(paths().busyFile('s1')); // set by the /cc turn above
     const r2 = await handleHook('prompt-submit', inp({ prompt: '/CC Offline' }), ctx());
     expect(out(r2).hookSpecificOutput.additionalContext).toBe(msg);
     expect(await getRegistration('s1')).toEqual(before);
@@ -225,13 +227,38 @@ describe('hook', () => {
     expect(await isBusy('s1')).toBe(false);
   });
 
-  it('/cc clears the busy marker and the waiting state', async () => {
+  it('/cc marks its own turn busy (fresh marker) and clears the waiting state', async () => {
     await register({ sessionId: 's1', transcriptPath: '/t', cwd: '/x', pid: 42 });
     await setBusy('s1');
+    const old = Date.now() - 60_000;
+    fs.utimesSync(paths().busyFile('s1'), old / 1000, old / 1000);
     await handleHook('notification', inp({ notification_type: 'permission_prompt' }), ctx());
     await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
-    expect(await isBusy('s1')).toBe(false);
+    expect(await isBusy('s1')).toBe(true);
+    expect(fs.statSync(paths().busyFile('s1')).mtimeMs).toBeGreaterThan(old + 30_000);
     expect(await getWaiting('s1')).toBeNull();
+  });
+
+  it('the first /cc marks the turn busy, also when the hub fails to start', async () => {
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
+    expect(await isBusy('s1')).toBe(true);
+    process.env.AI_CHAT_CENTER_HOME = tmpDir('acc-');
+    const failing = { ...ctx(), ensureHub: async (): Promise<string> => { throw new Error('no hub'); } };
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), failing);
+    expect(await isBusy('s1')).toBe(true);
+  });
+
+  it('the busy marker of the /cc turn is cleared by that turn\'s Stop waiter, not by an earlier one', async () => {
+    const earlierWaiter = Date.now() - 1000; // the Stop waiter of the previous turn, still running
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
+    const notListed = async (): Promise<PidLookup> => ({ ok: true, pid: null });
+    const stop = (spawnedAt: number) =>
+      runWaiter('stop', { session_id: 's1', transcript_path: '/t.jsonl' } as never, { pollMs: 10, lookup: notListed, spawnedAt, deadlineMs: 50 } satisfies WaiterOptions);
+    await stop(earlierWaiter);
+    expect(await isBusy('s1')).toBe(true);
+    // Claude Code spawns the Stop waiter when the /cc turn ends, after the hook returned.
+    await stop(Date.now());
+    expect(await isBusy('s1')).toBe(false);
   });
 
   it.skipIf(process.platform === 'win32')('/cc tightens an existing state home to 0700', async () => {

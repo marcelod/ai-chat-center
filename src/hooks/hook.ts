@@ -24,7 +24,7 @@ import { assertSessionId, paths } from '../core/paths.js';
 import { DIR_MODE, ensureDir } from '../core/fsAtomic.js';
 import { claudeConfigDir, codeStamp, getRegistration, isActive, markDisconnected, register, stampedByThisCode, updateRegistration } from '../core/registry.js';
 import { clearWaiting, setWaiting } from '../core/waiting.js';
-import { clearBusy, setBusy } from '../core/busy.js';
+import { setBusy } from '../core/busy.js';
 import { setEffort } from '../core/meta.js';
 import { clearTurnOrigin, promptOrigin, setTurnOrigin } from '../core/turn.js';
 import { ensureHub } from './ensureHub.js';
@@ -118,7 +118,10 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
     // Re-running /cc on an active session keeps its original connectedAt.
     ...(keep ? { connectedAt: prev.connectedAt } : {}),
   });
-  await clearBusy(sid);
+  // The /cc turn itself is running: a fresh marker (any older one belonged to an earlier turn) so the app
+  // shows it busy (the hub needs `claude agents` busy AND the marker) and no app message is injected
+  // mid-turn. Written now, before the turn's Stop waiter is spawned: that waiter clears it (clearBusyIfOlder).
+  await setBusy(sid);
   await clearWaiting(sid);
   await clearTurnOrigin(sid);
   // A question left by a hook killed without cleanup would keep the session waiting in the app.

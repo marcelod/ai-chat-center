@@ -4,9 +4,9 @@ import { removeFile, writeJsonAtomic } from './fsAtomic.js';
 
 // Busy marker: a turn is running, so the waiter must not inject app messages mid-turn. Set by the
 // UserPromptSubmit hook of an active registration, which fires for every turn: typed in the terminal,
-// and also the turn a delivery wakes (hook feedback). Cleared by the Stop waiter (the turn ended; only a
-// marker older than that waiter, see clearBusyIfOlder), on /cc
-// and on disconnect. A turn that ends without Stop (Esc, an API error) leaves it behind: the waiter and
+// the turn a delivery wakes (hook feedback), and the /cc turn itself (written fresh by connect). Cleared
+// by the Stop waiter (the turn ended; only a marker older than that waiter, see clearBusyIfOlder) and on
+// disconnect. A turn that ends without Stop (Esc, an API error) leaves it behind: the waiter and
 // the hub drop a marker older than 10 s once `claude agents` reports the session idle.
 
 export async function setBusy(sid: string): Promise<void> {
