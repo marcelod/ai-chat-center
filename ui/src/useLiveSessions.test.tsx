@@ -426,6 +426,30 @@ describe('useLiveSessions: hub verification', () => {
   });
 });
 
+describe('useLiveSessions selection after a refresh', () => {
+  it('a selected session removed elsewhere is replaced by a neighbour, or by nothing when none is left', async () => {
+    const { result } = renderHook(() => useLiveSessions());
+    await waitFor(() => expect(result.current.data.connected).toHaveLength(2));
+    act(() => result.current.select('s1'));
+    vi.mocked(api.getSessions).mockResolvedValue({ ...sessions, connected: [sessions.connected[1]] });
+    await act(async () => push({ type: 'sessions' }));
+    await waitFor(() => expect(result.current.data.connected).toHaveLength(1));
+    expect(result.current.selectedId).toBe('s2');
+    vi.mocked(api.getSessions).mockResolvedValue({ ...sessions, connected: [] });
+    await act(async () => push({ type: 'sessions' }));
+    await waitFor(() => expect(result.current.data.connected).toHaveLength(0));
+    expect(result.current.selectedId).toBeNull();
+  });
+
+  it('keeps a selection the list has not shown yet (a /cc focus request ahead of the list)', async () => {
+    const { result } = renderHook(() => useLiveSessions());
+    await waitFor(() => expect(result.current.data.connected).toHaveLength(2));
+    act(() => result.current.select('s9'));
+    await act(async () => push({ type: 'sessions' }));
+    expect(result.current.selectedId).toBe('s9');
+  });
+});
+
 describe('useLiveSessions remove', () => {
   it('calls the hub, drops the session from the list at once and selects another', async () => {
     vi.mocked(api.removeSession).mockResolvedValue(undefined);

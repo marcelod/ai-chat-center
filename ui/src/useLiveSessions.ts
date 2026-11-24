@@ -83,6 +83,8 @@ export function useLiveSessions() {
   const mountedAt = useRef(Date.now());
   const firstSeen = useRef(new Map<string, number>());
   const seq = useRef(0);
+  /** `select`, for the refresh defined before it. */
+  const selectRef = useRef<(id: string | null) => void>(() => {});
   const inFlight = useRef(false);
   const trailing = useRef(false);
 
@@ -206,6 +208,7 @@ export function useLiveSessions() {
     try {
       const res = await api.getSessions();
       if (mine === seq.current) {
+        const before = dataRef.current.connected;
         dataRef.current = res;
         for (const s of res.connected) if (!firstSeen.current.has(s.sessionId)) firstSeen.current.set(s.sessionId, Date.now());
         setData(res);
@@ -214,6 +217,13 @@ export function useLiveSessions() {
         reconcilePending(res, startedAt);
         const now = new Date();
         commit(res.connected.reduce((st, s) => baseline(st, s.sessionId, s.lastEvent?.ts, now), unreadRef.current));
+        // The open conversation left the list (removed in another window, say): show a neighbour, or the
+        // list itself at narrow width. A selection the list never had (a /cc focus request that arrived
+        // ahead of the list) stays until the session shows up.
+        const sel = selectedRef.current;
+        if (sel && before.some((s) => s.sessionId === sel) && !res.connected.some((s) => s.sessionId === sel)) {
+          selectRef.current(neighbourOf(before, sel, res.connected));
+        }
       }
     } catch {
       setError(true);
@@ -384,6 +394,7 @@ export function useLiveSessions() {
     },
     [commit, loadEvents],
   );
+  selectRef.current = select;
 
   const send = useCallback(
     async (sid: string, text: string) => {
