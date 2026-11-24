@@ -210,6 +210,7 @@ export async function pruneRegistrations(maxAgeMs: number, now = Date.now()): Pr
     await clearBackground(sid).catch(() => {});
   }
   const alive = new Set((await listRegistrations()).map((r) => r.sessionId));
-  await cleanupAttachments(alive, now);
+  // Re-checked per folder: a session may register while the cleanup runs.
+  await cleanupAttachments(alive, now, undefined, async (sid) => (await getRegistration(sid)) !== null);
   return pruned;
 }

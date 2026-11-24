@@ -107,9 +107,16 @@ export async function storeAttachment(sid: string, rawName: string, src: Readabl
 
 /**
  * Deletes the attachment folders of sessions not in `alive` (and anything that is not a session folder),
- * and attachment files last modified more than `maxAgeMs` before `now`. Best effort: never throws.
+ * and attachment files last modified more than `maxAgeMs` before `now`. `stillAlive`, when given, is asked
+ * right before a folder is removed, so a session registered after the `alive` snapshot keeps its files.
+ * Best effort: never throws.
  */
-export async function cleanupAttachments(alive: Set<string>, now = Date.now(), maxAgeMs = ATTACHMENT_MAX_AGE_MS): Promise<void> {
+export async function cleanupAttachments(
+  alive: Set<string>,
+  now = Date.now(),
+  maxAgeMs = ATTACHMENT_MAX_AGE_MS,
+  stillAlive?: (sid: string) => Promise<boolean>,
+): Promise<void> {
   const root = paths().attachmentsDir;
   let entries: string[];
   try {
@@ -125,7 +132,7 @@ export async function cleanupAttachments(alive: Set<string>, now = Date.now(), m
     } catch {
       valid = false;
     }
-    if (!valid || !alive.has(name)) {
+    if (!valid || (!alive.has(name) && !(stillAlive && (await stillAlive(name).catch(() => true))))) {
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
       continue;
     }

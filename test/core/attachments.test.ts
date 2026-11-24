@@ -94,6 +94,18 @@ describe('cleanupAttachments', () => {
     expect(fs.existsSync(sessionAttachmentsDir('gone'))).toBe(false);
     expect(fs.existsSync(path.join(paths().attachmentsDir, 'bad name!'))).toBe(false);
   });
+  it('keeps the folder of a session that registered after the snapshot', async () => {
+    const late = await storeAttachment('late', 'x.txt', Readable.from([Buffer.from('x')]), 100);
+    await storeAttachment('gone', 'y.txt', Readable.from([Buffer.from('y')]), 100);
+    const asked: string[] = [];
+    await cleanupAttachments(new Set(), Date.now(), undefined, async (sid) => {
+      asked.push(sid);
+      return sid === 'late';
+    });
+    expect(fs.existsSync(late)).toBe(true);
+    expect(fs.existsSync(sessionAttachmentsDir('gone'))).toBe(false);
+    expect(asked.sort()).toEqual(['gone', 'late']);
+  });
   it('does nothing when there is no attachments folder', async () => {
     await expect(cleanupAttachments(new Set(), Date.now())).resolves.toBeUndefined();
   });
