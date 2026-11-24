@@ -88,6 +88,14 @@ O app segue mostrando o indicador de digitação (os três pontos) depois que o 
 - **Medir a CPU com a 0.4.3 rodando:** a queda esperada de consultas ao `claude agents` com tudo parado (de 12 para 2 por minuto) ainda não foi medida ao vivo; precisa de `/reload-plugins` e de um hub novo.
 - **Teste fraco em `test/hub/provider.test.ts`:** no teste de sessão recém-conectada, a asserção da segunda sessão passa pela regra "pid vivo e não listado", não pela regra `connectedAt`. Ajustar o teste para isolar cada regra.
 
+## Situação das entregas 0.4.4 a 0.4.7 (2026-11-24)
+
+- "Trabalhando" preso com tarefa em segundo plano: corrigido; o usuário vai confirmar com o uso.
+- Rascunho por conversa: aprovado.
+- Menu ⋮ com "Remover do app": aprovado; a posição dos três pontos ainda vai ser ajustada.
+- Atalho do Windows e do macOS, manifesto do PWA e ícone de 256: testar depois do push, com alguém usando Windows e macOS (`docs/testing/launcher-windows-macos.md`).
+- Conversa em grupo (0.4.6 e 0.4.7): mensagens dos agentes com nome, iniciais e cor próprios; pedidos do Claude aos agentes como "Claude → agente".
+
 ## Lembretes de processo
 
 - Toda mudança em `plugin/dist` exige subir a versão (há um teste que compara com a última tag `v*`). Ver `docs/testing/release-checklist.md`.
