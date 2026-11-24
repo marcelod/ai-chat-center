@@ -14,7 +14,7 @@ import { saveConfig, loadConfig } from '../../src/core/config.js';
 import { putPending, readAnswer } from '../../src/core/questions.js';
 import { paths } from '../../src/core/paths.js';
 import { getDisplayName } from '../../src/core/names.js';
-import { register, markDisconnected } from '../../src/core/registry.js';
+import { register, markDisconnected, getRegistration, isRemoved } from '../../src/core/registry.js';
 
 const TOKEN = 'a'.repeat(64);
 let home: string;
@@ -650,5 +650,56 @@ describe('one app window', () => {
     expect((await ping(u, { id: W1 }, { 'content-type': 'application/json' })).status).toBe(401);
     for (const body of [{}, { id: 'x' }, { id: 'A'.repeat(32) }, []]) expect((await ping(u, body)).status).toBe(400);
     expect(JSON.parse((await ask(u)).body).code).toBeDefined();
+  });
+});
+
+describe('remove endpoint', () => {
+  const post = (u: URL, sid = 's1', headers: Record<string, string> = auth) => req(u, `/api/sessions/${sid}/remove`, { method: 'POST', headers });
+  beforeEach(async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
+  });
+  it('200 disconnects an active session with reason removed and marks it removed', async () => {
+    const u = await start(fakeProvider());
+    const r = await post(u);
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.body)).toEqual({ ok: true });
+    const reg = (await getRegistration('s1'))!;
+    expect(reg.disconnectReason).toBe('removed');
+    expect(isRemoved(reg)).toBe(true);
+  });
+  it('200 for an ended session: only marks it', async () => {
+    await markDisconnected('s1', 'off');
+    const u = await start(fakeProvider());
+    expect((await post(u)).status).toBe(200);
+    const reg = (await getRegistration('s1'))!;
+    expect(reg.disconnectReason).toBe('off');
+    expect(isRemoved(reg)).toBe(true);
+  });
+  it('404 for an unknown session or an invalid id', async () => {
+    const u = await start(fakeProvider());
+    expect((await post(u, 'nope')).status).toBe(404);
+    expect((await post(u, '..%2Fx')).status).toBe(404);
+  });
+  it('401 without token and 403 for a foreign Origin; nothing changes', async () => {
+    const u = await start(fakeProvider());
+    expect((await post(u, 's1', {})).status).toBe(401);
+    expect((await post(u, 's1', { ...auth, origin: 'http://evil.com' })).status).toBe(403);
+    const reg = (await getRegistration('s1'))!;
+    expect(reg.disconnectedAt).toBeUndefined();
+    expect(isRemoved(reg)).toBe(false);
+  });
+  it('only POST', async () => {
+    const u = await start(fakeProvider());
+    expect((await req(u, '/api/sessions/s1/remove', { headers: auth })).status).toBe(404);
+  });
+  it('open streams get a sessions change at once', async () => {
+    const u = await start(fakeProvider(), { pollMs: 60_000 });
+    const s = await openStream(u, '/api/stream', auth);
+    try {
+      expect((await post(u)).status).toBe(200);
+      await s.next(/event: sessions/);
+    } finally {
+      s.req.destroy();
+    }
   });
 });

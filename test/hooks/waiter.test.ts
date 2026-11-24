@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { runWaiter, type WaiterOptions, type WaiterEvent, type PidLookup } from '../../src/hooks/waiter.js';
-import { register, markDisconnected, getRegistration, updateRegistration } from '../../src/core/registry.js';
+import { register, markDisconnected, markRemoved, getRegistration, updateRegistration } from '../../src/core/registry.js';
 import { setBusy, isBusy } from '../../src/core/busy.js';
 import { setWaiting, getWaiting } from '../../src/core/waiting.js';
 import { enqueue, peek } from '../../src/core/inbox.js';
@@ -187,6 +187,13 @@ describe('waiter', () => {
     });
     await vi.waitFor(async () => expect((await getRegistration('s1'))?.pid).toBe(777), { timeout: 5000, interval: 10 });
     alive = false;
+    expect(await p).toEqual({ exitCode: 0, stderr: '' });
+  });
+  it('ends when the app removes the session', async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: process.pid });
+    const p = wait('stop');
+    await sleep(40);
+    await markRemoved('s1');
     expect(await p).toEqual({ exitCode: 0, stderr: '' });
   });
   it('pid still unknown: ends when the hub marks the session exited', async () => {

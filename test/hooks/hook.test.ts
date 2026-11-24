@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import { handleHook, isCcCommand, type HookInput } from '../../src/hooks/hook.js';
 import { ensureHub, checkHealth, hubSpawnOptions } from '../../src/hooks/ensureHub.js';
 import { PROTOCOL, VERSION } from '../../src/core/version.js';
-import { register, getRegistration, markDisconnected } from '../../src/core/registry.js';
+import { register, getRegistration, markDisconnected, markRemoved, isActive, isRemoved } from '../../src/core/registry.js';
 import { isBusy, setBusy } from '../../src/core/busy.js';
 import { getWaiting, setWaiting } from '../../src/core/waiting.js';
 import { paths } from '../../src/core/paths.js';
@@ -173,6 +173,29 @@ describe('hook', () => {
     const r = await handleHook('prompt-submit', inp({ prompt: '/ai-chat-center:cc off' }), ctx());
     expect(r.stdout).toBeUndefined();
     expect((await getRegistration('s1'))?.disconnectReason).toBe('off');
+  });
+
+  it('/cc after the app removed the session connects it again and clears the mark', async () => {
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
+    const key = await keyOf();
+    await markRemoved('s1');
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
+    const r = (await getRegistration('s1'))!;
+    expect(isActive(r)).toBe(true);
+    expect(isRemoved(r)).toBe(false);
+    expect(r.disconnectReason).toBeUndefined();
+    expect(r.key).not.toBe(key);
+    expect(r.previousKeys).toContain(key);
+  });
+
+  it('a plain prompt does not bring a removed session back', async () => {
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
+    await markRemoved('s1');
+    await handleHook('prompt-submit', inp({ prompt: 'hello' }), ctx());
+    const r = (await getRegistration('s1'))!;
+    expect(isActive(r)).toBe(false);
+    expect(isRemoved(r)).toBe(true);
+    expect(await isBusy('s1')).toBe(false);
   });
 
   it('isCcCommand table', () => {

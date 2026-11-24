@@ -240,6 +240,10 @@ export async function releaseQuestion(sid: string, toolUseId: string): Promise<v
 }
 export const renameSession = (sid: string, name: string) =>
   request<{ name: string }>(`/api/sessions/${encodeURIComponent(sid)}/name`, { method: 'PUT', body: JSON.stringify({ name }) });
+/** Takes the session out of the app; an active one is disconnected (a later /cc brings it back). */
+export async function removeSession(sid: string): Promise<void> {
+  await request<unknown>(`/api/sessions/${encodeURIComponent(sid)}/remove`, { method: 'POST' });
+}
 export const getConfig = () => request<UiConfig>('/api/config');
 export const setConfig = (c: Pick<UiConfig, 'language'>) =>
   request<UiConfig>('/api/config', { method: 'PUT', body: JSON.stringify(c) });

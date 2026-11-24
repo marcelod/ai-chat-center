@@ -9,6 +9,7 @@ vi.mock('./api', () => ({
   openStream: vi.fn(),
   verifyHub: vi.fn(),
   forgetToken: vi.fn(),
+  removeSession: vi.fn(),
 }));
 
 import * as api from './api';
@@ -422,5 +423,44 @@ describe('useLiveSessions: hub verification', () => {
       await sending;
     });
     expect(result.current.pending.s1.map((m) => m.id)).toEqual(['m1']);
+  });
+});
+
+describe('useLiveSessions remove', () => {
+  it('calls the hub, drops the session from the list at once and selects another', async () => {
+    vi.mocked(api.removeSession).mockResolvedValue(undefined);
+    const { result } = renderHook(() => useLiveSessions());
+    await waitFor(() => expect(result.current.data.connected).toHaveLength(2));
+    act(() => result.current.select('s1'));
+    // The re-read after the removal never answers here: only the local drop can take s1 out.
+    vi.mocked(api.getSessions).mockReturnValue(new Promise(() => {}));
+    await act(() => result.current.remove('s1'));
+    expect(api.removeSession).toHaveBeenCalledWith('s1');
+    expect(api.getSessions).toHaveBeenCalledTimes(2);
+    expect(result.current.data.connected.map((s) => s.sessionId)).toEqual(['s2']);
+    expect(result.current.selectedId).toBe('s2');
+  });
+  it('selects nothing when no other session is left; keeps the selection when another one is removed', async () => {
+    const gone = new Set<string>();
+    vi.mocked(api.removeSession).mockImplementation(async (sid) => void gone.add(sid));
+    vi.mocked(api.getSessions).mockImplementation(async () => ({ ...sessions, connected: sessions.connected.filter((s) => !gone.has(s.sessionId)) }));
+    const { result } = renderHook(() => useLiveSessions());
+    await waitFor(() => expect(result.current.data.connected).toHaveLength(2));
+    act(() => result.current.select('s2'));
+    await act(() => result.current.remove('s1'));
+    expect(result.current.selectedId).toBe('s2');
+    await act(() => result.current.remove('s2'));
+    expect(result.current.selectedId).toBeNull();
+  });
+  it('a failed remove changes nothing and rejects', async () => {
+    vi.mocked(api.removeSession).mockRejectedValue(new Error('boom'));
+    const { result } = renderHook(() => useLiveSessions());
+    await waitFor(() => expect(result.current.data.connected).toHaveLength(2));
+    act(() => result.current.select('s1'));
+    await act(async () => {
+      await expect(result.current.remove('s1')).rejects.toThrow('boom');
+    });
+    expect(result.current.data.connected).toHaveLength(2);
+    expect(result.current.selectedId).toBe('s1');
   });
 });

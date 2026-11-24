@@ -4,7 +4,7 @@ import { getEffort, shortModel } from '../core/meta.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ChatEvent, LiveSession, ProviderChange, SessionView } from '../shared/types.js';
-import { getRegistration, isActive, listRegistrations, markDisconnected, sameConfigDir, trustedKeys, type Registration } from '../core/registry.js';
+import { getRegistration, isActive, isRemoved, listRegistrations, markDisconnected, sameConfigDir, trustedKeys, type Registration } from '../core/registry.js';
 import { busyAge, clearBusy, isBusy } from '../core/busy.js';
 import { countUnsigned, enqueue, peek } from '../core/inbox.js';
 import { getPending } from '../core/questions.js';
@@ -260,6 +260,8 @@ export class ClaudeCodeProvider implements Provider {
     const activeIds = new Set<string>();
 
     for (const reg of regs) {
+      // Removed from the app by the user: hidden until a new /cc registers it again.
+      if (isRemoved(reg)) continue;
       const sid = reg.sessionId;
       const l = liveById.get(sid);
       let disconnected = !isActive(reg);
