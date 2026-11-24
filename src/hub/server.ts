@@ -15,6 +15,8 @@ import { getRegistration, isActive, markRemoved } from '../core/registry.js';
 import { VERSION } from '../core/version.js';
 import { CHALLENGE_RE, healthProof } from '../core/healthProof.js';
 import { createPairing } from './pairing.js';
+import { AttachmentTooLargeError, storeAttachment } from '../core/attachments.js';
+import { MAX_ATTACHMENT_BYTES } from '../shared/attachments.js';
 
 export interface HubOptions {
   provider: Provider;
@@ -344,7 +346,7 @@ export async function createHub(
       await saveConfig({ language: body.language as Lang });
       return sendJson(res, 200, { language: body.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|remove|questions\/([^/]+))$/.exec(p);
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|remove|attachments|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid: string;
       try {
@@ -413,6 +415,40 @@ export async function createHub(
         // Every open page drops it now, not at the next poll.
         fanOut({ type: 'sessions' });
         return sendJson(res, 200, { ok: true });
+      }
+      if (m[2] === 'attachments' && method === 'POST') {
+        // Raw body (any Content-Type), file name URI-encoded in X-File-Name. Only for a connected session:
+        // the file is meant for its next message. Never logs the content.
+        const reg = await getRegistration(sid);
+        if (!reg) {
+          req.resume();
+          throw new HttpError(404, 'no such session');
+        }
+        if (!isActive(reg)) {
+          req.resume();
+          throw new SessionDisconnectedError(sid);
+        }
+        const rawName = req.headers['x-file-name'];
+        let name: string;
+        try {
+          if (typeof rawName !== 'string' || rawName === '') throw new Error('missing');
+          name = decodeURIComponent(rawName);
+        } catch {
+          req.resume();
+          throw new HttpError(400, 'invalid file name');
+        }
+        const declared = Number(req.headers['content-length']);
+        if (Number.isFinite(declared) && declared > MAX_ATTACHMENT_BYTES) {
+          req.resume();
+          throw new HttpError(413, 'file too large');
+        }
+        try {
+          const stored = await storeAttachment(sid, name, req, MAX_ATTACHMENT_BYTES);
+          return sendJson(res, 200, { path: stored });
+        } catch (e) {
+          if (e instanceof AttachmentTooLargeError) throw new HttpError(413, 'file too large');
+          throw e;
+        }
       }
       if (m[2] === 'events' && method === 'GET') return sendJson(res, 200, await provider.events(sid));
       if (m[2] === 'messages' && method === 'POST') {

@@ -2,6 +2,7 @@ import { unwrapMessages } from '../../core/protocol.js';
 import { isCcCommand } from '../../core/ccCommand.js';
 import { parseQuestions } from '../../core/questions.js';
 import type { ChatEvent, ToolAction } from '../../shared/types.js';
+import { splitAttachments } from '../../shared/attachments.js';
 
 type ActionsEvent = Extract<ChatEvent, { kind: 'actions' }>;
 type QuestionEvent = Extract<ChatEvent, { kind: 'question' }>;
@@ -24,6 +25,12 @@ const truncate = (s: string, max: number) => (s.length > max ? s.slice(0, max) :
  */
 const WRAPPER_TAGS = /<\/?(?:pasted_content|teammate-message)(?:\s+[\w-]+="[^"]*")*\s*>/g;
 const unwrapPrompt = (text: string): string => text.replace(WRAPPER_TAGS, '');
+
+/** The text of a user message without its `[Attachment: <path>]` lines, and those files' names (chips). */
+function body(text: string): { text: string; attachments?: string[] } {
+  const r = splitAttachments(text);
+  return r.attachments.length ? r : { text };
+}
 
 
 const AGENT_MESSAGE_PREFIX = 'Another Claude session sent a message:';
@@ -207,7 +214,7 @@ export class TranscriptParser {
     this.open = null;
     this.queued.push({ text: text.trim(), at: Date.parse(ts) || 0 });
     const n = Math.max(images, pasted);
-    return [{ kind: 'user', id: uuid, ts, text, origin: 'terminal', ...(n ? { images: n } : {}) }];
+    return [{ kind: 'user', id: uuid, ts, ...body(text), origin: 'terminal', ...(n ? { images: n } : {}) }];
   }
 
   private takeQueued(text: string, ts: string): boolean {
@@ -275,7 +282,7 @@ export class TranscriptParser {
       const images = parts.images;
       if ((text.trim() || images) && !text.startsWith(INTERRUPTED) && !this.takeQueued(text, ts)) {
         this.open = null;
-        out.push({ kind: 'user', id: uuid, ts, text, origin: 'terminal', ...(images ? { images } : {}) });
+        out.push({ kind: 'user', id: uuid, ts, ...body(text), origin: 'terminal', ...(images ? { images } : {}) });
       }
       return out;
     }
@@ -286,7 +293,7 @@ export class TranscriptParser {
       this.open = null;
       return withIndex(
         msgs.map((m): ChatEvent => ({
-          kind: 'user', id: uuid, ts, text: m.text, origin: 'app', appMessageId: m.id,
+          kind: 'user', id: uuid, ts, ...body(m.text), origin: 'app', appMessageId: m.id,
         })),
         uuid,
       );
@@ -332,7 +339,7 @@ export class TranscriptParser {
     if (!text.trim()) return [];
     if (this.takeQueued(text, ts)) return [];
     this.open = null;
-    return [{ kind: 'user', id: uuid, ts, text, origin: 'terminal' }];
+    return [{ kind: 'user', id: uuid, ts, ...body(text), origin: 'terminal' }];
   }
 
   /**

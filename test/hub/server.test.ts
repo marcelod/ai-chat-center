@@ -705,3 +705,92 @@ describe('remove endpoint', () => {
     }
   });
 });
+
+describe('attachments endpoint', () => {
+  const up = (u: URL, body: Buffer | string, o: { sid?: string; name?: string | null; headers?: Record<string, string> } = {}) =>
+    req(u, `/api/sessions/${o.sid ?? 's1'}/attachments`, {
+      method: 'POST',
+      headers: {
+        ...auth,
+        'content-type': 'image/png',
+        ...(o.name === null ? {} : { 'x-file-name': encodeURIComponent(o.name ?? 'shot é.png') }),
+        ...o.headers,
+      },
+      body,
+    });
+  const stored = () => {
+    const dir = path.join(paths().attachmentsDir, 's1');
+    return fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  };
+  beforeEach(async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
+  });
+  it('stores the raw body and returns its absolute path', async () => {
+    const u = await start(fakeProvider());
+    const r = await up(u, Buffer.from([1, 2, 3, 4]));
+    expect(r.status).toBe(200);
+    const { path: p } = JSON.parse(r.body) as { path: string };
+    expect(path.isAbsolute(p)).toBe(true);
+    expect(path.dirname(p)).toBe(path.join(paths().attachmentsDir, 's1'));
+    expect(path.basename(p)).toMatch(/^[0-9a-f]{16}-shot é\.png$/);
+    expect([...fs.readFileSync(p)]).toEqual([1, 2, 3, 4]);
+    if (process.platform !== 'win32') expect(fs.statSync(p).mode & 0o777).toBe(0o600);
+  });
+  it('sanitizes the name: base name only', async () => {
+    const u = await start(fakeProvider());
+    const r = await up(u, 'x', { name: '../../evil.sh' });
+    expect(r.status).toBe(200);
+    const p = JSON.parse(r.body).path as string;
+    expect(path.dirname(p)).toBe(path.join(paths().attachmentsDir, 's1'));
+    expect(path.basename(p)).toMatch(/^[0-9a-f]{16}-evil\.sh$/);
+  });
+  it('400 without a file name or with a badly encoded one', async () => {
+    const u = await start(fakeProvider());
+    expect((await up(u, 'x', { name: null })).status).toBe(400);
+    expect((await req(u, '/api/sessions/s1/attachments', { method: 'POST', headers: { ...auth, 'x-file-name': '%E0%A4%A' }, body: 'x' })).status).toBe(400);
+    expect(stored()).toEqual([]);
+  });
+  it('413 over 20 MB (declared or streamed) and nothing is kept', async () => {
+    const u = await start(fakeProvider());
+    expect((await up(u, Buffer.alloc(20 * 1024 * 1024 + 1))).status).toBe(413);
+    expect(stored()).toEqual([]);
+    // Chunked (no Content-Length): caught while streaming.
+    const status = await new Promise<number>((resolve, reject) => {
+      const r = http.request(
+        {
+          host: '127.0.0.1', port: u.port, path: '/api/sessions/s1/attachments', method: 'POST',
+          headers: { host: `127.0.0.1:${u.port}`, ...auth, 'x-file-name': 'a.bin', 'transfer-encoding': 'chunked' },
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode!);
+        },
+      );
+      r.on('error', reject);
+      for (let i = 0; i < 21; i++) r.write(Buffer.alloc(1024 * 1024));
+      r.end();
+    });
+    expect(status).toBe(413);
+    expect(stored()).toEqual([]);
+  });
+  it('404 for an unknown session or an invalid id, 409 for a disconnected one', async () => {
+    const u = await start(fakeProvider());
+    expect((await up(u, 'x', { sid: 'nope' })).status).toBe(404);
+    expect((await up(u, 'x', { sid: '..%2Fx' })).status).toBe(404);
+    await markDisconnected('s1', 'off');
+    const r = await up(u, 'x');
+    expect(r.status).toBe(409);
+    expect(JSON.parse(r.body).code).toBe('session-disconnected');
+    expect(stored()).toEqual([]);
+  });
+  it('401 without token and 403 for a foreign Origin; nothing is stored', async () => {
+    const u = await start(fakeProvider());
+    expect((await up(u, 'x', { headers: { authorization: '' } })).status).toBe(401);
+    expect((await up(u, 'x', { headers: { origin: 'http://evil.com' } })).status).toBe(403);
+    expect(fs.existsSync(paths().attachmentsDir)).toBe(false);
+  });
+  it('only POST', async () => {
+    const u = await start(fakeProvider());
+    expect((await req(u, '/api/sessions/s1/attachments', { headers: auth })).status).toBe(404);
+  });
+});

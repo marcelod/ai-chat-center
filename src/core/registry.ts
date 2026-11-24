@@ -8,6 +8,7 @@ import { clearBusy } from './busy.js';
 import { clearWaiting } from './waiting.js';
 import { clearDelivered } from './delivered.js';
 import { withLock } from './lock.js';
+import { cleanupAttachments } from './attachments.js';
 import { PROTOCOL, VERSION } from './version.js';
 
 /** How long a registration write waits for the per-session lock before proceeding anyway. */
@@ -177,7 +178,8 @@ export async function markRemoved(sid: string): Promise<boolean> {
 
 /**
  * Deletes registrations disconnected more than `maxAgeMs` ago, with their inbox, busy and waiting
- * files. Returns the pruned session ids.
+ * files, then the attachments of sessions that no longer exist and those older than 30 days (see
+ * attachments.ts). Returns the pruned session ids.
  */
 export async function pruneRegistrations(maxAgeMs: number, now = Date.now()): Promise<string[]> {
   const pruned: string[] = [];
@@ -204,5 +206,7 @@ export async function pruneRegistrations(maxAgeMs: number, now = Date.now()): Pr
     await clearWaiting(sid);
     await clearDelivered(sid);
   }
+  const alive = new Set((await listRegistrations()).map((r) => r.sessionId));
+  await cleanupAttachments(alive, now);
   return pruned;
 }

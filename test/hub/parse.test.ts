@@ -403,3 +403,31 @@ describe('TranscriptParser model', () => {
     expect(p.model).toBe('claude-sonnet-5-5');
   });
 });
+
+describe('TranscriptParser: app attachments', () => {
+  const K = 'k'.repeat(32);
+  const A = '/h/attachments/s1/0123456789abcdef-shot.png';
+  const B = '/h/attachments/s1/fedcba9876543210-notes.txt';
+  const push = (p: TranscriptParser, content: unknown, uuid = 'u') => p.push({ type: 'user', uuid, timestamp: 't', message: { content } });
+  it('an app message shows its attachment lines as chips, not as text', () => {
+    const p = new TranscriptParser([K]);
+    const body = `look\n[Attachment: ${A}]\n[Attachment: ${B}]`;
+    expect(push(p, `[AI Chat Center message id=m1 key=${K}]\n${body}\n[/AI Chat Center message]`)).toEqual([
+      { kind: 'user', id: 'u', ts: 't', text: 'look', origin: 'app', appMessageId: 'm1', attachments: ['shot.png', 'notes.txt'] },
+    ]);
+  });
+  it('a message made only of attachments', () => {
+    const p = new TranscriptParser([K]);
+    expect(push(p, `[AI Chat Center message id=m2 key=${K}]\n[Attachment: ${A}]\n[/AI Chat Center message]`)).toEqual([
+      { kind: 'user', id: 'u', ts: 't', text: '', origin: 'app', appMessageId: 'm2', attachments: ['shot.png'] },
+    ]);
+  });
+  it('terminal prompts (string or blocks) with attachment lines get chips too; plain ones get no field', () => {
+    const p = new TranscriptParser([K]);
+    expect(push(p, `see\n[Attachment: ${A}]`, 'a')).toEqual([{ kind: 'user', id: 'a', ts: 't', text: 'see', origin: 'terminal', attachments: ['shot.png'] }]);
+    expect(push(p, [{ type: 'text', text: `x\n[Attachment: ${B}]` }], 'b')).toEqual([
+      { kind: 'user', id: 'b', ts: 't', text: 'x', origin: 'terminal', attachments: ['notes.txt'] },
+    ]);
+    expect(push(p, 'plain', 'c')).toEqual([{ kind: 'user', id: 'c', ts: 't', text: 'plain', origin: 'terminal' }]);
+  });
+});

@@ -19,6 +19,8 @@ export type ChatEvent =
       appMessageId?: string;
       /** Number of images attached to the prompt (shown as a chip). */
       images?: number;
+      /** Names of the files attached in the app (`[Attachment: <path>]` lines, taken out of `text`). */
+      attachments?: string[];
       /** A `!` shell-mode command typed in the terminal (its output follows as an actions item). */
       shell?: true;
     }

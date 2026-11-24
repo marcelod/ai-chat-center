@@ -28,6 +28,8 @@ export interface Paths {
   metaFile: (sid: string) => string;
   /** Written by the hub while an app tab is open (see presence.ts). */
   presenceFile: string;
+  /** Files attached in the app, one folder per session (see attachments.ts). */
+  attachmentsDir: string;
   logDir: string;
 }
 
@@ -60,6 +62,7 @@ export function paths(): Paths {
     namesFile: (sid) => (assertSessionId(sid), path.join(home, 'names', `${sid}.json`)),
     metaFile: (sid) => (assertSessionId(sid), path.join(home, 'meta', `${sid}.json`)),
     presenceFile: path.join(home, 'app-presence.json'),
+    attachmentsDir: path.join(home, 'attachments'),
     logDir: path.join(home, 'logs'),
   };
 }
