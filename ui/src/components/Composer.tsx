@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useT } from '../i18n';
+import { loadDraft, saveDraft } from '../drafts';
 import { SendIcon } from './icons';
 
-type Props = { name: string; disabled: boolean; blockedByQuestion?: boolean; onSend: (text: string) => Promise<void> };
+type Props = { sessionId: string; name: string; disabled: boolean; blockedByQuestion?: boolean; onSend: (text: string) => Promise<void> };
 type Failure = { kind: 'disconnected' } | { kind: 'version'; direction: 'older' | 'newer' } | { kind: 'failed'; text: string };
 
 /** The session runs another version of the plugin (audit R5-M1): `session-older-version` / `session-newer-version`. */
@@ -21,10 +22,10 @@ export const PAD_PX = 12;
 export const MAX_LINES = 8;
 export const MAX_HEIGHT = MAX_LINES * LINE_PX + 2 * PAD_PX;
 
-export function Composer({ name, disabled: sessionOff, blockedByQuestion = false, onSend }: Props) {
+export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuestion = false, onSend }: Props) {
   const t = useT();
   const disabled = sessionOff || blockedByQuestion;
-  const [text, setText] = useState('');
+  const [text, setText] = useState(() => loadDraft(sessionId));
   const [failure, setFailure] = useState<Failure | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -39,6 +40,7 @@ export function Composer({ name, disabled: sessionOff, blockedByQuestion = false
     el.style.overflowY = el.scrollHeight > MAX_HEIGHT ? 'auto' : 'hidden';
   }, []);
   useLayoutEffect(resize, [text, resize]);
+  useEffect(() => saveDraft(sessionId, text), [sessionId, text]);
 
   // A width change (window resize, sidebar toggle) re-wraps the text: measure again.
   useEffect(() => {

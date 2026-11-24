@@ -369,7 +369,7 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
         )}
       </div>
 
-      <Composer key={session.sessionId} name={session.name} disabled={state === 'disconnected'}
+      <Composer key={session.sessionId} sessionId={session.sessionId} name={session.name} disabled={state === 'disconnected'}
         blockedByQuestion={Boolean(session.pendingQuestion)} onSend={onSend} />
     </section>
   );
