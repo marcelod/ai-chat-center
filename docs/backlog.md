@@ -62,6 +62,10 @@ Cada conversa pode ter um fundo próprio: cor sólida, degradê ou imagem. Serve
 
 Hoje uma sessão sai do app quando o terminal dela fecha. Para continuar no dia seguinte pelo app, seria preciso abrir um terminal com `claude --resume <id>` a partir do app. Pedido ligado ao atalho do Windows e do macOS (2026-11-24); rodada própria.
 
+### Mostrar o modo da sessão
+
+Mostrar em cada conversa o modo em que a sessão está: auto mode ligado ou desligado, modo de planejamento, aceitar edições ou o padrão. Fonte provável: o campo `permission_mode` que os hooks recebem (confirmar). O valor só se atualiza quando um hook dispara, então a troca de modo com Shift+Tab só aparece no próximo evento.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes.
