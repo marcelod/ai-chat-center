@@ -76,6 +76,27 @@ export function agentMessages(content: string, names: Map<string, string> = new 
   return out;
 }
 
+/**
+ * Claude's message to an agent: a subagent started with Agent/Task (named after its `name`, else its
+ * description; the text is the prompt) or a SendMessage with a text message. Null for anything else (a
+ * structured SendMessage stays an action).
+ */
+function toAgentMessage(name: string, input: unknown): { to: string; text: string } | null {
+  if (!isRecord(input)) return null;
+  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  if (name === 'Agent' || name === 'Task') {
+    const text = str(input.prompt);
+    if (!text) return null;
+    return { to: str(input.name) || str(input.description), text: truncate(text, RESULT_MAX * 4) };
+  }
+  if (name === 'SendMessage') {
+    const text = str(input.message);
+    if (!text) return null;
+    return { to: str(input.to), text: truncate(text, RESULT_MAX * 4) };
+  }
+  return null;
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -136,6 +157,8 @@ export class TranscriptParser {
   private questions = new Map<string, QuestionEvent>();
   /** Subagent id → its description (from the Agent tool result), to name a subagent's hand-back. */
   private agentNames = new Map<string, string>();
+  /** Agent tool_use id → the name shown for that agent, until its result gives the agent id. */
+  private agentCalls = new Map<string, string>();
   /** Queued prompts already shown, to skip a later identical user entry. */
   private queued: { text: string; at: number }[] = [];
   /** The last `!` command, for the output entry that follows it. */
@@ -220,6 +243,13 @@ export class TranscriptParser {
           const q: QuestionEvent = { kind: 'question', id: uuid, ts, toolUseId: block.id, questions };
           this.questions.set(block.id, q);
           created.push(q);
+          continue;
+        }
+        const toAgent = toAgentMessage(name, block.input);
+        if (toAgent) {
+          this.open = null; // a message to an agent closes the group, like text
+          created.push({ kind: 'toAgent', id: uuid, ts, ...toAgent });
+          if (name !== 'SendMessage') this.agentCalls.set(block.id, toAgent.to);
           continue;
         }
         const action: ToolAction = { toolUseId: block.id, name, summary: summarize(name, block.input) };
@@ -345,6 +375,13 @@ export class TranscriptParser {
         else q.answerText = truncate(resultText(block.content), RESULT_MAX);
         this.questions.delete(block.tool_use_id);
         out.set(q.id, { ...q });
+        continue;
+      }
+      const call = this.agentCalls.get(block.tool_use_id);
+      if (call !== undefined) {
+        const id = /agentId:\s*([\w-]+)/.exec(resultText(block.content))?.[1];
+        if (id && call) this.agentNames.set(id, call);
+        this.agentCalls.delete(block.tool_use_id);
         continue;
       }
       const ev = this.byToolUse.get(block.tool_use_id);

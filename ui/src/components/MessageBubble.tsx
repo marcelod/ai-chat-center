@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ChatEvent } from '@shared/types';
@@ -90,24 +91,95 @@ export function AssistantBubble({ text }: { text: string }) {
 }
 
 type Agent = Extract<ChatEvent, { kind: 'agent' }>;
+type ToAgent = Extract<ChatEvent, { kind: 'toAgent' }>;
 
-/** A teammate's or subagent's message: on the Claude side, labelled with who sent it. */
+/** Initials and a fixed colour per agent name, so each participant of the "group" is told apart at a glance. */
+export function agentIdentity(name: string): { initials: string; color: string } {
+  const words = name.split(/[\s_\-./:]+/).filter(Boolean);
+  const initials = (words.length >= 2 ? words[0][0] + words[1][0] : (words[0] ?? '?').slice(0, 2)).toUpperCase();
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return { initials, color: `hsl(${h % 360} 55% 42%)` };
+}
+
+function AgentAvatar({ name }: { name: string }) {
+  const { initials, color } = agentIdentity(name);
+  return (
+    <span
+      aria-hidden="true"
+      data-avatar
+      className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+      style={{ backgroundColor: color }}
+    >
+      {initials}
+    </span>
+  );
+}
+
+function MarkdownText({ text }: { text: string }) {
+  return (
+    <Markdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+      }}
+    >
+      {text}
+    </Markdown>
+  );
+}
+
+/** A teammate's or subagent's message: on the Claude side, with the agent's avatar and name. */
 export function AgentBubble({ event }: { event: Agent }) {
   const t = useT();
+  const name = event.from || t('ui.chat.agent');
+  return (
+    <div data-bubble="agent" className="flex max-w-[min(100%,760px)] items-start gap-2 self-start">
+      <AgentAvatar name={name} />
+      <div className="md min-w-0 break-words rounded-[14px_14px_14px_4px] border border-line bg-field px-3.5 py-2.5 text-[15px] leading-relaxed">
+        <p className="mb-1 text-xs font-semibold" style={{ color: agentIdentity(name).color }}>
+          {event.from ? t('ui.chat.agentFrom', { name: event.from }) : t('ui.chat.agent')}
+        </p>
+        <MarkdownText text={event.text} />
+      </div>
+    </div>
+  );
+}
+
+const CLAMP = 280;
+
+/** What Claude asked an agent: "Claude → name", the request clamped with a toggle to read it all. */
+export function ToAgentBubble({ event }: { event: ToAgent }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const long = event.text.length > CLAMP;
+  const shown = open || !long ? event.text : `${event.text.slice(0, CLAMP).trimEnd()}…`;
+  const name = event.to || t('ui.chat.agent');
   return (
     <div
-      data-bubble="agent"
-      className="md max-w-[min(100%,720px)] self-start break-words rounded-[14px_14px_14px_4px] border border-dashed border-line bg-field px-3.5 py-2.5 text-[15px] leading-relaxed"
+      data-bubble="toAgent"
+      className="md max-w-[min(100%,720px)] self-start break-words rounded-[14px_14px_14px_4px] border border-dashed border-line px-3.5 py-2 text-sm leading-relaxed text-muted"
     >
-      <p className="mb-1 text-xs font-semibold text-muted">{event.from ? t('ui.chat.agentFrom', { name: event.from }) : t('ui.chat.agent')}</p>
-      <Markdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
-        }}
-      >
-        {event.text}
-      </Markdown>
+      <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold">
+        <span>{t('ui.chat.toAgent')}</span>
+        <AgentAvatarSmall name={name} />
+        <span style={{ color: agentIdentity(name).color }}>{name}</span>
+      </p>
+      <MarkdownText text={shown} />
+      {long && (
+        <button type="button" className="mt-1 text-xs font-semibold underline" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          {open ? t('ui.chat.showLess') : t('ui.chat.showAll')}
+        </button>
+      )}
     </div>
+  );
+}
+
+function AgentAvatarSmall({ name }: { name: string }) {
+  const { initials, color } = agentIdentity(name);
+  return (
+    <span aria-hidden="true" className="flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-bold text-white" style={{ backgroundColor: color }}>
+      {initials}
+    </span>
   );
 }

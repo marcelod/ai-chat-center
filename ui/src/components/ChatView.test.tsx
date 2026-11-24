@@ -71,6 +71,17 @@ describe('ChatView', () => {
     expect(within(b).getByText('Agent dev-c2-frontend')).toBeTruthy();
     expect(within(b).getByText('dois').tagName).toBe('STRONG');
     expect(container.querySelector('[data-bubble="user"]')).toBeNull();
+    expect(within(b).getByText('DC', { selector: '[data-avatar]' })).toBeTruthy();
+  });
+  it("Claude's message to an agent shows who it is for, clamped with a toggle", async () => {
+    const long = 'Fix the casing. '.repeat(40);
+    const { container } = setup({ events: [{ kind: 'toAgent', id: 'm1', ts: ts(1), to: 'dev-c2-frontend', text: long }] });
+    const b = container.querySelector('[data-bubble="toAgent"]') as HTMLElement;
+    expect(within(b).getByText('dev-c2-frontend')).toBeTruthy();
+    expect(b.textContent).not.toContain(long.trim());
+    await userEvent.click(within(b).getByRole('button', { name: 'Show all' }));
+    expect(b.textContent).toContain(long.trim());
+    expect(within(b).getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe('true');
   });
 
   it('header shows cwd, branch, model and effort, each with a label', () => {

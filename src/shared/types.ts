@@ -25,6 +25,8 @@ export type ChatEvent =
   | { kind: 'assistant'; id: string; ts: string; text: string }
   /** A message from a teammate or a subagent of the session (not typed by the user): who sent it and what it says. */
   | { kind: 'agent'; id: string; ts: string; from: string; text: string }
+  /** What Claude asked a subagent or sent a teammate (Agent, SendMessage): to whom, and the request. */
+  | { kind: 'toAgent'; id: string; ts: string; to: string; text: string }
   | { kind: 'actions'; id: string; ts: string; items: ToolAction[] }
   | {
       kind: 'question';

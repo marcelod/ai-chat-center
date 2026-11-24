@@ -169,9 +169,15 @@ describe('TranscriptParser with a session key', () => {
   });
   it('a subagent hand-back shows only the report, named after the Agent call that started it', () => {
     const p = new TranscriptParser([K]);
-    p.push({ type: 'assistant', uuid: 'a1', timestamp: 't', message: { content: [{ type: 'tool_use', id: 'tu1', name: 'Agent', input: { description: 'Fix stuck busy status', prompt: 'p' } }] } });
+    expect(p.push({ type: 'assistant', uuid: 'a1', timestamp: 't', message: { content: [{ type: 'tool_use', id: 'tu1', name: 'Agent', input: { description: 'Fix stuck busy status', prompt: 'Fix the bug' } }] } })).toEqual([
+      { kind: 'toAgent', id: 'a1', ts: 't', to: 'Fix stuck busy status', text: 'Fix the bug' },
+    ]);
     p.push({ type: 'user', uuid: 'r1', timestamp: 't', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: [{ type: 'text', text: 'Async agent launched successfully.\nagentId: ac80710dab2f9dfc0 (internal ID)' }] }] } });
     const msg = 'Another Claude session sent a message:\n<agent-message from="ac80710dab2f9dfc0">\n[Subagent hand-back] The text below is the final report. The report follows:\n  Branch `fix/busy-status`, one commit.\n  \n  - **Fix:** done.\n</agent-message>\n\nThat "other Claude session" is an agent working inside this same session.';
+    expect(p.push({ type: 'assistant', uuid: 'a2', timestamp: 't', message: { content: [{ type: 'tool_use', id: 'tu2', name: 'SendMessage', input: { to: 'dev-c2', message: 'Rebase onto main' } }, { type: 'tool_use', id: 'tu3', name: 'SendMessage', input: { to: 'dev-c2', message: { type: 'shutdown_request' } } }] } })).toMatchObject([
+      { kind: 'toAgent', to: 'dev-c2', text: 'Rebase onto main' },
+      { kind: 'actions', items: [{ name: 'SendMessage' }] },
+    ]);
     expect(push(p, msg)).toEqual([{ kind: 'agent', id: 'u', ts: 't', from: 'Fix stuck busy status', text: 'Branch `fix/busy-status`, one commit.\n\n- **Fix:** done.' }]);
     expect(push(p, msg.replace('ac80710dab2f9dfc0', 'unknown1'))).toMatchObject([{ kind: 'agent', from: '' }]);
   });
