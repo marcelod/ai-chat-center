@@ -61,6 +61,8 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
   const picker = useRef<HTMLInputElement>(null);
   const filesRef = useRef(files);
   filesRef.current = files;
+  // Hub path of each pending file already uploaded (by PendingFile id): a retry after a partial failure reuses it.
+  const uploadedRef = useRef(new Map<string, string>());
   // Thumbnails are object URLs: released when the composer goes away.
   useEffect(() => () => filesRef.current.forEach(revoke), []);
 
@@ -84,6 +86,7 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
   const removeFile = (id: string) => {
     const gone = filesRef.current.find((f) => f.id === id);
     if (gone) revoke(gone);
+    uploadedRef.current.delete(id);
     const next = filesRef.current.filter((f) => f.id !== id);
     filesRef.current = next;
     setFiles(next);
@@ -169,7 +172,14 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
     setFailure(null);
     const paths: string[] = [];
     try {
-      for (const f of batch) paths.push(await onUpload(f.file));
+      for (const f of batch) {
+        let stored = uploadedRef.current.get(f.id);
+        if (stored === undefined) {
+          stored = await onUpload(f.file);
+          uploadedRef.current.set(f.id, stored);
+        }
+        paths.push(stored);
+      }
     } catch (e) {
       if (!mounted.current) return; // the files are gone with the composer; the text is still the draft
       setUploading(false);
@@ -188,6 +198,7 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
     }
     setUploading(false);
     batch.forEach(revoke);
+    uploadedRef.current.clear();
     filesRef.current = [];
     setFiles([]);
     setText('');

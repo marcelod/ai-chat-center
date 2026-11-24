@@ -293,6 +293,29 @@ describe('Composer attachments', () => {
     expect(chips()).toHaveLength(1);
   });
 
+  it('retrying after a partial upload failure does not upload again the files already stored', async () => {
+    const user = userEvent.setup();
+    let failB = true;
+    const { input, onSend, onUpload } = mountA({
+      id: 'retry',
+      onUpload: async (f) => {
+        if (f.name === 'b.txt' && failB) {
+          failB = false;
+          throw new Error('500');
+        }
+        return `/h/${f.name}`;
+      },
+    });
+    await user.upload(input!, [file('a.txt'), file('b.txt')]);
+    await user.type(box(), 'hey{Enter}');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not upload the attachments');
+    expect(onSend).not.toHaveBeenCalled();
+    box().focus();
+    await user.keyboard('{Enter}');
+    expect(onUpload.mock.calls.map(([f]) => f.name)).toEqual(['a.txt', 'b.txt', 'b.txt']);
+    expect(onSend).toHaveBeenCalledWith('hey\n[Attachment: /h/a.txt]\n[Attachment: /h/b.txt]');
+  });
+
   it('an upload refused as disconnected (409) shows the disconnected error', async () => {
     const user = userEvent.setup();
     const { input } = mountA({ onUpload: async () => Promise.reject(Object.assign(new Error('409'), { status: 409, code: 'session-disconnected' })) });
