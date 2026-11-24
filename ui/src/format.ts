@@ -24,7 +24,8 @@ function eventPreview(e: ChatEvent | undefined, t: T): string {
   if (!e) return t('ui.noMessages');
   switch (e.kind) {
     case 'user': {
-      const text = e.shell ? `! ${e.text}` : e.text || (e.images ? t('ui.chat.image') : '');
+      const files = e.attachments?.length ? `📎 ${e.attachments.join(', ')}` : '';
+      const text = e.shell ? `! ${e.text}` : e.text || files || (e.images ? t('ui.chat.image') : '');
       return `${t('ui.you')}: ${text}`;
     }
     case 'assistant':

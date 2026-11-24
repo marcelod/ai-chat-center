@@ -4,7 +4,9 @@ import remarkGfm from 'remark-gfm';
 import type { ChatEvent } from '@shared/types';
 import { formatTime } from '../format';
 import { useLang, useT } from '../i18n';
+import { splitAttachments } from '@shared/attachments';
 import { ClockIcon, KeyboardIcon, PhoneIcon } from './icons';
+import { SentAttachments } from './Attachments';
 
 type User = Extract<ChatEvent, { kind: 'user' }>;
 
@@ -28,6 +30,7 @@ export function UserBubble({ event }: { event: User }) {
           {event.images === 1 ? t('ui.chat.image') : t('ui.chat.images', { n: event.images })}
         </span>
       ) : null}
+      {event.attachments?.length ? <SentAttachments names={event.attachments} /> : null}
       <p className="mt-1 flex items-center justify-end gap-1 text-[11px] text-bubble-meta">
         <span role="img" aria-label={label} title={label} className="flex">
           <Icon width={13} height={13} />
@@ -38,14 +41,16 @@ export function UserBubble({ event }: { event: User }) {
   );
 }
 
-export function QueuedBubble({ text }: { text: string }) {
+export function QueuedBubble({ text: raw }: { text: string }) {
   const t = useT();
+  const { text, attachments } = splitAttachments(raw);
   return (
     <div
       data-bubble="queued"
       className="max-w-[560px] self-end rounded-[14px_14px_4px_14px] border border-dashed border-queued-border bg-queued-bg px-3.5 py-2.5 text-[15px]"
     >
-      <p className="whitespace-pre-wrap break-words">{text}</p>
+      {text && <p className="whitespace-pre-wrap break-words">{text}</p>}
+      <SentAttachments names={attachments} />
       <p className="mt-1 flex items-center justify-end gap-1 text-[11px] text-bubble-meta">
         <ClockIcon width={13} height={13} />
         {t('ui.chat.queued')}
@@ -54,14 +59,16 @@ export function QueuedBubble({ text }: { text: string }) {
   );
 }
 
-export function FailedBubble({ text, onRetry }: { text: string; onRetry: () => void }) {
+export function FailedBubble({ text: raw, onRetry }: { text: string; onRetry: () => void }) {
   const t = useT();
+  const { text, attachments } = splitAttachments(raw);
   return (
     <div
       data-bubble="failed"
       className="max-w-[560px] self-end rounded-[14px_14px_4px_14px] border border-line bg-field px-3.5 py-2.5 text-[15px] text-muted"
     >
-      <p className="whitespace-pre-wrap break-words">{text}</p>
+      {text && <p className="whitespace-pre-wrap break-words">{text}</p>}
+      <SentAttachments names={attachments} />
       <p className="mt-1 flex items-center justify-end gap-2 text-[11px]">
         {t('ui.chat.notDelivered')}
         <button type="button" onClick={onRetry} className="min-h-11 rounded-lg px-3 text-[12px] font-semibold underline">

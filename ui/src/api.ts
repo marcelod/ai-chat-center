@@ -230,6 +230,34 @@ export async function sendMessage(id: string, text: string): Promise<{ id: strin
     body: JSON.stringify({ text }),
   });
 }
+/**
+ * Uploads one file for the session's next message; resolves to its absolute path on the hub machine.
+ * Raw body with the browser's type; the name travels URI-encoded in X-File-Name. Like sendMessage, the
+ * file is never POSTed to a server that cannot prove it is the hub.
+ */
+export async function uploadAttachment(sid: string, file: File): Promise<string> {
+  if (pairing) await pairing;
+  const check = await verifyHub();
+  if (check === 'mismatch') {
+    dropToken();
+    throw new ApiError(401);
+  }
+  if (check === 'unreachable') throw new ApiError(0);
+  const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/attachments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-File-Name': encodeURIComponent(file.name),
+      Authorization: `Bearer ${token ?? ''}`,
+    },
+    body: file,
+  });
+  if (res.status === 401) dropToken();
+  if (!res.ok) throw new ApiError(res.status, await errorCode(res));
+  const j = (await res.json()) as { path?: unknown };
+  if (typeof j?.path !== 'string') throw new ApiError(500);
+  return j.path;
+}
 const questionPath = (sid: string, toolUseId: string) =>
   `/api/sessions/${encodeURIComponent(sid)}/questions/${encodeURIComponent(toolUseId)}`;
 export async function answerQuestion(sid: string, toolUseId: string, answers: Record<string, string>): Promise<void> {

@@ -16,6 +16,8 @@ type Props = {
   pending: PendingMessage[];
   loading: boolean;
   onSend: (text: string) => Promise<void>;
+  /** Uploads a file attached in the composer (see Composer). */
+  onUpload?: (file: File) => Promise<string>;
   onRetry?: (id: string) => void;
   answersFromApp?: boolean;
   onAnswer?: (toolUseId: string, answers: Record<string, string>) => Promise<void>;
@@ -191,7 +193,7 @@ function SessionTitle({
   );
 }
 
-export function ChatView({ session, events, pending, loading, onSend, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove }: Props) {
+export function ChatView({ session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -370,7 +372,7 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
       </div>
 
       <Composer key={session.sessionId} sessionId={session.sessionId} name={session.name} disabled={state === 'disconnected'}
-        blockedByQuestion={Boolean(session.pendingQuestion)} onSend={onSend} />
+        blockedByQuestion={Boolean(session.pendingQuestion)} onSend={onSend} onUpload={onUpload} />
     </section>
   );
 }

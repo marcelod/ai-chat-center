@@ -106,7 +106,8 @@
       "messages": "Mensagens",
       "image": "[imagem]",
       "images": "[{n} imagens]",
-      "compacted": "Conversa compactada · {time}"
+      "compacted": "Conversa compactada · {time}",
+      "attachments": "Arquivos anexados"
     },
     "composer": {
       "placeholder": "Mensagem para {name}…",
@@ -119,7 +120,15 @@
       "sendOlderVersion": "Esta sessão roda uma versão mais antiga do AI Chat Center. Reinicie-a (saia e rode `claude --resume`) para enviar mensagens pelo app.",
       "sendNewerVersion": "Esta sessão roda uma versão do AI Chat Center mais nova que a deste app. Digite /cc nessa sessão para atualizar o app e envie de novo.",
       "sendFailed": "Não foi possível enviar a mensagem.",
-      "retry": "Tentar de novo"
+      "retry": "Tentar de novo",
+      "attach": "Anexar arquivos",
+      "attachments": "Arquivos a enviar",
+      "removeAttachment": "Remover {name}",
+      "attachTooLarge": "{name} tem mais de 20 MB e não foi anexado.",
+      "attachTooMany": "No máximo {max} arquivos por mensagem.",
+      "attachFailed": "Não foi possível enviar os anexos. Tente de novo.",
+      "uploading": "Enviando anexos…",
+      "dropHere": "Solte os arquivos para anexá-los"
     },
     "notifications": {
       "label": "Notificações do navegador",

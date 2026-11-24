@@ -74,6 +74,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
             pending={pending[selected.sessionId] ?? []}
             loading={loading}
             onSend={(text) => send(selected.sessionId, text)}
+            onUpload={(file) => api.uploadAttachment(selected.sessionId, file)}
             onRetry={(id) => void retry(selected.sessionId, id)}
             answersFromApp={answersFromApp}
             onAnswer={(id, answers) => api.answerQuestion(selected.sessionId, id, answers)}

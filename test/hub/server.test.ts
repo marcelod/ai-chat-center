@@ -158,7 +158,7 @@ describe('auth and host checks', () => {
     expect(Object.keys(r.headers).some((h) => h.startsWith('access-control-'))).toBe(false);
     const h = await req(u, '/');
     expect(h.headers['content-security-policy']).toBe(
-      "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
+      "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'",
     );
     expect(h.headers['x-content-type-options']).toBe('nosniff');
     const bad = await req(u, '/api/sessions');

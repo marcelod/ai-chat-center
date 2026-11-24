@@ -43,7 +43,7 @@ const WINDOW_ID_RE = /^[0-9a-f]{32}$/;
 const LANGS: Lang[] = ['en', 'pt-BR'];
 
 const CSP =
-  "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'";
+  "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'";
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
