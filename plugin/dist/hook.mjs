@@ -258,7 +258,7 @@ async function clearWaiting(sid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.4.2";
+var VERSION = "0.4.3";
 var PROTOCOL = 2;
 
 // src/core/registry.ts

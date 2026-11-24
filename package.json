@@ -1,6 +1,6 @@
 {
   "name": "ai-chat-center",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Follow and reply to terminal AI coding sessions from a WhatsApp-style web UI",
   "type": "module",
   "license": "MIT",

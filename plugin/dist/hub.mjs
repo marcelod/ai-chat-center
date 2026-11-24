@@ -2,7 +2,7 @@ import { createRequire as __acc_createRequire } from 'node:module';
 const require = __acc_createRequire(import.meta.url);
 
 // src/hub/main.ts
-import fs11 from "node:fs/promises";
+import fs12 from "node:fs/promises";
 import fsSync from "node:fs";
 import path10 from "node:path";
 import crypto8 from "node:crypto";
@@ -169,7 +169,7 @@ function shortModel(id) {
 }
 
 // src/hub/provider.ts
-import fs9 from "node:fs/promises";
+import fs10 from "node:fs/promises";
 import path8 from "node:path";
 
 // src/core/registry.ts
@@ -469,7 +469,7 @@ async function clearDelivered(sid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.4.2";
+var VERSION = "0.4.3";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -1033,6 +1033,40 @@ async function queryLiveSessions(run = runClaudeAgentsJson) {
   }
 }
 
+// src/hooks/parentClaude.ts
+import fs9 from "node:fs";
+import { execFileSync } from "node:child_process";
+function isClaudeArgv(argv) {
+  const base = (s) => s.split(/[\\/]/).pop() ?? "";
+  if (/^claude(\.exe)?$/i.test(base(argv[0] ?? ""))) return true;
+  return /^node(\.exe)?$/i.test(base(argv[0] ?? "")) && /[\\/]@anthropic-ai[\\/]claude-code[\\/]/.test(argv[1] ?? "");
+}
+function readProcessArgv(pid, platform) {
+  try {
+    if (platform === "linux") {
+      return fs9.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
+    }
+    const out = execFileSync("ps", ["-o", "args=", "-p", String(pid)], { encoding: "utf8", timeout: 2e3, stdio: ["ignore", "pipe", "ignore"] });
+    return out.trim().split(/\s+/).filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+function createClaudeProcessCheck(platform = process.platform, readArgv = (p) => readProcessArgv(p, platform), now = Date.now, ttlMs = 1e4) {
+  const cache = /* @__PURE__ */ new Map();
+  return (pid) => {
+    if (!Number.isInteger(pid) || pid <= 1 || platform === "win32") return false;
+    const t = now();
+    const hit = cache.get(pid);
+    if (hit && t - hit.at < ttlMs) return hit.ok;
+    const argv = readArgv(pid);
+    const ok = argv !== null && isClaudeArgv(argv);
+    if (cache.size > 256) cache.clear();
+    cache.set(pid, { at: t, ok });
+    return ok;
+  };
+}
+
 // src/hub/provider.ts
 var SessionDisconnectedError = class extends Error {
   constructor(sessionId) {
@@ -1053,6 +1087,7 @@ var SessionProtocolError = class extends Error {
   direction;
 };
 var LIVE_TTL_MS = 5e3;
+var LIVE_IDLE_TTL_MS = 3e4;
 var STALE_BUSY_MS = 1e4;
 var GRACE_MS = 15e3;
 var WAITER_HEARTBEAT_STALE_MS = 3e4;
@@ -1063,7 +1098,7 @@ var ClaudeCodeProvider = class {
   constructor(listLive = queryLiveSessions, opts = {}) {
     this.listLive = listLive;
     this.now = opts.now ?? Date.now;
-    this.alive = opts.isAlive ?? isAlive;
+    this.alive = opts.isAlive ?? createClaudeProcessCheck();
   }
   listLive;
   readers = /* @__PURE__ */ new Map();
@@ -1080,9 +1115,9 @@ var ClaudeCodeProvider = class {
   lastSignature = null;
   now;
   alive;
-  async live(force = false) {
+  async live(force = false, ttl = LIVE_TTL_MS) {
     const t = this.now();
-    if (!force && this.liveCache && t >= this.liveCache.at && t - this.liveCache.at < LIVE_TTL_MS) {
+    if (!force && this.liveCache && t >= this.liveCache.at && t - this.liveCache.at < ttl) {
       return { list: this.liveCache.value, ok: true, fresh: false };
     }
     const value = await this.listLive();
@@ -1154,7 +1189,7 @@ var ClaudeCodeProvider = class {
     const oldest = Math.min(...queued.map((m) => Date.parse(m.createdAt)).filter((n) => !Number.isNaN(n)));
     if (!Number.isFinite(oldest) || this.now() - oldest < STALLED_AFTER_MS) return false;
     try {
-      return this.now() - (await fs9.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
+      return this.now() - (await fs10.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
     } catch {
       return true;
     }
@@ -1168,7 +1203,7 @@ var ClaudeCodeProvider = class {
   async transcriptMissing(transcriptPath, connectedAt) {
     if (this.now() - (Date.parse(connectedAt) || 0) < TRANSCRIPT_MISSING_AFTER_MS) return false;
     try {
-      await fs9.stat(transcriptPath);
+      await fs10.stat(transcriptPath);
       return false;
     } catch (err) {
       return err.code === "ENOENT";
@@ -1202,10 +1237,29 @@ var ClaudeCodeProvider = class {
     }
     return gone;
   }
+  /** The lookup age to accept now: short while anything may change soon, long when all is idle (see LIVE_IDLE_TTL_MS). */
+  async liveTtl(regs) {
+    const last = this.liveCache?.value;
+    if (!last) return LIVE_TTL_MS;
+    const byId = new Map(last.map((l) => [l.sessionId, l]));
+    for (const reg of regs) {
+      if (!isActive(reg)) continue;
+      const sid = reg.sessionId;
+      const l = byId.get(sid);
+      if ((Date.parse(reg.connectedAt) || 0) > this.liveCache.at) return LIVE_TTL_MS;
+      if (l) {
+        if (l.status !== "idle" || reg.pid !== null && !this.alive(reg.pid)) return LIVE_TTL_MS;
+      } else if (sameConfigDir(reg) && !(reg.pid !== null && this.alive(reg.pid) && !last.some((x) => x.pid === reg.pid))) {
+        return LIVE_TTL_MS;
+      }
+      if (await busyAge(sid, this.now()) !== null || await getWaiting(sid) || await getPending(sid)) return LIVE_TTL_MS;
+    }
+    return LIVE_IDLE_TTL_MS;
+  }
   async listSessions() {
-    const live = await this.live();
-    const liveById = new Map(live.list.map((l) => [l.sessionId, l]));
     const regs = await listRegistrations();
+    const live = await this.live(false, await this.liveTtl(regs));
+    const liveById = new Map(live.list.map((l) => [l.sessionId, l]));
     const connected = [];
     const activeIds = /* @__PURE__ */ new Set();
     for (const reg of regs) {
@@ -1364,7 +1418,7 @@ var ClaudeCodeProvider = class {
     if (!again || !isActive(again)) {
       const dir = paths().inboxDir(sid);
       try {
-        for (const n of await fs9.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs9.rm(path8.join(dir, n), { force: true });
+        for (const n of await fs10.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs10.rm(path8.join(dir, n), { force: true });
       } catch {
       }
       throw new SessionDisconnectedError(sid);
@@ -1375,7 +1429,7 @@ var ClaudeCodeProvider = class {
 
 // src/hub/server.ts
 import http from "node:http";
-import fs10 from "node:fs/promises";
+import fs11 from "node:fs/promises";
 import path9 from "node:path";
 import crypto7 from "node:crypto";
 
@@ -1611,9 +1665,9 @@ data: ${JSON.stringify(c)}
     if (target !== root && !target.startsWith(root + path9.sep)) return sendJson(res, 404, { error: "not found" });
     const send = async (file) => {
       try {
-        const st = await fs10.stat(file);
+        const st = await fs11.stat(file);
         if (!st.isFile()) return false;
-        const data = await fs10.readFile(file);
+        const data = await fs11.readFile(file);
         const ext = path9.extname(file).toLowerCase();
         const type = MIME[ext] ?? "application/octet-stream";
         const headers = { "Content-Type": type, "Content-Length": data.length };
@@ -1627,7 +1681,7 @@ data: ${JSON.stringify(c)}
     };
     let rootExists = true;
     try {
-      rootExists = (await fs10.stat(root)).isDirectory();
+      rootExists = (await fs11.stat(root)).isDirectory();
     } catch {
       rootExists = false;
     }
@@ -1688,6 +1742,7 @@ data: ${JSON.stringify(c)}
           try {
             assertSessionId(sid);
             focus = { seq: (focus?.seq ?? 0) + 1, sessionId: sid };
+            for (const r of clients) r.write("event: focus\ndata: {}\n\n");
           } catch {
           }
         }
@@ -1860,7 +1915,7 @@ async function holdsHub(r, now = Date.now()) {
   if (r.pid !== null) return isAlive(r.pid);
   let last = Date.parse(r.connectedAt) || 0;
   try {
-    last = Math.max(last, (await fs11.stat(r.transcriptPath)).mtimeMs);
+    last = Math.max(last, (await fs12.stat(r.transcriptPath)).mtimeMs);
   } catch {
   }
   return now - last < UNKNOWN_PID_HOLD_MS;
@@ -1878,17 +1933,17 @@ async function rotateToken() {
   await ensureDir(path10.dirname(file));
   const t = crypto8.randomBytes(32).toString("hex");
   await writeFileAtomic600(file, t);
-  await fs11.chmod(file, 384).catch(() => {
+  await fs12.chmod(file, 384).catch(() => {
   });
   return t;
 }
 async function writeFileAtomic600(file, data) {
   const tmp = `${file}.${process.pid}.${crypto8.randomUUID()}.tmp`;
   try {
-    await fs11.writeFile(tmp, data, { mode: 384 });
-    await withFsRetry(() => fs11.rename(tmp, file));
+    await fs12.writeFile(tmp, data, { mode: 384 });
+    await withFsRetry(() => fs12.rename(tmp, file));
   } catch (e) {
-    await fs11.rm(tmp, { force: true });
+    await fs12.rm(tmp, { force: true });
     throw e;
   }
 }
@@ -1898,7 +1953,7 @@ async function liveHubExists(self) {
   if (self && info.port === self.port) return false;
   let token;
   try {
-    token = (await fs11.readFile(paths().token, "utf8")).trim();
+    token = (await fs12.readFile(paths().token, "utf8")).trim();
   } catch {
     return false;
   }
@@ -2046,7 +2101,7 @@ async function startHub(opts = {}) {
         clearInterval(ownTimer);
         await started.close();
         const cur = await readJson(paths().hubJson);
-        if (cur?.pid === process.pid && cur?.port === port) await fs11.rm(paths().hubJson, { force: true });
+        if (cur?.pid === process.pid && cur?.port === port) await fs12.rm(paths().hubJson, { force: true });
         log("hub stopped");
       }
     };
