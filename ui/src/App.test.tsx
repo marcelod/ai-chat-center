@@ -16,6 +16,7 @@ vi.mock('./api', () => ({
   sendMessage: vi.fn(),
   verifyHub: vi.fn(async () => 'ok'),
   forgetToken: vi.fn(),
+  pingWindow: vi.fn(async () => null),
 }));
 
 import * as api from './api';

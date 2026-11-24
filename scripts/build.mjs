@@ -1,4 +1,4 @@
-// Builds the installable plugin: bundles the hook/waiter/hub entries and the web UI into plugin/dist.
+// Builds the installable plugin: bundles the hook/waiter/hub/open entries and the web UI into plugin/dist.
 import { build } from 'esbuild';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -18,6 +18,7 @@ await build({
     ask: path.join(root, 'src/bin/ask.ts'),
     waiter: path.join(root, 'src/bin/waiter.ts'),
     hub: path.join(root, 'src/bin/hub.ts'),
+    open: path.join(root, 'src/bin/open.ts'),
   },
   outdir: dist,
   bundle: true,

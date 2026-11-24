@@ -262,3 +262,29 @@ export function openStream(onChange: (c: ProviderChange) => void, handlers: Stre
   es.onerror = () => handlers.onError?.();
   return () => es.close();
 }
+
+export type WindowFocus = { seq: number; sessionId: string } | null;
+
+/**
+ * Tells the hub this app page is open (`closing: false`) or closing. /cc opens a new window only when no
+ * page is open; otherwise it asks the open page to show its session, which comes back here as `focus`.
+ * Closing uses a keepalive request, which still goes out while the page unloads.
+ */
+export async function pingWindow(id: string, closing = false): Promise<WindowFocus> {
+  if (closing) {
+    try {
+      void fetch('/api/window', {
+        method: 'POST',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token ?? ''}` },
+        body: JSON.stringify({ id, closing: true }),
+      }).catch(() => {});
+    } catch {
+      /* the page is going away anyway */
+    }
+    return null;
+  }
+  const r = await request<{ focus?: WindowFocus }>('/api/window', { method: 'POST', body: JSON.stringify({ id }) });
+  const f = r?.focus;
+  return f && typeof f.seq === 'number' && typeof f.sessionId === 'string' ? f : null;
+}

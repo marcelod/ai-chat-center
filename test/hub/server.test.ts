@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { createHub } from '../../src/hub/server.js';
+import { createHub, WINDOW_FRESH_MS } from '../../src/hub/server.js';
 import { SessionDisconnectedError, SessionProtocolError, type Provider } from '../../src/hub/provider.js';
 import type { ProviderChange } from '../../src/shared/types.js';
 import { VERSION } from '../../src/core/version.js';
@@ -18,7 +18,7 @@ import { register, markDisconnected } from '../../src/core/registry.js';
 
 const TOKEN = 'a'.repeat(64);
 let home: string;
-let hub: { url: string; close(): Promise<void> } | undefined;
+let hub: Awaited<ReturnType<typeof createHub>> | undefined;
 let prevHome: string | undefined;
 
 /** Waits (bounded) until the poll count stays the same for 200 ms: the chain stopped. */
@@ -48,8 +48,8 @@ function fakeProvider(over: Partial<Provider> = {}): Provider & { pollCalls: num
   return p;
 }
 
-async function start(provider: Provider, extra: { staticDir?: string; pollMs?: number } = {}) {
-  hub = await createHub({ provider, token: TOKEN, port: 0, staticDir: extra.staticDir ?? path.join(home, 'nope'), pollMs: extra.pollMs ?? 20 });
+async function start(provider: Provider, extra: { staticDir?: string; pollMs?: number; now?: () => number } = {}) {
+  hub = await createHub({ provider, token: TOKEN, port: 0, staticDir: extra.staticDir ?? path.join(home, 'nope'), pollMs: extra.pollMs ?? 20, now: extra.now });
   return new URL(hub.url);
 }
 
@@ -592,5 +592,54 @@ describe('pairing endpoints', () => {
     // none of the rejected attempts consumed the code
     const ok = await pair(u, { code }, { 'content-type': 'application/json', origin: `http://127.0.0.1:${u.port}` });
     expect(ok.status).toBe(200);
+  });
+});
+
+describe('one app window', () => {
+  const J = { ...auth, 'content-type': 'application/json' };
+  const ping = (u: URL, body: unknown, headers: Record<string, string> = J) =>
+    req(u, '/api/window', { method: 'POST', headers, body: JSON.stringify(body) });
+  const ask = (u: URL, body?: unknown) =>
+    req(u, '/api/pair-code', { method: 'POST', headers: body === undefined ? auth : J, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const W1 = 'a'.repeat(32);
+  const W2 = 'b'.repeat(32);
+
+  it('no page open: pair-code issues a code, with or without a body', async () => {
+    const u = await start(fakeProvider());
+    expect(JSON.parse((await ask(u)).body).code).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.parse((await ask(u, { sessionId: 's1' })).body).code).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('a page that pings counts as open: pair-code answers live, no code, and the page gets the session', async () => {
+    const u = await start(fakeProvider());
+    expect(JSON.parse((await ping(u, { id: W1 })).body)).toEqual({ focus: null });
+    const r = JSON.parse((await ask(u, { sessionId: 's1' })).body);
+    expect(r).toEqual({ live: true });
+    expect(JSON.parse((await ping(u, { id: W1 })).body)).toEqual({ focus: { seq: 1, sessionId: 's1' } });
+    await ask(u, { sessionId: 's2' });
+    expect(JSON.parse((await ping(u, { id: W1 })).body).focus).toEqual({ seq: 2, sessionId: 's2' });
+    // an invalid session id is not passed on
+    await ask(u, { sessionId: '../x' });
+    expect(JSON.parse((await ping(u, { id: W1 })).body).focus.seq).toBe(2);
+  });
+
+  it('a page that closed or stopped pinging no longer counts', async () => {
+    let t = 1_000_000;
+    const u = await start(fakeProvider(), { now: () => t });
+    await ping(u, { id: W1 });
+    await ping(u, { id: W2 });
+    await ping(u, { id: W1, closing: true });
+    expect(JSON.parse((await ask(u)).body).live).toBe(true); // W2 still open
+    expect(hub!.windows()).toBe(1); // holds the hub up (main.ts idle check)
+    t += WINDOW_FRESH_MS;
+    expect(hub!.windows()).toBe(0);
+    expect(JSON.parse((await ask(u)).body).code).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('the window route needs the token and a valid id', async () => {
+    const u = await start(fakeProvider());
+    expect((await ping(u, { id: W1 }, { 'content-type': 'application/json' })).status).toBe(401);
+    for (const body of [{}, { id: 'x' }, { id: 'A'.repeat(32) }, []]) expect((await ping(u, body)).status).toBe(400);
+    expect(JSON.parse((await ask(u)).body).code).toBeDefined();
   });
 });

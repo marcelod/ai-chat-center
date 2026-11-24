@@ -223,7 +223,8 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
     let idleFired = false;
     const idleTimer = setInterval(async () => {
       try {
-        let held = started.clients() > 0;
+        // An open app page holds the hub even while hidden (a hidden page keeps no stream open).
+        let held = started.clients() > 0 || (started.windows?.() ?? 0) > 0;
         for (const r of held ? [] : await listRegistrations()) if ((held = await holdsHub(r))) break;
         if (held) {
           lastUsed = Date.now();

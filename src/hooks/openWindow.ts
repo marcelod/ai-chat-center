@@ -103,11 +103,12 @@ export interface LaunchDeps extends OpenDeps {
 const CODE_RE = /^[0-9a-f]{64}$/;
 
 /**
- * Opens a new app window for the hub at `hubUrl` (the `#token=` URL ensureHub returns). False when no
- * browser is found (nothing else is attempted). Throws when the hub gives no pairing code or the spawn
- * fails; error messages never carry the token.
+ * Opens the app window for the hub at `hubUrl` (the `#token=` URL ensureHub returns), unless an app page
+ * is already open: then the hub asks that page to show `sessionId` and no window is opened ('reused'), so
+ * only one window stays open. False when no browser is found (nothing else is attempted). Throws when the
+ * hub gives no pairing code or the spawn fails; error messages never carry the token.
  */
-export async function launchAppWindow(hubUrl: string, deps: LaunchDeps = {}): Promise<boolean> {
+export async function launchAppWindow(hubUrl: string, deps: LaunchDeps = {}, sessionId?: string): Promise<'opened' | 'reused' | false> {
   const browser = (deps.findBrowser ?? (() => findBrowser()))();
   if (!browser) return false;
   const u = new URL(hubUrl);
@@ -116,17 +117,20 @@ export async function launchAppWindow(hubUrl: string, deps: LaunchDeps = {}): Pr
   const doFetch = deps.fetch ?? fetch;
   const res = await doFetch(`${u.origin}/api/pair-code`, {
     method: 'POST',
-    headers: { authorization: `Bearer ${token}` },
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(sessionId ? { sessionId } : {}),
     signal: AbortSignal.timeout(deps.timeoutMs ?? 2000),
   });
   if (!res.ok) throw new Error(`app window: pair-code answered ${res.status}`);
-  let code: unknown;
+  let answer: { code?: unknown; live?: unknown } | null;
   try {
-    code = ((await res.json()) as { code?: unknown })?.code;
+    answer = (await res.json()) as typeof answer;
   } catch {
     throw new Error('app window: pair-code answer is not JSON');
   }
+  if (answer?.live === true) return 'reused';
+  const code = answer?.code;
   if (typeof code !== 'string' || !CODE_RE.test(code)) throw new Error('app window: pair-code answer has no valid code');
   if (!openAppWindow(browser, `${u.origin}/#pair=${code}`, deps)) throw new Error(`app window: could not start ${browser}`);
-  return true;
+  return 'opened';
 }

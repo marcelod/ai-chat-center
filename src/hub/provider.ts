@@ -13,6 +13,7 @@ import { paths } from '../core/paths.js';
 import { TranscriptReader } from './transcript/reader.js';
 import { queryLiveSessions } from './status.js';
 import { PROTOCOL } from '../core/version.js';
+import { isAlive } from '../core/lock.js';
 
 export type { LiveSession, SessionView, ProviderChange };
 
@@ -55,7 +56,11 @@ const WAITER_HEARTBEAT_STALE_MS = 30_000;
 const STALLED_AFTER_MS = 15_000;
 const MISSES_TO_EXIT = 3;
 
-export type ProviderOptions = { now?: () => number };
+export type ProviderOptions = {
+  now?: () => number;
+  /** For tests: whether a process is alive. Default: isAlive (src/core/lock.ts). */
+  isAlive?: (pid: number) => boolean;
+};
 
 type Entry = { reader: TranscriptReader; read: boolean };
 type Live = { list: LiveSession[]; ok: boolean; fresh: boolean };
@@ -70,12 +75,14 @@ export class ClaudeCodeProvider implements Provider {
   private lastGood: LiveSession[] | null = null;
   private lastSignature: string | null = null;
   private readonly now: () => number;
+  private readonly alive: (pid: number) => boolean;
 
   constructor(
     private readonly listLive: () => Promise<LiveSession[] | null> = queryLiveSessions,
     opts: ProviderOptions = {},
   ) {
     this.now = opts.now ?? Date.now;
+    this.alive = opts.isAlive ?? isAlive;
   }
 
   private async live(force = false): Promise<Live> {
@@ -140,6 +147,14 @@ export class ClaudeCodeProvider implements Provider {
       this.misses.set(sid, m);
     }
     if (!live.ok) return false;
+    // Claude Code sometimes leaves a session out of `claude agents` for its whole life (its entry in
+    // ~/.claude/sessions was never written). Its claude process, known from the hook's parent, still
+    // runs and is listed under no other session: it is alive, not exited. Listed under another session
+    // id, it was replaced (/clear) and the usual rule applies.
+    if (reg.pid !== null && this.alive(reg.pid) && !live.list.some((l) => l.pid === reg.pid)) {
+      m.count = 0;
+      return false;
+    }
     if (live.fresh) m.count++;
     const age = this.now() - (Date.parse(connectedAt) || 0);
     return m.count >= MISSES_TO_EXIT && age > GRACE_MS;

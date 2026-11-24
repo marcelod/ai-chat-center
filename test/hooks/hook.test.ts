@@ -138,8 +138,14 @@ describe('hook', () => {
     expect(reg.previousKeys).toEqual([k1]);
   });
 
+  it('/cc when claude agents does not list the session: the parent claude process is used', async () => {
+    const r = await handleHook('prompt-submit', inp({ prompt: '/cc' }), { ...ctx(), resolvePid: async () => null, parentClaudePid: () => 4242 });
+    expect((await getRegistration('s1'))!.pid).toBe(4242);
+    expect(out(r).hookSpecificOutput.additionalContext).not.toContain('could not identify');
+  });
+
   it('/cc when the claude pid cannot be resolved: registers with pid null and says so', async () => {
-    const r = await handleHook('prompt-submit', inp({ prompt: '/cc' }), { ...ctx(), resolvePid: async () => null });
+    const r = await handleHook('prompt-submit', inp({ prompt: '/cc' }), { ...ctx(), resolvePid: async () => null, parentClaudePid: () => null });
     const reg = (await getRegistration('s1'))!;
     expect(reg.pid).toBeNull();
     expect(reg.disconnectedAt).toBeUndefined();
@@ -723,6 +729,27 @@ describe('answers command and turn origin', () => {
     expect((await loadConfig()).openWindow).toBe(false);
   });
 
+  it('/cc window on installs the launcher (with a note), off removes it, /cc refreshes it while on', async () => {
+    const calls: string[] = [];
+    const launcher = { install: (c: string) => (calls.push(`install:${c}`), true), remove: () => void calls.push('remove') };
+    const c = { ...ctx(), findBrowser: () => '/usr/bin/chromium', launcher };
+    const on = await handleHook('prompt-submit', inp({ prompt: '/cc window on' }), c);
+    expect(out(on).systemMessage).toMatch(/icon was added to your app launcher/);
+    expect(calls).toEqual(['install:Follow and answer your Claude Code sessions']);
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), { ...c, fetch: (async () => new Response('{"live":true}')) as never });
+    expect(calls).toHaveLength(2);
+    await handleHook('prompt-submit', inp({ prompt: '/cc window off' }), c);
+    expect(calls.at(-1)).toBe('remove');
+    // no browser: no launcher; a failing install never breaks the hook
+    calls.length = 0;
+    await handleHook('prompt-submit', inp({ prompt: '/cc window on' }), { ...c, findBrowser: () => null });
+    expect(calls).toEqual([]);
+    const boom = { ...c, launcher: { install: () => { throw new Error('EACCES'); }, remove: () => {} } };
+    const r = await handleHook('prompt-submit', inp({ prompt: '/cc window on' }), boom);
+    expect(out(r).hookSpecificOutput.additionalContext).toContain(WINDOW_ON);
+    expect(out(r).systemMessage).not.toMatch(/launcher/);
+  });
+
   it('/cc window on adds a localized note when no browser is found', async () => {
     const none = { ...ctx(), findBrowser: () => null };
     expect(out(await handleHook('prompt-submit', inp({ prompt: '/cc window on' }), none)).systemMessage).toMatch(/No Chrome, Chromium or Edge found/);
@@ -735,13 +762,13 @@ describe('answers command and turn origin', () => {
     const CODE = 'ab12'.repeat(16);
     const spawned: { cmd: string; args: string[] }[] = [];
     const fetched: string[] = [];
-    const winCtx = (o: { browser?: string | null; status?: number } = {}) => ({
+    const winCtx = (o: { browser?: string | null; status?: number; live?: boolean } = {}) => ({
       ensureHub: async () => HUB,
       resolvePid: async (): Promise<number | null> => 42,
       findBrowser: () => (o.browser === undefined ? '/usr/bin/chromium' : o.browser),
       fetch: (async (url: string) => {
         fetched.push(url);
-        return new Response(JSON.stringify({ code: CODE }), { status: o.status ?? 200 });
+        return new Response(JSON.stringify(o.live ? { live: true } : { code: CODE }), { status: o.status ?? 200 });
       }) as never,
       spawn: ((cmd: string, args: string[]) => {
         spawned.push({ cmd, args });
@@ -776,6 +803,15 @@ describe('answers command and turn origin', () => {
       expect(JSON.stringify(spawned)).not.toContain('tok-secret');
       expect(out(r).hookSpecificOutput.additionalContext).not.toContain('tok-secret');
       expect(hookLog()).not.toContain('tok-secret');
+    });
+
+    it('flag on, the app is already open: /cc opens no second window', async () => {
+      await saveConfig({ openWindow: true });
+      const r = await handleHook('prompt-submit', inp({ prompt: '/cc' }), winCtx({ live: true }));
+      expect(out(r).hookSpecificOutput.additionalContext).toContain('AI Chat Center: connected');
+      expect(out(r).systemMessage).toBe(`AI Chat Center is ready: ${HUB}`);
+      expect(fetched).toEqual(['http://127.0.0.1:7777/api/pair-code']);
+      expect(spawned).toHaveLength(0);
     });
 
     it('flag on, no browser: no window, no pair code, same reply', async () => {

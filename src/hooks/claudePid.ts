@@ -31,3 +31,4 @@ export async function resolveClaudePid(sessionId: string, opts: ResolvePidOption
   const r = await lookupClaudePid(sessionId, opts);
   return r.ok ? r.pid : null;
 }
+

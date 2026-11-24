@@ -28,13 +28,15 @@ import { clearBusy, setBusy } from '../core/busy.js';
 import { setEffort } from '../core/meta.js';
 import { clearTurnOrigin, promptOrigin, setTurnOrigin } from '../core/turn.js';
 import { ensureHub } from './ensureHub.js';
-import { loadConfig, saveConfig } from '../core/config.js';
+import { loadConfig, saveConfig, type Lang } from '../core/config.js';
 import { t } from '../core/i18n.js';
 import { isCcCommand } from '../core/ccCommand.js';
 
 export { isCcCommand };
 import { resolveClaudePid } from './claudePid.js';
+import { parentClaudePid } from './parentClaude.js';
 import { findBrowser, launchAppWindow } from './openWindow.js';
+import { installLauncher, removeLauncher } from './launcher.js';
 
 export type HookEvent = 'prompt-submit' | 'notification';
 export type HookInput = {
@@ -52,11 +54,15 @@ export interface HookContext {
   ensureHub: (notice?: (msg: string) => void) => Promise<string>;
   /** Resolves the claude process pid of a session, or null. Default: resolveClaudePid. */
   resolvePid?: (sessionId: string) => Promise<number | null>;
+  /** The claude process from the hook's parent, or null. Default: parentClaudePid (src/hooks/parentClaude.ts). */
+  parentClaudePid?: () => number | null;
   /** Path of a Chrome, Chromium or Edge binary, or null. Default: findBrowser (src/hooks/openWindow.ts). */
   findBrowser?: () => string | null;
   /** For tests: the pair-code request and the browser launch. Default: global fetch, child_process.spawn. */
   fetch?: typeof fetch;
   spawn?: typeof import('node:child_process').spawn;
+  /** The launcher icon (src/hooks/launcher.ts). Absent (tests): no launcher is written or removed. */
+  launcher?: { install(comment: string): boolean; remove(): void };
 }
 export interface HookResult {
   stdout?: string;
@@ -96,7 +102,8 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
   const prev = await getRegistration(sid);
   const keep = prev && isActive(prev);
   await tightenHome();
-  const pid = await resolve(sid);
+  // Not listed by `claude agents`: the hook's parent, when it is the claude process (exec-form hooks).
+  const pid = (await resolve(sid)) ?? (ctx.parentClaudePid ?? parentClaudePid)();
   const previousKeys = [...(prev?.previousKeys ?? []), ...(prev?.key && !keep ? [prev.key] : [])].slice(-MAX_PREVIOUS_KEYS);
   const reg = await register({
     sessionId: sid,
@@ -130,7 +137,11 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
     const url = await ctx.ensureHub(notice);
     shown = t(language, 'hook.ready', { url });
     status = CONNECTED;
-    if (openWindow) await openWindowQuietly(url, ctx);
+    if (openWindow) {
+      // The plugin folder and the Node path change with updates: keep the launcher pointing at this copy.
+      refreshLauncher(ctx, language);
+      await openWindowQuietly(url, ctx, sid);
+    }
   } catch (e) {
     // Keep the registration: the hub will show the session once it is up.
     logError(e);
@@ -143,15 +154,25 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
   return output(lines.join('\n'), [shown, ...notices].join('\n'));
 }
 
+/** Writes or refreshes the launcher icon; true when there is one (Linux). Never fails the hook. */
+function refreshLauncher(ctx: HookContext, language: Lang): boolean {
+  try {
+    return ctx.launcher?.install(t(language, 'hook.launcherComment')) ?? false;
+  } catch (e) {
+    logError(e);
+    return false;
+  }
+}
+
 /** Opens the app window (spec 2026-11-23-app-window); never fails or delays the /cc reply beyond a short timeout. */
-async function openWindowQuietly(url: string, ctx: HookContext): Promise<void> {
+async function openWindowQuietly(url: string, ctx: HookContext, sid: string): Promise<void> {
   try {
     await launchAppWindow(url, {
       findBrowser: ctx.findBrowser ?? (() => findBrowser()),
       ...(ctx.fetch ? { fetch: ctx.fetch } : {}),
       ...(ctx.spawn ? { spawn: ctx.spawn } : {}),
       onError: (msg) => logError(msg),
-    });
+    }, sid);
   } catch (e) {
     // Messages from launchAppWindow never carry the token; log the message only (no stack, no url).
     logError(e instanceof Error ? e.message : String(e));
@@ -176,7 +197,16 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
       const on = cmd === 'window-on';
       const { language } = await saveConfig({ openWindow: on });
       const find = ctx.findBrowser ?? (() => findBrowser());
-      const note = on && find() === null ? `\n${t(language, 'hook.windowNoBrowser')}` : '';
+      const browser = on ? find() : null;
+      let note = on && browser === null ? `\n${t(language, 'hook.windowNoBrowser')}` : '';
+      if (on && browser !== null && refreshLauncher(ctx, language)) note += `\n${t(language, 'hook.windowLauncher')}`;
+      if (!on) {
+        try {
+          ctx.launcher?.remove();
+        } catch (e) {
+          logError(e);
+        }
+      }
       answersResult = output(on ? WINDOW_ON : WINDOW_OFF, t(language, on ? 'hook.windowOn' : 'hook.windowOff') + note);
     }
     if (cmd === 'answers-on' || cmd === 'answers-off') {
@@ -245,7 +275,10 @@ export async function main(): Promise<void> {
     const event = process.argv[2] as HookEvent;
     if (event !== 'prompt-submit' && event !== 'notification') return;
     const input = JSON.parse(await readStdin()) as HookInput;
-    result = await handleHook(event, input, { ensureHub: (notice) => ensureHub({ notice }) });
+    result = await handleHook(event, input, {
+      ensureHub: (notice) => ensureHub({ notice }),
+      launcher: { install: (comment) => installLauncher({ comment }), remove: () => removeLauncher() },
+    });
   } catch (e) {
     logError(e);
   }

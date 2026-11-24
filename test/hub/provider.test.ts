@@ -66,7 +66,7 @@ describe('provider', () => {
   it('exited only after grace period and 3 consecutive misses', async () => {
     await reg();
     let t = Date.now();
-    const p = new ClaudeCodeProvider(async () => [], { now: () => t });
+    const p = new ClaudeCodeProvider(async () => [], { now: () => t, isAlive: () => false });
     // within grace: many misses, never marked
     for (let i = 0; i < 4; i++) { t += 2500; await p.listSessions(); }
     expect((await getRegistration('s1'))!.disconnectedAt).toBeUndefined();
@@ -123,10 +123,31 @@ describe('provider', () => {
     for (let i = 0; i < 5; i++) await p.listSessions();
     expect((await getRegistration('s1'))!.disconnectedAt).toBeUndefined();
   });
+  it('an unlisted session whose claude process is alive and listed under no other session is not exited', async () => {
+    await reg();
+    let t = Date.now() + 60000;
+    let alive = true;
+    let list: LiveSession[] = [live({ sessionId: 'other', pid: 7 })];
+    const p = new ClaudeCodeProvider(async () => list, { now: () => t, isAlive: () => alive });
+    for (let i = 0; i < 5; i++) { t += 6000; await p.listSessions(); await p.detectExits(); }
+    expect((await getRegistration('s1'))!.disconnectedAt).toBeUndefined();
+    // the same process now runs another session (/clear): the old one exited
+    list = [live({ sessionId: 's9', pid: 1 })];
+    for (let i = 0; i < 3; i++) { t += 6000; await p.detectExits(); }
+    expect((await getRegistration('s1'))!.disconnectReason).toBe('exited');
+    // and a dead process is exited as before
+    await new Promise((r) => setTimeout(r, 5));
+    await reg();
+    alive = false;
+    list = [];
+    t = Date.now() + 120000;
+    for (let i = 0; i < 3; i++) { t += 6000; await p.detectExits(); }
+    expect((await getRegistration('s1'))!.disconnectReason).toBe('exited');
+  });
   it('re-registered session can be marked exited again later', async () => {
     await reg();
     let t = Date.now() + 60000;
-    const p = new ClaudeCodeProvider(async () => [], { now: () => t });
+    const p = new ClaudeCodeProvider(async () => [], { now: () => t, isAlive: () => false });
     for (let i = 0; i < 3; i++) { t += 5000; await p.listSessions(); }
     expect((await getRegistration('s1'))!.disconnectedAt).toBeDefined();
     await new Promise((r) => setTimeout(r, 5));

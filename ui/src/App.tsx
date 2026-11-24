@@ -5,6 +5,7 @@ import { SessionList } from './components/SessionList';
 import { ChatView } from './components/ChatView';
 import { notificationsSupported } from './notify';
 import { useLiveSessions } from './useLiveSessions';
+import { useAppWindow } from './useAppWindow';
 import { useCollapsedList } from './useCollapsedList';
 import { LangProvider, useT } from './i18n';
 
@@ -27,6 +28,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
   const live = useLiveSessions();
   const { data, eventsById, pending, unread, selectedId, select, send, retry, error, loading } = live;
   const selected = data.connected.find((s) => s.sessionId === selectedId);
+  useAppWindow(select);
 
   const pendingId = selected?.pendingQuestion?.toolUseId;
   useEffect(() => {

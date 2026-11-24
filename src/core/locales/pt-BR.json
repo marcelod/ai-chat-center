@@ -7,7 +7,9 @@
     "answersOff": "AI Chat Center: perguntas de múltipla escolha voltam a ser respondidas só no terminal.",
     "windowOn": "AI Chat Center: o app vai abrir em janela própria ao conectar. Para desligar: /ai-chat-center:cc window off",
     "windowOff": "AI Chat Center: o app não abre mais em janela própria.",
-    "windowNoBrowser": "Nenhum Chrome, Chromium ou Edge encontrado: o link continua sendo mostrado."
+    "windowNoBrowser": "Nenhum Chrome, Chromium ou Edge encontrado: o link continua sendo mostrado.",
+    "windowLauncher": "O atalho “AI Chat Center” foi adicionado ao menu de aplicativos: ele abre o app (e inicia o hub, se preciso).",
+    "launcherComment": "Acompanhe e responda suas sessões do Claude Code"
   },
   "ui": {
     "rename": {

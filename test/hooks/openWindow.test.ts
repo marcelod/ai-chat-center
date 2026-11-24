@@ -127,13 +127,25 @@ describe('launchAppWindow', () => {
     const calls: Call[] = [];
     const seen: { url?: string; init?: RequestInit }[] = [];
     const r = await launchAppWindow(HUB, { findBrowser: () => '/usr/bin/chromium', fetch: okFetch(seen), spawn: fakeSpawn(calls) });
-    expect(r).toBe(true);
+    expect(r).toBe('opened');
     expect(seen[0].url).toBe('http://127.0.0.1:7777/api/pair-code');
     expect(seen[0].init?.method).toBe('POST');
     expect((seen[0].init?.headers as Record<string, string>).authorization).toBe('Bearer secret-token');
     expect(seen[0].init?.signal).toBeInstanceOf(AbortSignal);
     expect(calls[0].args).toEqual([`--app=http://127.0.0.1:7777/#pair=${CODE}`, '--new-window']);
     expect(JSON.stringify(calls)).not.toContain('secret-token');
+  });
+
+  it('an app page is already open: sends the session, opens nothing', async () => {
+    const calls: Call[] = [];
+    const seen: { url?: string; init?: RequestInit }[] = [];
+    const live = (async (url: string, init: RequestInit) => {
+      seen.push({ url, init });
+      return new Response(JSON.stringify({ live: true }), { status: 200 });
+    }) as never;
+    expect(await launchAppWindow(HUB, { findBrowser: () => '/b', fetch: live, spawn: fakeSpawn(calls) }, 's1')).toBe('reused');
+    expect(JSON.parse(String(seen[0].init?.body))).toEqual({ sessionId: 's1' });
+    expect(calls).toHaveLength(0);
   });
 
   it('no browser: does not call the hub nor spawn', async () => {

@@ -23,11 +23,21 @@ export interface HubOptions {
   staticDir: string;
   pollMs?: number;
   log?: (msg: string) => void;
+  /** For tests: the clock of the window pings. */
+  now?: () => number;
 }
 
 const MAX_BODY = 64 * 1024;
 const MAX_TEXT = 32_000;
 const HEARTBEAT_MS = 15_000;
+/**
+ * An app page pings `/api/window` every WINDOW_PING_MS, hidden or not (a hidden page closes its stream).
+ * Chrome throttles the timers of a hidden page to about once a minute, so a page counts as open while
+ * its last ping is younger than WINDOW_FRESH_MS. A page that closes says so (keepalive POST on pagehide).
+ */
+export const WINDOW_FRESH_MS = 150_000;
+const MAX_WINDOWS = 20;
+const WINDOW_ID_RE = /^[0-9a-f]{32}$/;
 const LANGS: Lang[] = ['en', 'pt-BR'];
 
 const CSP =
@@ -110,13 +120,23 @@ async function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
 
 export async function createHub(
   opts: HubOptions,
-): Promise<{ url: string; clients(): number; close(): Promise<void>; server: http.Server }> {
+): Promise<{ url: string; clients(): number; windows(): number; close(): Promise<void>; server: http.Server }> {
   const { provider, token, staticDir } = opts;
   const pollMs = opts.pollMs ?? 500;
   const log = opts.log ?? (() => {});
   let port = opts.port;
 
   const pairing = createPairing();
+  const now = opts.now ?? Date.now;
+  /** App pages alive: page id -> last ping. Map keeps insertion order (oldest first). */
+  const windows = new Map<string, number>();
+  /** The last "show this session" request from /cc, for the open pages to pick up on their next ping. */
+  let focus: { seq: number; sessionId: string } | null = null;
+  const liveWindows = () => {
+    const t = now();
+    for (const [id, at] of windows) if (t - at >= WINDOW_FRESH_MS) windows.delete(id);
+    return windows.size;
+  };
   const clients = new Set<http.ServerResponse>();
   let pollTimer: NodeJS.Timeout | null = null;
   let heartbeat: NodeJS.Timeout | null = null;
@@ -282,8 +302,36 @@ export async function createHub(
       return;
     }
     if (p === '/api/pair-code' && method === 'POST') {
-      req.resume();
+      // /cc asks this before opening a window. With an app page already open, no window is needed: that
+      // page is asked to show the session instead (`{live: true}`, no code), so only one window stays open.
+      // The body is optional (older hooks send none).
+      const json = String(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json');
+      const body = (json ? await readJsonBody(req) : (req.resume(), null)) as { sessionId?: unknown } | null;
+      const sid = body && typeof body === 'object' && !Array.isArray(body) ? body.sessionId : undefined;
+      if (liveWindows() > 0) {
+        if (typeof sid === 'string') {
+          try {
+            assertSessionId(sid);
+            focus = { seq: (focus?.seq ?? 0) + 1, sessionId: sid };
+          } catch {
+            /* no valid session to show: the open page stays as it is */
+          }
+        }
+        return sendJson(res, 200, { live: true });
+      }
       return sendJson(res, 200, { code: pairing.issue() });
+    }
+    if (p === '/api/window' && method === 'POST') {
+      const body = (await readJsonBody(req)) as { id?: unknown; closing?: unknown } | null;
+      const id = body && typeof body === 'object' && !Array.isArray(body) ? body.id : undefined;
+      if (typeof id !== 'string' || !WINDOW_ID_RE.test(id)) throw new HttpError(400, 'invalid window id');
+      windows.delete(id);
+      if (body!.closing !== true) {
+        liveWindows();
+        while (windows.size >= MAX_WINDOWS) windows.delete(windows.keys().next().value as string);
+        windows.set(id, now());
+      }
+      return sendJson(res, 200, { focus });
     }
     if (p === '/api/sessions' && method === 'GET') return sendJson(res, 200, await provider.listSessions());
     if (p === '/api/config' && method === 'GET') return sendJson(res, 200, await loadConfig());
@@ -417,6 +465,7 @@ export async function createHub(
   return {
     url: `http://127.0.0.1:${port}`,
     clients: () => clients.size,
+    windows: () => liveWindows(),
     server,
     close: () =>
       new Promise<void>((resolve) => {
