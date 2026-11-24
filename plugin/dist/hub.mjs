@@ -885,7 +885,9 @@ var TranscriptParser = class {
       return [{ kind: "actions", id: uuid, ts, items: [item] }];
     }
     const t = content.trimStart();
-    if (t.startsWith("<command-") || t.startsWith("<local-command-") || t.startsWith("<task-notification>") || t.startsWith("<system-reminder>")) {
+    if (t.startsWith("<command-") || t.startsWith("<local-command-") || t.startsWith("<task-notification>") || t.startsWith("<system-reminder>") || // A teammate's or subagent's message (agent teams, SendMessage): Claude Code stores it as a user
+    // entry, but nobody typed it.
+    t.startsWith("Another Claude session sent a message:")) {
       return [];
     }
     const text = unwrapPrompt(content);

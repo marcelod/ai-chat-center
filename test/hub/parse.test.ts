@@ -154,6 +154,13 @@ describe('TranscriptParser with a session key', () => {
       { kind: 'user', id: 'u', ts: 't', text: 'hi', origin: 'app', appMessageId: 'ok' },
     ]);
   });
+  it('a message from another Claude session (teammate, subagent) is never a user bubble', () => {
+    const p = new TranscriptParser([K]);
+    expect(push(p, 'Another Claude session sent a message:\n<teammate-message teammate_id="dev-c2" color="blue">\nreport\n</teammate-message>')).toEqual([]);
+    expect(push(p, 'Another Claude session sent a message:\n\n{"type":"idle_notification","from":"dev-c2-frontend"}')).toEqual([]);
+    expect(push(p, 'Another Claude session sent a message:\n<agent-message from="a1">\nreport\n</agent-message>')).toEqual([]);
+    expect(push(p, 'tell me what another Claude session sent a message about')).toMatchObject([{ kind: 'user', origin: 'terminal' }]);
+  });
   it('the spike fixture (keyless markers) yields no app messages once a key is known', () => {
     const p = new TranscriptParser([K]);
     const evs = lines.flatMap((l) => p.push(JSON.parse(l)));
