@@ -154,12 +154,34 @@ describe('TranscriptParser with a session key', () => {
       { kind: 'user', id: 'u', ts: 't', text: 'hi', origin: 'app', appMessageId: 'ok' },
     ]);
   });
-  it('a message from another Claude session (teammate, subagent) is never a user bubble', () => {
+  it('a message from another Claude session is shown as the agent\'s, never as the user\'s', () => {
     const p = new TranscriptParser([K]);
-    expect(push(p, 'Another Claude session sent a message:\n<teammate-message teammate_id="dev-c2" color="blue">\nreport\n</teammate-message>')).toEqual([]);
-    expect(push(p, 'Another Claude session sent a message:\n\n{"type":"idle_notification","from":"dev-c2-frontend"}')).toEqual([]);
-    expect(push(p, 'Another Claude session sent a message:\n<agent-message from="a1">\nreport\n</agent-message>')).toEqual([]);
+    expect(push(p, 'Another Claude session sent a message:\n<teammate-message teammate_id="pesquisa" color="blue" summary="Relatório">\nO relatório.\n</teammate-message>')).toEqual([
+      { kind: 'agent', id: 'u', ts: 't', from: 'pesquisa', text: 'O relatório.' },
+    ]);
+    const idle = JSON.stringify({ type: 'idle_notification', from: 'dev-c2-frontend', timestamp: 'x', idleReason: 'available', result: 'Os dois ajustes **já** estavam feitos.' });
+    expect(push(p, `Another Claude session sent a message:\n<teammate-message teammate_id="dev-c2-frontend" color="orange">\n${idle}\n</teammate-message>`)).toEqual([
+      { kind: 'agent', id: 'u', ts: 't', from: 'dev-c2-frontend', text: 'Os dois ajustes **já** estavam feitos.' },
+    ]);
+    const bare = JSON.stringify({ type: 'idle_notification', from: 'dev-c2-frontend', idleReason: 'available' });
+    expect(push(p, `Another Claude session sent a message:\n<teammate-message teammate_id="dev-c2-frontend">\n${bare}\n</teammate-message>`)).toEqual([]);
     expect(push(p, 'tell me what another Claude session sent a message about')).toMatchObject([{ kind: 'user', origin: 'terminal' }]);
+  });
+  it('a subagent hand-back shows only the report, named after the Agent call that started it', () => {
+    const p = new TranscriptParser([K]);
+    p.push({ type: 'assistant', uuid: 'a1', timestamp: 't', message: { content: [{ type: 'tool_use', id: 'tu1', name: 'Agent', input: { description: 'Fix stuck busy status', prompt: 'p' } }] } });
+    p.push({ type: 'user', uuid: 'r1', timestamp: 't', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: [{ type: 'text', text: 'Async agent launched successfully.\nagentId: ac80710dab2f9dfc0 (internal ID)' }] }] } });
+    const msg = 'Another Claude session sent a message:\n<agent-message from="ac80710dab2f9dfc0">\n[Subagent hand-back] The text below is the final report. The report follows:\n  Branch `fix/busy-status`, one commit.\n  \n  - **Fix:** done.\n</agent-message>\n\nThat "other Claude session" is an agent working inside this same session.';
+    expect(push(p, msg)).toEqual([{ kind: 'agent', id: 'u', ts: 't', from: 'Fix stuck busy status', text: 'Branch `fix/busy-status`, one commit.\n\n- **Fix:** done.' }]);
+    expect(push(p, msg.replace('ac80710dab2f9dfc0', 'unknown1'))).toMatchObject([{ kind: 'agent', from: '' }]);
+  });
+  it('a newer peer entry (isMeta, origin.kind peer) is shown with the origin name and report', () => {
+    const p = new TranscriptParser([K]);
+    const content = 'Another Claude session sent a message:\n<agent-message from="afac8">\n[Subagent hand-back] frame. The report follows:\n  Sources: docs\n</agent-message>\n\nThat "other Claude session" is an agent.';
+    const ev = p.push({ type: 'user', uuid: 'u', timestamp: 't', isMeta: true, origin: { kind: 'peer', from: 'afac8', name: 'claude-code-guide', handback: true, handbackReportText: 'Sources: docs\n\n1. Pre-answer' }, message: { content } });
+    expect(ev).toEqual([{ kind: 'agent', id: 'u', ts: 't', from: 'claude-code-guide', text: 'Sources: docs\n\n1. Pre-answer' }]);
+    // other meta entries stay hidden
+    expect(p.push({ type: 'user', uuid: 'v', timestamp: 't', isMeta: true, message: { content: 'Caveat: internal' } })).toEqual([]);
   });
   it('the spike fixture (keyless markers) yields no app messages once a key is known', () => {
     const p = new TranscriptParser([K]);

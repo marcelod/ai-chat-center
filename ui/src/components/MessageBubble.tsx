@@ -88,3 +88,26 @@ export function AssistantBubble({ text }: { text: string }) {
     </div>
   );
 }
+
+type Agent = Extract<ChatEvent, { kind: 'agent' }>;
+
+/** A teammate's or subagent's message: on the Claude side, labelled with who sent it. */
+export function AgentBubble({ event }: { event: Agent }) {
+  const t = useT();
+  return (
+    <div
+      data-bubble="agent"
+      className="md max-w-[min(100%,720px)] self-start break-words rounded-[14px_14px_14px_4px] border border-dashed border-line bg-field px-3.5 py-2.5 text-[15px] leading-relaxed"
+    >
+      <p className="mb-1 text-xs font-semibold text-muted">{event.from ? t('ui.chat.agentFrom', { name: event.from }) : t('ui.chat.agent')}</p>
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+        }}
+      >
+        {event.text}
+      </Markdown>
+    </div>
+  );
+}

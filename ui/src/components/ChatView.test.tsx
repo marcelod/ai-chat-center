@@ -64,6 +64,15 @@ function setup(
 }
 
 describe('ChatView', () => {
+  it("an agent's message is on Claude's side, labelled with the agent, never as the user's", () => {
+    const { container } = setup({ events: [{ kind: 'agent', id: 'g1', ts: ts(1), from: 'dev-c2-frontend', text: 'Os **dois** ajustes' }] });
+    const b = container.querySelector('[data-bubble="agent"]') as HTMLElement;
+    expect(b).not.toBeNull();
+    expect(within(b).getByText('Agent dev-c2-frontend')).toBeTruthy();
+    expect(within(b).getByText('dois').tagName).toBe('STRONG');
+    expect(container.querySelector('[data-bubble="user"]')).toBeNull();
+  });
+
   it('header shows cwd, branch, model and effort, each with a label', () => {
     setup({ session: session({ branch: 'feat/x', model: 'Opus 5.5', effort: 'high' }) });
     expect(screen.getByText('/home/me/billing-api')).toBeInTheDocument();

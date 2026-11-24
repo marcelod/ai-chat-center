@@ -29,6 +29,8 @@ function eventPreview(e: ChatEvent | undefined, t: T): string {
     }
     case 'assistant':
       return e.text;
+    case 'agent':
+      return `${e.from || t('ui.chat.agent')}: ${e.text}`;
     case 'actions':
       return e.items[e.items.length - 1]?.summary ?? '';
     case 'question':

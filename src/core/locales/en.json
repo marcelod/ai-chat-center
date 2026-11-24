@@ -85,6 +85,8 @@
       "connectedAt": "Connected to AI Chat Center · {time}",
       "disconnectedAt": "Disconnected · {time}",
       "typing": "Claude is working",
+      "agent": "Agent",
+      "agentFrom": "Agent {name}",
       "branch": "Branch",
       "model": "Model",
       "effort": "Reasoning level",

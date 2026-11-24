@@ -8,7 +8,7 @@ import { QuestionCard } from './QuestionCard';
 import { Composer } from './Composer';
 import { BackIcon, WarningIcon } from './icons';
 import { ChatMenu } from './ChatMenu';
-import { AssistantBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
+import { AgentBubble, AssistantBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
 
 type Props = {
   session: SessionView;
@@ -223,6 +223,8 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
         return <UserBubble key={e.id} event={e} />;
       case 'assistant':
         return <AssistantBubble key={e.id} text={e.text} />;
+      case 'agent':
+        return <AgentBubble key={e.id} event={e} />;
       case 'actions':
         return <ActionsGroup key={e.id} items={e.items} />;
       case 'question':

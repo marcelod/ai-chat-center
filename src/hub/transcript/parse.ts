@@ -25,6 +25,57 @@ const truncate = (s: string, max: number) => (s.length > max ? s.slice(0, max) :
 const WRAPPER_TAGS = /<\/?(?:pasted_content|teammate-message)(?:\s+[\w-]+="[^"]*")*\s*>/g;
 const unwrapPrompt = (text: string): string => text.replace(WRAPPER_TAGS, '');
 
+
+const AGENT_MESSAGE_PREFIX = 'Another Claude session sent a message:';
+const AGENT_BLOCK = /<(teammate-message|agent-message)((?:\s+[\w-]+="[^"]*")*)\s*>\n?([\s\S]*?)<\/\1>/g;
+
+function attr(attrs: string, name: string): string | undefined {
+  return new RegExp(`\\s${name}="([^"]*)"`).exec(attrs)?.[1];
+}
+
+/**
+ * The messages inside a teammate/subagent entry: who sent each and its text. A teammate's JSON status
+ * (idle_notification and the like) shows only its `result`, and nothing when it has none; a subagent's
+ * hand-back shows only the report, without the harness frame around it.
+ */
+export function agentMessages(content: string, names: Map<string, string> = new Map()): { from: string; text: string }[] {
+  const out: { from: string; text: string }[] = [];
+  for (const m of content.matchAll(AGENT_BLOCK)) {
+    const [, tag, attrs, rawBody] = m;
+    let text = rawBody.trim();
+    let from: string;
+    if (tag === 'teammate-message') {
+      from = attr(attrs, 'teammate_id') ?? '';
+      if (text.startsWith('{')) {
+        try {
+          const j = JSON.parse(text) as Record<string, unknown>;
+          const said = [j.result, j.message, j.content].find((v) => typeof v === 'string' && v.trim() !== '');
+          text = typeof said === 'string' ? said.trim() : '';
+          if (!from && typeof j.from === 'string') from = j.from;
+        } catch {
+          /* not JSON: show as written */
+        }
+      }
+    } else {
+      const id = attr(attrs, 'from') ?? '';
+      from = names.get(id) ?? '';
+      const marker = 'The report follows:';
+      const at = rawBody.indexOf(marker);
+      if (at >= 0) {
+        text = rawBody
+          .slice(at + marker.length)
+          .replace(/^\n/, '')
+          .split('\n')
+          .map((l) => (l.startsWith('  ') ? l.slice(2) : l))
+          .join('\n')
+          .trim();
+      }
+    }
+    if (text) out.push({ from, text: truncate(text, RESULT_MAX * 4) });
+  }
+  return out;
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -83,6 +134,8 @@ export class TranscriptParser {
   private open: ActionsEvent | null = null;
   private byToolUse = new Map<string, ActionsEvent>();
   private questions = new Map<string, QuestionEvent>();
+  /** Subagent id → its description (from the Agent tool result), to name a subagent's hand-back. */
+  private agentNames = new Map<string, string>();
   /** Queued prompts already shown, to skip a later identical user entry. */
   private queued: { text: string; at: number }[] = [];
   /** The last `!` command, for the output entry that follows it. */
@@ -107,6 +160,10 @@ export class TranscriptParser {
       const model = message.model;
       if (typeof model === 'string' && model && model !== '<synthetic>') this.model = model;
       return this.assistant(uuid, ts, message.content);
+    }
+    if (entry.type === 'user') {
+      const fromAgent = this.peer(uuid, ts, entry.origin, message.content);
+      if (fromAgent) return fromAgent;
     }
     if (entry.type === 'user' && entry.isMeta !== true) {
       if (entry.isCompactSummary === true) return [{ kind: 'notice', id: uuid, ts, code: 'compacted' }];
@@ -236,18 +293,40 @@ export class TranscriptParser {
       t.startsWith('<command-') ||
       t.startsWith('<local-command-') ||
       t.startsWith('<task-notification>') ||
-      t.startsWith('<system-reminder>') ||
-      // A teammate's or subagent's message (agent teams, SendMessage): Claude Code stores it as a user
-      // entry, but nobody typed it.
-      t.startsWith('Another Claude session sent a message:')
+      t.startsWith('<system-reminder>')
     ) {
       return [];
     }
+
     const text = unwrapPrompt(content);
     if (!text.trim()) return [];
     if (this.takeQueued(text, ts)) return [];
     this.open = null;
     return [{ kind: 'user', id: uuid, ts, text, origin: 'terminal' }];
+  }
+
+  /**
+   * A teammate's or subagent's message (agent teams, SendMessage, a subagent's hand-back): Claude Code
+   * stores it as a user entry (older versions without `isMeta`), but the user did not type it. Shown as the
+   * agent's, with only what it said. Newer versions add `origin: {kind: 'peer', name, handbackReportText}`.
+   * Null when the entry is not one.
+   */
+  private peer(uuid: string, ts: string, origin: unknown, content: unknown): ChatEvent[] | null {
+    const text = typeof content === 'string' ? content : promptParts(content).text;
+    const isPeer = isRecord(origin) && origin.kind === 'peer';
+    if (!isPeer && !text.trimStart().startsWith(AGENT_MESSAGE_PREFIX)) return null;
+    let msgs = agentMessages(text, this.agentNames);
+    if (isPeer) {
+      const name = typeof origin.name === 'string' && origin.name ? origin.name : undefined;
+      const report = typeof origin.handbackReportText === 'string' ? origin.handbackReportText.trim() : '';
+      if (msgs.length === 0 && report) msgs = [{ from: '', text: truncate(report, RESULT_MAX * 4) }];
+      if (msgs.length === 1) {
+        if (report) msgs[0].text = truncate(report, RESULT_MAX * 4);
+        if (name && !msgs[0].from) msgs[0].from = name;
+      }
+    }
+    this.open = null;
+    return msgs.map((m, i, all) => ({ kind: 'agent' as const, id: all.length > 1 ? `${uuid}#${i}` : uuid, ts, ...m }));
   }
 
   private toolResults(blocks: unknown[], toolUseResult?: unknown): ChatEvent[] {
@@ -271,7 +350,12 @@ export class TranscriptParser {
       const ev = this.byToolUse.get(block.tool_use_id);
       const item = ev?.items.find((i) => i.toolUseId === block.tool_use_id);
       if (!ev || !item) continue;
-      item.result = truncate(resultText(block.content), RESULT_MAX);
+      const full = resultText(block.content);
+      if (item.name === 'Agent' || item.name === 'Task') {
+        const id = /agentId:\s*([\w-]+)/.exec(full)?.[1];
+        if (id && item.summary) this.agentNames.set(id, item.summary);
+      }
+      item.result = truncate(full, RESULT_MAX);
       if (block.is_error === true) item.isError = true;
       this.byToolUse.delete(block.tool_use_id);
       out.set(ev.id, snapshot(ev));
