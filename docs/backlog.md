@@ -29,10 +29,38 @@ Cada sessão conectada mantém um processo Node de cerca de 60 MB esperando mens
 - O Chrome pode não trazer a janela para a frente (`window.focus()`).
 - O atalho do Linux supõe Chrome com o perfil "Default" (`StartupWMClass`).
 
-## Layout, ideias para o futuro
+## Melhorias do app (pedidas em 2026-11-24)
 
-- Comandos rápidos na caixa de mensagem.
-- Entrada por voz.
+### Rascunho por conversa
+
+Hoje, quando a pessoa escreve algo numa conversa, troca para outra e volta, o texto que não foi enviado se perde. O rascunho de cada conversa deve ser mantido até ser enviado ou apagado. Falta decidir se ele sobrevive a recarregar a página (localStorage) ou só à troca de conversa.
+
+### Anexos: arquivos, imagens e área de transferência
+
+Enviar arquivos e imagens pelo app, escolhendo o arquivo, arrastando para a caixa ou colando com Ctrl+V. Falta definir como o anexo chega à sessão: o hub grava o arquivo num diretório e a mensagem leva o caminho, já que o Claude lê imagens pelo caminho.
+
+### Comandos da sessão a partir do app
+
+Rodar comandos como `/compact` e `/reload-plugins` pelo app. Isto absorve a ideia anterior de "comandos rápidos na caixa de mensagem".
+
+- Limite conhecido: a mensagem do app chega à sessão como texto de hook, então um comando interno do Claude Code enviado assim não é executado. Foi o que aconteceu com `/compact` em 2026-11-24. É preciso outro caminho, por exemplo enviar as teclas ao terminal da sessão; investigar o que é viável no Linux, no Windows e no macOS.
+- Comandos que a sessão consegue rodar pelo Bash ou por skills podem funcionar já pelo caminho atual.
+
+### Menu de ações da conversa
+
+Trocar o lápis por um menu de três pontos verticais (⋮) com as ações da conversa:
+
+- Renomear (o que o lápis faz hoje).
+- Remover do app: some só do app; a sessão continua no terminal, e a pessoa pode seguir por lá.
+- Outras ações possíveis: escolher o fundo (ver o item abaixo), fixar a conversa no topo, desconectar a sessão.
+
+### Fundo por conversa
+
+Cada conversa pode ter um fundo próprio: cor sólida, degradê ou imagem. Serve para identificar a conversa rapidamente e não confundir uma com a outra. O fundo é escolhido pelo menu de ações; manter o contraste do texto legível nos temas claro e escuro.
+
+### Entrada por voz
+
+Ideia antiga, ainda sem detalhes.
 
 ## Ajustes do uso no dia a dia
 
