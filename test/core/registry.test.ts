@@ -7,6 +7,8 @@ import { setBusy, clearBusy, isBusy } from '../../src/core/busy.js';
 import { paths } from '../../src/core/paths.js';
 import { setWaiting, getWaiting, clearWaiting } from '../../src/core/waiting.js';
 import { tmpDir } from '../helpers/tmp.js';
+import { Readable } from 'node:stream';
+import { sessionAttachmentsDir, storeAttachment } from '../../src/core/attachments.js';
 
 beforeEach(() => {
   process.env.AI_CHAT_CENTER_HOME = path.join(tmpDir('acc-'), 'home');
@@ -159,6 +161,25 @@ describe('registry: pruning (audit RT13)', () => {
     expect(await pruneRegistrations(30 * day, now)).toEqual(['old']);
     expect(await getBackground('old')).toBeNull();
     expect(fs.readdirSync(paths().backgroundsDir)).toEqual([]);
+  });
+  it('also deletes the attachments of sessions that no longer exist and attachments older than 30 days', async () => {
+    const day = 86_400_000;
+    const now = Date.now();
+    await register({ sessionId: 'old', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    await register({ sessionId: 'alive', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    await markDisconnected('old', 'off');
+    await updateRegistration('old', { disconnectedAt: new Date(now - 31 * day).toISOString() });
+    const oldFile = await storeAttachment('old', 'a.txt', Readable.from([Buffer.from('a')]), 100);
+    const stale = await storeAttachment('alive', 'b.txt', Readable.from([Buffer.from('b')]), 100);
+    const fresh = await storeAttachment('alive', 'c.txt', Readable.from([Buffer.from('c')]), 100);
+    await storeAttachment('never', 'd.txt', Readable.from([Buffer.from('d')]), 100);
+    const t = new Date(now - 31 * day);
+    fs.utimesSync(stale, t, t);
+    expect(await pruneRegistrations(30 * day, now)).toEqual(['old']);
+    expect(fs.existsSync(oldFile)).toBe(false);
+    expect(fs.existsSync(stale)).toBe(false);
+    expect(fs.existsSync(fresh)).toBe(true);
+    expect(fs.existsSync(sessionAttachmentsDir('never'))).toBe(false);
   });
 });
 

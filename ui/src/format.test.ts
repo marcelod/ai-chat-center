@@ -18,6 +18,18 @@ describe('formatTime', () => {
   });
 });
 
+describe('previewText for a message with attachments', () => {
+  const s = (text: string, attachments: string[]) =>
+    ({
+      sessionId: 's', name: 'n', cwd: '/', state: 'idle', pendingAppMessageIds: [],
+      lastEvent: { kind: 'user', id: 'u', ts: at(14), text, origin: 'app', attachments },
+    }) as SessionView;
+  it('shows the text when there is one, else the file names', () => {
+    expect(previewText(s('hello', ['a.png']), t)).toBe('You: hello');
+    expect(previewText(s('', ['a.png', 'b.txt']), t)).toBe('You: 📎 a.png, b.txt');
+  });
+});
+
 describe('previewText for a pending question', () => {
   it('shows the question waiting text', () => {
     const s = { sessionId: 's', name: 'n', cwd: '/', state: 'waiting', waitingKind: 'question', pendingAppMessageIds: [] } as SessionView;

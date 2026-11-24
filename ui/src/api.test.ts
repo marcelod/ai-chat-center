@@ -255,6 +255,31 @@ describe('hub verification', () => {
     expect(await api.sendMessage('s1', 'hi')).toEqual({ id: 'm1' });
     expect(seen.map((r) => r.method)).toEqual(['GET', 'POST']);
   });
+  it('uploadAttachment POSTs the raw file with its type and URI-encoded name once the hub proved itself', async () => {
+    stub((c) => ({ ok: true, pid: 7, version: 'v', proof: proof(TOKEN, c, port(), 7, 'v') }), 200, { status: 200, body: { path: '/h/a/s1/x-shot é.png' } });
+    const api = await load();
+    const file = new File(['abc'], 'shot é.png', { type: 'image/png' });
+    expect(await api.uploadAttachment('s 1', file)).toBe('/h/a/s1/x-shot é.png');
+    const calls = (fetch as unknown as { mock: { calls: [string, RequestInit?][] } }).mock.calls;
+    const [url, init] = calls[calls.length - 1];
+    expect(url).toBe('/api/sessions/s%201/attachments');
+    expect(init?.method).toBe('POST');
+    expect(init?.body).toBe(file);
+    const h = init?.headers as Record<string, string>;
+    expect(h['Content-Type']).toBe('image/png');
+    expect(h['X-File-Name']).toBe(encodeURIComponent('shot é.png'));
+    expect(h.Authorization).toBe(`Bearer ${TOKEN}`);
+  });
+  it('uploadAttachment never POSTs to a server that cannot prove itself; a refusal carries status and code', async () => {
+    const seen = stub(() => ({ ok: true, pid: 7, version: 'v', proof: 'f'.repeat(64) }));
+    let api = await load();
+    await expect(api.uploadAttachment('s1', new File(['x'], 'a.txt'))).rejects.toMatchObject({ status: 401 });
+    expect(seen.some((r) => r.method === 'POST')).toBe(false);
+    window.history.replaceState(null, '', `/#token=${TOKEN}`);
+    stub((c) => ({ ok: true, pid: 7, version: 'v', proof: proof(TOKEN, c, port(), 7, 'v') }), 200, { status: 409, body: { code: 'session-disconnected' } });
+    api = await load();
+    await expect(api.uploadAttachment('s1', new File(['x'], 'a.txt'))).rejects.toMatchObject({ status: 409, code: 'session-disconnected' });
+  });
 });
 
 describe('background', () => {

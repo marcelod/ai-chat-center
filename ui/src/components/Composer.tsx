@@ -1,10 +1,35 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
+import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, withAttachments } from '@shared/attachments';
 import { useT } from '../i18n';
 import { loadDraft, saveDraft } from '../drafts';
-import { SendIcon } from './icons';
+import { PaperclipIcon, SendIcon } from './icons';
+import { PendingAttachments, type PendingFile } from './Attachments';
 
-type Props = { sessionId: string; name: string; disabled: boolean; blockedByQuestion?: boolean; onSend: (text: string) => Promise<void> };
+type Props = {
+  sessionId: string;
+  name: string;
+  disabled: boolean;
+  blockedByQuestion?: boolean;
+  onSend: (text: string) => Promise<void>;
+  /** Uploads one file to the hub and resolves to its absolute path. Without it, nothing can be attached. */
+  onUpload?: (file: File) => Promise<string>;
+};
 type Failure = { kind: 'disconnected' } | { kind: 'version'; direction: 'older' | 'newer' } | { kind: 'failed'; text: string };
+type AttachError = { kind: 'tooLarge'; name: string } | { kind: 'tooMany' } | { kind: 'upload' };
+
+let nextFileId = 0;
+const objectUrl = (f: File): string | undefined => {
+  if (!f.type.startsWith('image/') || typeof URL.createObjectURL !== 'function') return undefined;
+  try {
+    return URL.createObjectURL(f);
+  } catch {
+    return undefined;
+  }
+};
+const revoke = (p: PendingFile) => {
+  if (p.url && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(p.url);
+};
+const hasFiles = (dt: DataTransfer | null) => Boolean(dt && Array.from(dt.types ?? []).includes('Files'));
 
 /** The session runs another version of the plugin (audit R5-M1): `session-older-version` / `session-newer-version`. */
 const versionOf = (e: unknown): 'older' | 'newer' | null => {
@@ -22,12 +47,48 @@ export const PAD_PX = 12;
 export const MAX_LINES = 8;
 export const MAX_HEIGHT = MAX_LINES * LINE_PX + 2 * PAD_PX;
 
-export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuestion = false, onSend }: Props) {
+export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuestion = false, onSend, onUpload }: Props) {
   const t = useT();
   const disabled = sessionOff || blockedByQuestion;
   const [text, setText] = useState(() => loadDraft(sessionId));
   const [failure, setFailure] = useState<Failure | null>(null);
+  // Attachments live in memory only (not in the draft): they need not survive a reload.
+  const [files, setFiles] = useState<PendingFile[]>([]);
+  const [attachError, setAttachError] = useState<AttachError | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const filesRef = useRef(files);
+  filesRef.current = files;
+  // Thumbnails are object URLs: released when the composer goes away.
+  useEffect(() => () => filesRef.current.forEach(revoke), []);
+
+  const addFiles = (list: File[]) => {
+    if (!onUpload || disabled || uploading || list.length === 0) return;
+    let error: AttachError | null = null;
+    const room = MAX_ATTACHMENTS - filesRef.current.length;
+    const fit: File[] = [];
+    for (const f of list) {
+      if (f.size > MAX_ATTACHMENT_BYTES) error = { kind: 'tooLarge', name: f.name };
+      else if (fit.length >= room) error ??= { kind: 'tooMany' };
+      else fit.push(f);
+    }
+    setAttachError(error);
+    if (fit.length === 0) return;
+    const added = fit.map((file) => ({ id: `f${++nextFileId}`, file, url: objectUrl(file) }));
+    const next = [...filesRef.current, ...added];
+    filesRef.current = next;
+    setFiles(next);
+  };
+  const removeFile = (id: string) => {
+    const gone = filesRef.current.find((f) => f.id === id);
+    if (gone) revoke(gone);
+    const next = filesRef.current.filter((f) => f.id !== id);
+    filesRef.current = next;
+    setFiles(next);
+    setAttachError(null);
+  };
 
   // Grow with the content up to 8 lines, then scroll; shrinks back when the text is cleared.
   const resize = useCallback(() => {
@@ -92,22 +153,99 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
     }
   };
 
-  const submit = () => {
-    const body = text.trim();
-    if (!body || disabled) return;
+  const submit = async () => {
+    const typed = text.trim();
+    const batch = filesRef.current;
+    if ((!typed && batch.length === 0) || disabled || uploading) return;
+    if (batch.length === 0 || !onUpload) {
+      if (!typed) return;
+      setText('');
+      void deliver(typed);
+      return;
+    }
+    // Upload first; the text and the files stay in the box until every file is on the hub.
+    setUploading(true);
+    setAttachError(null);
+    setFailure(null);
+    const paths: string[] = [];
+    try {
+      for (const f of batch) paths.push(await onUpload(f.file));
+    } catch (e) {
+      if (!mounted.current) return; // the files are gone with the composer; the text is still the draft
+      setUploading(false);
+      if (statusOf(e) === 409) {
+        const direction = versionOf(e);
+        setFailure(direction ? { kind: 'version', direction } : { kind: 'disconnected' });
+      } else setAttachError({ kind: 'upload' });
+      return;
+    }
+    const body = withAttachments(typed, paths);
+    if (!mounted.current) {
+      // Switched chat during the upload: the message still goes to its session; its text is no draft anymore.
+      if (loadDraft(sessionId).trim() === typed) saveDraft(sessionId, '');
+      void onSend(body).catch(() => keepAsDraft(body));
+      return;
+    }
+    setUploading(false);
+    batch.forEach(revoke);
+    filesRef.current = [];
+    setFiles([]);
     setText('');
     void deliver(body);
+  };
+
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const pasted = Array.from(e.clipboardData?.files ?? []);
+    if (pasted.length === 0 || !onUpload) return;
+    e.preventDefault();
+    addFiles(pasted);
+  };
+  const canDrop = Boolean(onUpload) && !disabled && !uploading;
+  const onDragOver = (e: DragEvent<HTMLElement>) => {
+    if (!canDrop || !hasFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setDragging(true);
+  };
+  const onDrop = (e: DragEvent<HTMLElement>) => {
+    setDragging(false);
+    if (!canDrop || !hasFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    addFiles(Array.from(e.dataTransfer.files ?? []));
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      submit();
+      void submit();
     }
   };
 
   return (
-    <footer className="border-t border-line bg-surface px-4 py-3 md:px-12">
+    <footer
+      className={`border-t bg-surface px-4 py-3 md:px-12 ${dragging ? 'border-accent ring-2 ring-inset ring-accent/40' : 'border-line'}`}
+      onDragOver={onDragOver}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={onDrop}
+    >
+      {dragging && <p className="mb-2 text-sm font-semibold text-accent">{t('ui.composer.dropHere')}</p>}
+      {attachError && (
+        <p role="alert" className="mb-2 text-sm text-danger">
+          {attachError.kind === 'tooLarge'
+            ? t('ui.composer.attachTooLarge', { name: attachError.name })
+            : attachError.kind === 'tooMany'
+              ? t('ui.composer.attachTooMany', { max: MAX_ATTACHMENTS })
+              : t('ui.composer.attachFailed')}
+        </p>
+      )}
+      {uploading && (
+        <p role="status" className="mb-2 text-sm text-muted">
+          {t('ui.composer.uploading')}
+        </p>
+      )}
+      <PendingAttachments files={files} onRemove={removeFile} disabled={uploading} />
       {failure?.kind === 'disconnected' && (
         <p role="alert" className="mb-2 text-sm text-danger">
           {t('ui.composer.sendDisconnected')}
@@ -131,6 +269,31 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
         </p>
       )}
       <div className="flex items-end gap-2">
+        {onUpload && (
+          <>
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              hidden
+              tabIndex={-1}
+              onChange={(e) => {
+                addFiles(Array.from(e.target.files ?? []));
+                e.target.value = '';
+              }}
+            />
+            <button
+              type="button"
+              aria-label={t('ui.composer.attach')}
+              title={t('ui.composer.attach')}
+              disabled={disabled || uploading}
+              onClick={() => picker.current?.click()}
+              className="flex h-12 w-11 shrink-0 items-center justify-center rounded-xl text-muted hover:bg-field disabled:opacity-40"
+            >
+              <PaperclipIcon />
+            </button>
+          </>
+        )}
         <textarea
           ref={ref}
           rows={1}
@@ -139,6 +302,8 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
           disabled={disabled}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
+          readOnly={uploading}
           aria-label={t('ui.composer.placeholder', { name })}
           placeholder={blockedByQuestion ? t('ui.composer.answerPlaceholder') : disabled ? t('ui.composer.disconnectedPlaceholder') : t('ui.composer.placeholder', { name })}
           className="min-h-[46px] flex-1 resize-none rounded-xl border border-field-border bg-surface px-3.5 py-3 text-[15px] text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 disabled:bg-field"
@@ -146,8 +311,8 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
         <button
           type="button"
           aria-label={t('ui.composer.send')}
-          disabled={disabled || !text.trim()}
-          onClick={submit}
+          disabled={disabled || uploading || (!text.trim() && files.length === 0)}
+          onClick={() => void submit()}
           className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-contrast disabled:opacity-40"
         >
           <SendIcon />

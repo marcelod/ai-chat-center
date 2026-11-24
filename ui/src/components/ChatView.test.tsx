@@ -289,6 +289,36 @@ describe('ChatView', () => {
     expect(box).toHaveValue('second');
   });
 
+  it('a user message with attachments shows its file chips; one made only of files has no empty text', () => {
+    const { container } = setup({
+      events: [
+        { kind: 'user', id: 'f1', ts: ts(1), text: 'see these', origin: 'app', appMessageId: 'x1', attachments: ['shot.png', 'notes.txt'] },
+        { kind: 'user', id: 'f2', ts: ts(2), text: '', origin: 'app', appMessageId: 'x2', attachments: ['only.pdf'] },
+      ],
+    });
+    const [b1, b2] = Array.from(container.querySelectorAll('[data-bubble="user"]')) as HTMLElement[];
+    const list1 = within(b1).getByRole('list', { name: 'Attached files' });
+    expect(within(list1).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['shot.png', 'notes.txt']);
+    expect(within(b1).getByText('see these')).toBeInTheDocument();
+    expect(within(b2).getByRole('list', { name: 'Attached files' })).toHaveTextContent('only.pdf');
+    expect(b2.querySelector('p.whitespace-pre-wrap')).toBeNull();
+  });
+  it('queued and not-delivered messages show attachment lines as chips, not as text', () => {
+    const line = '[Attachment: /h/a/s1/0123456789abcdef-shot.png]';
+    const { container } = setup({
+      events: [],
+      pending: [
+        { id: 'q1', text: `queued one\n${line}`, ts: ts(1) },
+        { id: 'q2', text: `failed one\n${line}`, ts: ts(2), failed: true },
+      ],
+    });
+    for (const kind of ['queued', 'failed']) {
+      const b = container.querySelector(`[data-bubble="${kind}"]`) as HTMLElement;
+      expect(b.textContent).not.toContain('[Attachment:');
+      expect(within(b).getByRole('list', { name: 'Attached files' })).toHaveTextContent('shot.png');
+    }
+  });
+
   it('not-delivered item shows retry', async () => {
     const { container } = setup({ events: [], pending: [{ id: 'a1', text: 'lost', ts: ts(1), failed: true }] });
     expect(screen.getByText('not delivered')).toBeInTheDocument();
