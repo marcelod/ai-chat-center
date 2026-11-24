@@ -38,6 +38,9 @@ function paths() {
     backgroundFile: (sid) => (assertSessionId(sid), path.join(home, "backgrounds", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
     attachmentsDir: path.join(home, "attachments"),
+    usageFile: path.join(home, "usage.json"),
+    statuslineFile: path.join(home, "statusline.json"),
+    statuslineScript: path.join(home, "bin", "statusline.mjs"),
     logDir: path.join(home, "logs")
   };
 }
@@ -483,7 +486,7 @@ var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
 var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
 
 // src/core/version.ts
-var VERSION = "0.4.8";
+var VERSION = "0.4.9";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -599,6 +602,8 @@ function isCcCommand(prompt) {
   if (arg === "answers off") return "answers-off";
   if (arg === "window on") return "window-on";
   if (arg === "window off") return "window-off";
+  if (arg === "usage on") return "usage-on";
+  if (arg === "usage off") return "usage-off";
   return "unknown";
 }
 
@@ -627,6 +632,23 @@ async function queryLiveSessions(run = runClaudeAgentsJson) {
   } catch {
     return null;
   }
+}
+
+// src/core/meta.ts
+var MODE_RE = /^[a-zA-Z]{1,24}$/;
+async function readMeta(sid) {
+  const d = await readJson(paths().metaFile(sid));
+  return d && typeof d === "object" && !Array.isArray(d) ? d : {};
+}
+async function setField(sid, key, value, re) {
+  const file = paths().metaFile(sid);
+  if (typeof value !== "string" || !re.test(value)) return;
+  const meta = await readMeta(sid);
+  if (meta[key] === value) return;
+  await writeJsonAtomic(file, { ...meta, [key]: value });
+}
+async function setMode(sid, mode) {
+  await setField(sid, "mode", mode, MODE_RE);
 }
 
 // src/hooks/waiter.ts
@@ -748,6 +770,13 @@ async function runWaiter(event, input, opts = {}) {
   if (!stampedByThisCode(first)) {
     try {
       await updateRegistration(sid, codeStamp(), { ifConnectedAt: first.connectedAt });
+    } catch (e) {
+      logError(e);
+    }
+  }
+  if (event === "stop" && typeof input.permission_mode === "string") {
+    try {
+      await setMode(sid, input.permission_mode);
     } catch (e) {
       logError(e);
     }

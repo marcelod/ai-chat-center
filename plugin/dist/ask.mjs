@@ -38,6 +38,9 @@ function paths() {
     backgroundFile: (sid) => (assertSessionId(sid), path.join(home, "backgrounds", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
     attachmentsDir: path.join(home, "attachments"),
+    usageFile: path.join(home, "usage.json"),
+    statuslineFile: path.join(home, "statusline.json"),
+    statuslineScript: path.join(home, "bin", "statusline.mjs"),
     logDir: path.join(home, "logs")
   };
 }

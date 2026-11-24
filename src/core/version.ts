@@ -1,5 +1,5 @@
 /** Plugin version. Kept equal to plugin/.claude-plugin/plugin.json and package.json by test/core/version.test.ts. */
-export const VERSION = '0.4.8';
+export const VERSION = '0.4.9';
 
 /**
  * The hub <-> waiter message protocol (today: inbox messages signed `v2|sid|id|createdAt|text`). The hook and

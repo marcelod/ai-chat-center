@@ -2,8 +2,9 @@ import { createRequire as __acc_createRequire } from 'node:module';
 const require = __acc_createRequire(import.meta.url);
 
 // src/hooks/hook.ts
-import fs11 from "node:fs";
-import path12 from "node:path";
+import fs12 from "node:fs";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
+import path13 from "node:path";
 import crypto5 from "node:crypto";
 
 // src/core/paths.ts
@@ -39,6 +40,9 @@ function paths() {
     backgroundFile: (sid) => (assertSessionId(sid), path.join(home, "backgrounds", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
     attachmentsDir: path.join(home, "attachments"),
+    usageFile: path.join(home, "usage.json"),
+    statuslineFile: path.join(home, "statusline.json"),
+    statuslineScript: path.join(home, "bin", "statusline.mjs"),
     logDir: path.join(home, "logs")
   };
 }
@@ -268,7 +272,7 @@ var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
 var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
 
 // src/core/version.ts
-var VERSION = "0.4.8";
+var VERSION = "0.4.9";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -322,15 +326,109 @@ async function markDisconnected(sid, reason) {
 
 // src/core/meta.ts
 var EFFORT_RE = /^[a-z]{1,16}$/;
-async function getEffort(sid) {
+var MODE_RE = /^[a-zA-Z]{1,24}$/;
+async function readMeta(sid) {
   const d = await readJson(paths().metaFile(sid));
-  return d && typeof d.effort === "string" && EFFORT_RE.test(d.effort) ? d.effort : null;
+  return d && typeof d === "object" && !Array.isArray(d) ? d : {};
+}
+async function setField(sid, key, value2, re) {
+  const file = paths().metaFile(sid);
+  if (typeof value2 !== "string" || !re.test(value2)) return;
+  const meta = await readMeta(sid);
+  if (meta[key] === value2) return;
+  await writeJsonAtomic(file, { ...meta, [key]: value2 });
 }
 async function setEffort(sid, level) {
-  const file = paths().metaFile(sid);
-  if (typeof level !== "string" || !EFFORT_RE.test(level)) return;
-  if (await getEffort(sid) === level) return;
-  await writeJsonAtomic(file, { effort: level });
+  await setField(sid, "effort", level, EFFORT_RE);
+}
+async function setMode(sid, mode) {
+  await setField(sid, "mode", mode, MODE_RE);
+}
+
+// src/hooks/statusline.ts
+import fs4 from "node:fs";
+import path6 from "node:path";
+
+// src/core/statuslineState.ts
+async function readStatuslineState() {
+  const d = await readJson(paths().statuslineFile);
+  if (!d || typeof d !== "object" || !("original" in d)) return null;
+  const o = d.original;
+  return { original: o && typeof o === "object" && !Array.isArray(o) ? o : null };
+}
+
+// src/hooks/statusline.ts
+var settingsPath = (o) => o.settingsFile ?? path6.join(claudeConfigDir(), "settings.json");
+var quote = (a) => `"${a.replace(/\\/g, "/").replace(/(["`$])/g, "\\$1")}"`;
+function wrapperCommand(o) {
+  return `${quote(o.nodePath ?? process.execPath)} ${quote(paths().statuslineScript)}`;
+}
+function isOurs(sl) {
+  return !!sl && typeof sl === "object" && typeof sl.command === "string" && sl.command.includes(paths().statuslineScript.replace(/\\/g, "/"));
+}
+async function readSettings(file) {
+  let text;
+  try {
+    text = await fs4.promises.readFile(file, "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") return {};
+    throw e;
+  }
+  const d = JSON.parse(text);
+  if (!d || typeof d !== "object" || Array.isArray(d)) throw new Error(`${file} is not a JSON object`);
+  return d;
+}
+async function writeSettings(file, data) {
+  let mode = null;
+  try {
+    mode = (await fs4.promises.stat(file)).mode & 511;
+  } catch {
+  }
+  await writeJsonAtomic(file, data);
+  if (mode !== null) await fs4.promises.chmod(file, mode).catch(() => {
+  });
+}
+async function refreshWrapper(o) {
+  const dest = paths().statuslineScript;
+  const src = await fs4.promises.readFile(o.source);
+  const cur = await fs4.promises.readFile(dest).catch(() => null);
+  if (cur && cur.equals(src)) return;
+  await fs4.promises.mkdir(path6.dirname(dest), { recursive: true, mode: 448 });
+  const tmp = `${dest}.${process.pid}.tmp`;
+  await fs4.promises.writeFile(tmp, src, { mode: 384 });
+  await fs4.promises.rename(tmp, dest);
+}
+async function installStatusline(o) {
+  const file = settingsPath(o);
+  const settings = await readSettings(file);
+  if (settings === null) return "failed";
+  await refreshWrapper(o);
+  const current = settings.statusLine;
+  if (isOurs(current)) {
+    const command = wrapperCommand(o);
+    if (current.command !== command) await writeSettings(file, { ...settings, statusLine: { ...current, command } });
+    return "refreshed";
+  }
+  const original = current && typeof current === "object" ? current : null;
+  await writeJsonAtomic(paths().statuslineFile, { original });
+  const statusLine = { type: "command", command: wrapperCommand(o) };
+  if (original && original.padding !== void 0) statusLine.padding = original.padding;
+  await writeSettings(file, { ...settings, statusLine });
+  return "installed";
+}
+async function removeStatusline(o) {
+  const file = settingsPath(o);
+  const settings = await readSettings(file);
+  const state = await readStatuslineState();
+  const current = settings?.statusLine;
+  if (!isOurs(current)) {
+    await fs4.promises.rm(paths().statuslineFile, { force: true });
+    return state ? "changed-since" : "not-installed";
+  }
+  const { statusLine: _ours, ...rest } = settings;
+  await writeSettings(file, state?.original ? { ...rest, statusLine: state.original } : rest);
+  await fs4.promises.rm(paths().statuslineFile, { force: true });
+  return "restored";
 }
 
 // src/core/protocol.ts
@@ -360,10 +458,10 @@ function promptOrigin(prompt, key) {
 
 // src/hooks/ensureHub.ts
 import crypto4 from "node:crypto";
-import fs4 from "node:fs";
+import fs5 from "node:fs";
 import http from "node:http";
 import os3 from "node:os";
-import path6 from "node:path";
+import path7 from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -427,13 +525,13 @@ function hubSpawnOptions() {
   return { detached: true, stdio: "ignore", windowsHide: true, cwd: os3.homedir() };
 }
 function defaultSpawnHub() {
-  const hubPath = path6.join(path6.dirname(fileURLToPath(import.meta.url)), "hub.mjs");
+  const hubPath = path7.join(path7.dirname(fileURLToPath(import.meta.url)), "hub.mjs");
   spawn(process.execPath, [hubPath], hubSpawnOptions()).unref();
 }
 function readHub() {
   try {
-    const { port, pid } = JSON.parse(fs4.readFileSync(paths().hubJson, "utf8"));
-    const token = fs4.readFileSync(paths().token, "utf8").trim();
+    const { port, pid } = JSON.parse(fs5.readFileSync(paths().hubJson, "utf8"));
+    const token = fs5.readFileSync(paths().token, "utf8").trim();
     if (typeof port !== "number" || !token) return null;
     return { port, token, pid: typeof pid === "number" ? pid : null };
   } catch {
@@ -545,14 +643,18 @@ var en_default = {
   hook: {
     ready: "AI Chat Center is ready: {url}",
     hubFailed: "AI Chat Center: the hub failed to start. See {log}",
-    unknownArg: "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on or /ai-chat-center:cc window off.",
+    unknownArg: "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on, /ai-chat-center:cc window off, /ai-chat-center:cc usage on or /ai-chat-center:cc usage off.",
     answersOn: "AI Chat Center: you can now answer multiple-choice questions from the app, including confirmations. To turn off: /ai-chat-center:cc answers off",
     answersOff: "AI Chat Center: multiple-choice questions are answered only in the terminal again.",
     windowOn: "AI Chat Center: the app will open in its own window when you connect. To turn off: /ai-chat-center:cc window off",
     windowOff: "AI Chat Center: the app will no longer open in its own window.",
     windowNoBrowser: "No Chrome, Chromium or Edge found: the link is still shown.",
     windowLauncher: "The \u201CAI Chat Center\u201D shortcut was added to your apps (the app menu on Linux, the Start menu on Windows, Applications in your home folder on macOS): it opens the app (and starts the hub if needed).",
-    launcherComment: "Follow and answer your Claude Code sessions"
+    launcherComment: "Follow and answer your Claude Code sessions",
+    usageOn: "AI Chat Center: the app now shows the 5-hour usage. Your status line stays the same (it runs through a small AI Chat Center wrapper). To undo: /ai-chat-center:cc usage off",
+    usageOff: "AI Chat Center: your status line is back as it was; the app no longer receives the 5-hour usage.",
+    usageOffChanged: "AI Chat Center: your status line was changed since usage on, so it was left as it is; the app no longer receives the 5-hour usage.",
+    usageFailed: "AI Chat Center: could not change the status line in settings.json. See {log}"
   },
   ui: {
     rename: {
@@ -651,6 +753,15 @@ var en_default = {
       branch: "Branch",
       model: "Model",
       effort: "Reasoning level",
+      mode: "Permission mode",
+      modes: {
+        default: "default",
+        acceptEdits: "accept edits",
+        plan: "plan mode",
+        auto: "auto mode",
+        bypassPermissions: "bypass permissions",
+        dontAsk: "don't ask"
+      },
       loading: "Loading messages\u2026",
       waitingBanner: "Claude is waiting for you to approve an action in the terminal",
       waitingInputBanner: "Claude is waiting for your answer in the terminal",
@@ -688,6 +799,20 @@ var en_default = {
       uploading: "Uploading attachments\u2026",
       dropHere: "Drop files to attach them"
     },
+    usage: {
+      label: "5-hour usage",
+      fiveHour: "5-hour window",
+      sevenDay: "7-day window",
+      summary: "{pct}% \xB7 resets in {left}",
+      used: "{pct}% used",
+      resetsAt: "Resets at {time} (in {left})",
+      resetsOn: "Resets {time}",
+      restarted: "Window restarted",
+      updated: "Updated at {time} (from a session's status line)",
+      hours: "{h}h{m}",
+      minutes: "{m} min",
+      hint: "5-hour usage: turn it on with /ai-chat-center:cc usage on"
+    },
     notifications: {
       label: "Browser notifications",
       enable: "Enable notifications",
@@ -707,14 +832,18 @@ var pt_BR_default = {
   hook: {
     ready: "AI Chat Center pronto: {url}",
     hubFailed: "AI Chat Center: o hub n\xE3o iniciou. Veja {log}",
-    unknownArg: "AI Chat Center: argumento desconhecido. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on ou /ai-chat-center:cc window off.",
+    unknownArg: "AI Chat Center: argumento desconhecido. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on, /ai-chat-center:cc window off, /ai-chat-center:cc usage on ou /ai-chat-center:cc usage off.",
     answersOn: "AI Chat Center: agora voc\xEA pode responder pelo app as perguntas de m\xFAltipla escolha, inclusive confirma\xE7\xF5es. Para desligar: /ai-chat-center:cc answers off",
     answersOff: "AI Chat Center: perguntas de m\xFAltipla escolha voltam a ser respondidas s\xF3 no terminal.",
     windowOn: "AI Chat Center: o app vai abrir em janela pr\xF3pria ao conectar. Para desligar: /ai-chat-center:cc window off",
     windowOff: "AI Chat Center: o app n\xE3o abre mais em janela pr\xF3pria.",
     windowNoBrowser: "Nenhum Chrome, Chromium ou Edge encontrado: o link continua sendo mostrado.",
     windowLauncher: "O atalho \u201CAI Chat Center\u201D foi adicionado aos seus aplicativos (menu de aplicativos no Linux, menu Iniciar no Windows, Aplicativos da sua pasta pessoal no macOS): ele abre o app (e inicia o hub, se preciso).",
-    launcherComment: "Acompanhe e responda suas sess\xF5es do Claude Code"
+    launcherComment: "Acompanhe e responda suas sess\xF5es do Claude Code",
+    usageOn: "AI Chat Center: o app agora mostra o uso do per\xEDodo de 5 horas. Sua status line continua igual (ela passa por um pequeno wrapper do AI Chat Center). Para desfazer: /ai-chat-center:cc usage off",
+    usageOff: "AI Chat Center: sua status line voltou a ser a de antes; o app n\xE3o recebe mais o uso do per\xEDodo de 5 horas.",
+    usageOffChanged: "AI Chat Center: sua status line foi alterada depois do usage on, ent\xE3o ficou como est\xE1; o app n\xE3o recebe mais o uso do per\xEDodo de 5 horas.",
+    usageFailed: "AI Chat Center: n\xE3o foi poss\xEDvel alterar a status line no settings.json. Veja {log}"
   },
   ui: {
     rename: {
@@ -813,6 +942,15 @@ var pt_BR_default = {
       branch: "Branch",
       model: "Modelo",
       effort: "N\xEDvel de racioc\xEDnio",
+      mode: "Modo de permiss\xE3o",
+      modes: {
+        default: "padr\xE3o",
+        acceptEdits: "aceitar edi\xE7\xF5es",
+        plan: "planejamento",
+        auto: "auto mode",
+        bypassPermissions: "sem permiss\xF5es",
+        dontAsk: "n\xE3o perguntar"
+      },
       loading: "Carregando mensagens\u2026",
       waitingBanner: "O Claude est\xE1 esperando voc\xEA aprovar uma a\xE7\xE3o no terminal",
       waitingInputBanner: "O Claude est\xE1 esperando sua resposta no terminal",
@@ -849,6 +987,20 @@ var pt_BR_default = {
       attachFailed: "N\xE3o foi poss\xEDvel enviar os anexos. Tente de novo.",
       uploading: "Enviando anexos\u2026",
       dropHere: "Solte os arquivos para anex\xE1-los"
+    },
+    usage: {
+      label: "Uso de 5 horas",
+      fiveHour: "Per\xEDodo de 5 horas",
+      sevenDay: "Per\xEDodo de 7 dias",
+      summary: "{pct}% \xB7 reinicia em {left}",
+      used: "{pct}% usado",
+      resetsAt: "Reinicia \xE0s {time} (em {left})",
+      resetsOn: "Reinicia {time}",
+      restarted: "Per\xEDodo reiniciado",
+      updated: "Atualizado \xE0s {time} (pela status line de uma sess\xE3o)",
+      hours: "{h}h{m}",
+      minutes: "{m} min",
+      hint: "Uso de 5 horas: ative com /ai-chat-center:cc usage on"
     },
     notifications: {
       label: "Notifica\xE7\xF5es do navegador",
@@ -892,6 +1044,8 @@ function isCcCommand(prompt) {
   if (arg === "answers off") return "answers-off";
   if (arg === "window on") return "window-on";
   if (arg === "window off") return "window-off";
+  if (arg === "usage on") return "usage-on";
+  if (arg === "usage off") return "usage-off";
   return "unknown";
 }
 
@@ -929,7 +1083,7 @@ async function resolveClaudePid(sessionId, opts = {}) {
 }
 
 // src/hooks/parentClaude.ts
-import fs5 from "node:fs";
+import fs6 from "node:fs";
 import { execFileSync } from "node:child_process";
 function isClaudeArgv(argv) {
   const base = (s) => s.split(/[\\/]/).pop() ?? "";
@@ -944,7 +1098,7 @@ function parentClaudePid(ppid = process.ppid, platform = process.platform, readA
 function readProcessArgv(pid, platform) {
   try {
     if (platform === "linux") {
-      return fs5.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
+      return fs6.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
     }
     const out = execFileSync("ps", ["-o", "args=", "-p", String(pid)], { encoding: "utf8", timeout: 2e3, stdio: ["ignore", "pipe", "ignore"] });
     return out.trim().split(/\s+/).filter(Boolean);
@@ -954,8 +1108,8 @@ function readProcessArgv(pid, platform) {
 }
 
 // src/hooks/openWindow.ts
-import fs6 from "node:fs";
-import path7 from "node:path";
+import fs7 from "node:fs";
+import path8 from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 var LINUX_NAMES = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge", "microsoft-edge-stable"];
 var MAC_APPS = [
@@ -969,11 +1123,11 @@ var WIN_EXES = [
 ];
 var WIN_BASES = ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"];
 function isExecutableFile(p, platform = process.platform, checks = {}) {
-  const stat = checks.stat ?? fs6.statSync;
-  const access = checks.access ?? fs6.accessSync;
+  const stat = checks.stat ?? fs7.statSync;
+  const access = checks.access ?? fs7.accessSync;
   try {
     if (!stat(p).isFile()) return false;
-    if (platform !== "win32") access(p, fs6.constants.X_OK);
+    if (platform !== "win32") access(p, fs7.constants.X_OK);
     return true;
   } catch {
     return false;
@@ -990,11 +1144,11 @@ function findBrowser(env = process.env, platform = process.platform, exists = (p
   let candidates;
   if (platform === "darwin") candidates = MAC_APPS;
   else if (platform === "win32") {
-    const bases = WIN_BASES.map((k) => env[k]).filter((b) => !!b && path7.win32.isAbsolute(b));
-    candidates = WIN_EXES.flatMap((exe) => bases.map((b) => path7.win32.join(b, ...exe)));
+    const bases = WIN_BASES.map((k) => env[k]).filter((b) => !!b && path8.win32.isAbsolute(b));
+    candidates = WIN_EXES.flatMap((exe) => bases.map((b) => path8.win32.join(b, ...exe)));
   } else {
-    const dirs = (env.PATH ?? "").split(path7.posix.delimiter).filter((d) => path7.posix.isAbsolute(d));
-    candidates = LINUX_NAMES.flatMap((n) => dirs.map((d) => path7.posix.join(d, n)));
+    const dirs = (env.PATH ?? "").split(path8.posix.delimiter).filter((d) => path8.posix.isAbsolute(d));
+    candidates = LINUX_NAMES.flatMap((n) => dirs.map((d) => path8.posix.join(d, n)));
   }
   return candidates.find(ok) ?? null;
 }
@@ -1043,28 +1197,28 @@ async function launchAppWindow(hubUrl, deps = {}, sessionId) {
 }
 
 // src/hooks/launcher.ts
-import fs10 from "node:fs";
+import fs11 from "node:fs";
 import os5 from "node:os";
-import path11 from "node:path";
+import path12 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // src/hooks/launcherFiles.ts
-import fs7 from "node:fs";
-import path8 from "node:path";
+import fs8 from "node:fs";
+import path9 from "node:path";
 var PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 function writeIfChanged(file, data, mode = 420) {
   try {
-    if (fs7.readFileSync(file).equals(data)) {
-      if (process.platform !== "win32" && (fs7.statSync(file).mode & 511) !== mode) fs7.chmodSync(file, mode);
+    if (fs8.readFileSync(file).equals(data)) {
+      if (process.platform !== "win32" && (fs8.statSync(file).mode & 511) !== mode) fs8.chmodSync(file, mode);
       return;
     }
   } catch {
   }
-  fs7.mkdirSync(path8.dirname(file), { recursive: true });
+  fs8.mkdirSync(path9.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs7.writeFileSync(tmp, data, { mode });
-  if (process.platform !== "win32") fs7.chmodSync(tmp, mode);
-  fs7.renameSync(tmp, file);
+  fs8.writeFileSync(tmp, data, { mode });
+  if (process.platform !== "win32") fs8.chmodSync(tmp, mode);
+  fs8.renameSync(tmp, file);
 }
 function pngSize(png) {
   if (png.length < 24 || !png.subarray(0, 8).equals(PNG_SIGNATURE) || png.toString("latin1", 12, 16) !== "IHDR") {
@@ -1101,17 +1255,17 @@ function pngToIcns(png) {
 }
 
 // src/hooks/launcherMac.ts
-import fs8 from "node:fs";
-import path9 from "node:path";
+import fs9 from "node:fs";
+import path10 from "node:path";
 var BUNDLE_ID = "com.ai-chat-center.launcher";
 var EXECUTABLE = "ai-chat-center";
 function macLauncherPaths(home) {
-  const app = path9.join(home, "Applications", "AI Chat Center.app");
+  const app = path10.join(home, "Applications", "AI Chat Center.app");
   return {
     app,
-    plist: path9.join(app, "Contents", "Info.plist"),
-    exec: path9.join(app, "Contents", "MacOS", EXECUTABLE),
-    icon: path9.join(app, "Contents", "Resources", "icon.icns")
+    plist: path10.join(app, "Contents", "Info.plist"),
+    exec: path10.join(app, "Contents", "MacOS", EXECUTABLE),
+    icon: path10.join(app, "Contents", "Resources", "icon.icns")
   };
 }
 var shQuote = (s) => `'${s.replace(/'/g, "'\\''")}'`;
@@ -1142,20 +1296,20 @@ function infoPlist() {
     ""
   ].join("\n");
 }
-var OUR_DIRS = /* @__PURE__ */ new Set(["Contents", path9.join("Contents", "MacOS"), path9.join("Contents", "Resources")]);
-var OUR_EXEC = path9.join("Contents", "MacOS", EXECUTABLE);
-var OUR_ICON = path9.join("Contents", "Resources", "icon.icns");
+var OUR_DIRS = /* @__PURE__ */ new Set(["Contents", path10.join("Contents", "MacOS"), path10.join("Contents", "Resources")]);
+var OUR_EXEC = path10.join("Contents", "MacOS", EXECUTABLE);
+var OUR_ICON = path10.join("Contents", "Resources", "icon.icns");
 function onlyOurFiles(app) {
   const walk = (rel) => {
-    for (const e of fs8.readdirSync(path9.join(app, rel), { withFileTypes: true })) {
-      const r = rel ? path9.join(rel, e.name) : e.name;
+    for (const e of fs9.readdirSync(path10.join(app, rel), { withFileTypes: true })) {
+      const r = rel ? path10.join(rel, e.name) : e.name;
       if (e.isDirectory()) {
         if (!OUR_DIRS.has(r) || !walk(r)) return false;
       } else if (!e.isFile()) {
         return false;
       } else if (r === OUR_EXEC) {
-        const st = fs8.statSync(path9.join(app, r));
-        if (st.size > 64 * 1024 || !fs8.readFileSync(path9.join(app, r), "utf8").startsWith("#!/bin/sh\nexec ")) return false;
+        const st = fs9.statSync(path10.join(app, r));
+        if (st.size > 64 * 1024 || !fs9.readFileSync(path10.join(app, r), "utf8").startsWith("#!/bin/sh\nexec ")) return false;
       } else if (r !== OUR_ICON) {
         return false;
       }
@@ -1163,16 +1317,16 @@ function onlyOurFiles(app) {
     return true;
   };
   try {
-    return fs8.lstatSync(app).isDirectory() && walk("");
+    return fs9.lstatSync(app).isDirectory() && walk("");
   } catch {
     return false;
   }
 }
 function ownership(p) {
-  if (!fs8.existsSync(p.app)) return "none";
+  if (!fs9.existsSync(p.app)) return "none";
   let plist;
   try {
-    plist = fs8.readFileSync(p.plist, "utf8");
+    plist = fs9.readFileSync(p.plist, "utf8");
   } catch (e) {
     const missing = e.code === "ENOENT" && !lexists(p.plist);
     return missing && onlyOurFiles(p.app) ? "partial" : "foreign";
@@ -1181,7 +1335,7 @@ function ownership(p) {
 }
 function lexists(f) {
   try {
-    fs8.lstatSync(f);
+    fs9.lstatSync(f);
     return true;
   } catch {
     return false;
@@ -1191,30 +1345,30 @@ function installMacLauncher(o) {
   const p = macLauncherPaths(o.home);
   if (ownership(p) === "foreign") throw new Error(`launcher: ${p.app} exists and is not ours; left alone`);
   writeIfChanged(p.plist, Buffer.from(infoPlist(), "utf8"));
-  writeIfChanged(p.exec, Buffer.from(launchScript(o.node, path9.join(o.distDir, "open.mjs")), "utf8"), 493);
-  writeIfChanged(p.icon, pngToIcns(fs8.readFileSync(path9.join(o.distDir, "ui", "icons", "icon-512.png"))));
+  writeIfChanged(p.exec, Buffer.from(launchScript(o.node, path10.join(o.distDir, "open.mjs")), "utf8"), 493);
+  writeIfChanged(p.icon, pngToIcns(fs9.readFileSync(path10.join(o.distDir, "ui", "icons", "icon-512.png"))));
   return true;
 }
 function removeMacLauncher(home) {
   const p = macLauncherPaths(home);
   const owner = ownership(p);
-  if (owner === "ours" || owner === "partial") fs8.rmSync(p.app, { recursive: true, force: true });
+  if (owner === "ours" || owner === "partial") fs9.rmSync(p.app, { recursive: true, force: true });
 }
 
 // src/hooks/launcherWin.ts
 import { spawnSync } from "node:child_process";
-import fs9 from "node:fs";
-import path10 from "node:path";
+import fs10 from "node:fs";
+import path11 from "node:path";
 function winLauncherPaths(env, home) {
-  const roaming = env.APPDATA && path10.isAbsolute(env.APPDATA) ? env.APPDATA : path10.join(home, "AppData", "Roaming");
-  const local = env.LOCALAPPDATA && path10.isAbsolute(env.LOCALAPPDATA) ? env.LOCALAPPDATA : path10.join(home, "AppData", "Local");
-  const dir = path10.join(local, "ai-chat-center");
+  const roaming = env.APPDATA && path11.isAbsolute(env.APPDATA) ? env.APPDATA : path11.join(home, "AppData", "Roaming");
+  const local = env.LOCALAPPDATA && path11.isAbsolute(env.LOCALAPPDATA) ? env.LOCALAPPDATA : path11.join(home, "AppData", "Local");
+  const dir = path11.join(local, "ai-chat-center");
   return {
-    shortcut: path10.join(roaming, "Microsoft", "Windows", "Start Menu", "Programs", "AI Chat Center.lnk"),
+    shortcut: path11.join(roaming, "Microsoft", "Windows", "Start Menu", "Programs", "AI Chat Center.lnk"),
     dir,
-    icon: path10.join(dir, "ai-chat-center.ico"),
-    stamp: path10.join(dir, "launcher.json"),
-    failStamp: path10.join(dir, "launcher-failed.json")
+    icon: path11.join(dir, "ai-chat-center.ico"),
+    stamp: path11.join(dir, "launcher.json"),
+    failStamp: path11.join(dir, "launcher-failed.json")
   };
 }
 var SHORTCUT_SCRIPT = [
@@ -1231,7 +1385,7 @@ var SHORTCUT_SCRIPT = [
 var RETRY_AFTER_FAILURE_MS = 24 * 36e5;
 function lastFailure(file, stamp) {
   try {
-    const f = JSON.parse(fs9.readFileSync(file, "utf8"));
+    const f = JSON.parse(fs10.readFileSync(file, "utf8"));
     return f.stamp === stamp && typeof f.at === "number" ? f.at : null;
   } catch {
     return null;
@@ -1240,16 +1394,16 @@ function lastFailure(file, stamp) {
 var defaultSpawn = (cmd, args, opts) => spawnSync(cmd, args, opts);
 function powershell(env) {
   const root = env.SystemRoot ?? env.SYSTEMROOT;
-  return root ? path10.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe";
+  return root ? path11.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe";
 }
 function installWinLauncher(o) {
   const p = winLauncherPaths(o.env, o.home);
-  writeIfChanged(p.icon, pngToIco(fs9.readFileSync(path10.join(o.distDir, "ui", "icons", "icon-256.png"))));
-  const openScript = path10.join(o.distDir, "open.mjs");
+  writeIfChanged(p.icon, pngToIco(fs10.readFileSync(path11.join(o.distDir, "ui", "icons", "icon-256.png"))));
+  const openScript = path11.join(o.distDir, "open.mjs");
   const stamp = JSON.stringify({ node: o.node, openScript, icon: p.icon, comment: o.comment });
   let same = false;
   try {
-    same = fs9.existsSync(p.shortcut) && fs9.readFileSync(p.stamp, "utf8") === stamp;
+    same = fs10.existsSync(p.shortcut) && fs10.readFileSync(p.stamp, "utf8") === stamp;
   } catch {
   }
   if (same) return true;
@@ -1258,7 +1412,7 @@ function installWinLauncher(o) {
   if (failedAt !== null && now - failedAt >= 0 && now - failedAt < RETRY_AFTER_FAILURE_MS) {
     throw new Error(`launcher: Start menu shortcut skipped: PowerShell failed at ${new Date(failedAt).toISOString()}; next try 24 h later or when the plugin or Node path changes`);
   }
-  fs9.mkdirSync(path10.dirname(p.shortcut), { recursive: true });
+  fs10.mkdirSync(path11.dirname(p.shortcut), { recursive: true });
   const r = (o.spawn ?? defaultSpawn)(
     powershell(o.env),
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", SHORTCUT_SCRIPT],
@@ -1283,14 +1437,14 @@ function installWinLauncher(o) {
     throw new Error(`launcher: PowerShell could not create the Start menu shortcut (${r.error?.message ?? `exit ${r.status}`})`);
   }
   writeIfChanged(p.stamp, Buffer.from(stamp, "utf8"));
-  fs9.rmSync(p.failStamp, { force: true });
+  fs10.rmSync(p.failStamp, { force: true });
   return true;
 }
 function removeWinLauncher(env, home) {
   const p = winLauncherPaths(env, home);
-  for (const f of [p.shortcut, p.icon, p.stamp, p.failStamp]) fs9.rmSync(f, { force: true });
+  for (const f of [p.shortcut, p.icon, p.stamp, p.failStamp]) fs10.rmSync(f, { force: true });
   try {
-    fs9.rmdirSync(p.dir);
+    fs10.rmdirSync(p.dir);
   } catch {
   }
 }
@@ -1299,10 +1453,10 @@ function removeWinLauncher(env, home) {
 var DESKTOP_ID = "ai-chat-center";
 var APP_WM_CLASS = "chrome-127.0.0.1__-Default";
 function launcherPaths(env = process.env, home = os5.homedir()) {
-  const data = env.XDG_DATA_HOME && path11.isAbsolute(env.XDG_DATA_HOME) ? env.XDG_DATA_HOME : path11.join(home, ".local", "share");
+  const data = env.XDG_DATA_HOME && path12.isAbsolute(env.XDG_DATA_HOME) ? env.XDG_DATA_HOME : path12.join(home, ".local", "share");
   return {
-    desktopFile: path11.join(data, "applications", `${DESKTOP_ID}.desktop`),
-    iconFile: path11.join(data, "icons", "hicolor", "512x512", "apps", `${DESKTOP_ID}.png`)
+    desktopFile: path12.join(data, "applications", `${DESKTOP_ID}.desktop`),
+    iconFile: path12.join(data, "icons", "hicolor", "512x512", "apps", `${DESKTOP_ID}.png`)
   };
 }
 function quoteExecArg(a) {
@@ -1325,7 +1479,7 @@ function desktopEntry(o) {
     ""
   ].join("\n");
 }
-var defaultDist = () => path11.dirname(fileURLToPath2(import.meta.url));
+var defaultDist = () => path12.dirname(fileURLToPath2(import.meta.url));
 var DEFAULT_COMMENT = "Follow and answer your Claude Code sessions";
 function installLauncher(o = {}) {
   const platform = o.platform ?? process.platform;
@@ -1338,8 +1492,8 @@ function installLauncher(o = {}) {
   if (platform === "darwin") return installMacLauncher({ home, node, distDir });
   if (platform !== "linux") return false;
   const p = launcherPaths(env, home);
-  writeIfChanged(p.iconFile, fs10.readFileSync(path11.join(distDir, "ui", "icons", "icon-512.png")));
-  const entry = desktopEntry({ node, openScript: path11.join(distDir, "open.mjs"), icon: p.iconFile, comment });
+  writeIfChanged(p.iconFile, fs11.readFileSync(path12.join(distDir, "ui", "icons", "icon-512.png")));
+  const entry = desktopEntry({ node, openScript: path12.join(distDir, "open.mjs"), icon: p.iconFile, comment });
   writeIfChanged(p.desktopFile, Buffer.from(entry, "utf8"));
   return true;
 }
@@ -1351,14 +1505,17 @@ function removeLauncher(o = {}) {
   if (platform === "darwin") return removeMacLauncher(home);
   if (platform !== "linux") return;
   const p = launcherPaths(env, home);
-  for (const f of [p.desktopFile, p.iconFile]) fs10.rmSync(f, { force: true });
+  for (const f of [p.desktopFile, p.iconFile]) fs11.rmSync(f, { force: true });
 }
 
 // src/hooks/hook.ts
 var MAX_PREVIOUS_KEYS = 20;
-var UNKNOWN_ARG = "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on or /ai-chat-center:cc window off.";
+var UNKNOWN_ARG = "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on, /ai-chat-center:cc window off, /ai-chat-center:cc usage on or /ai-chat-center:cc usage off.";
 var WINDOW_ON = "AI Chat Center: opening the app in its own window is ON";
 var WINDOW_OFF = "AI Chat Center: opening the app in its own window is OFF";
+var USAGE_ON = "AI Chat Center: showing the 5-hour usage in the app is ON";
+var USAGE_OFF = "AI Chat Center: showing the 5-hour usage in the app is OFF";
+var USAGE_FAILED = "AI Chat Center: the status line could not be changed";
 var ANSWERS_ON = "AI Chat Center: answering questions from the app is ON";
 var ANSWERS_OFF = "AI Chat Center: answering questions from the app is OFF";
 var CONNECTED = "AI Chat Center: connected";
@@ -1373,7 +1530,7 @@ var output = (context, systemMessage) => ({
 async function tightenHome() {
   try {
     await ensureDir(paths().home);
-    await fs11.promises.chmod(paths().home, DIR_MODE);
+    await fs12.promises.chmod(paths().home, DIR_MODE);
   } catch {
   }
 }
@@ -1400,8 +1557,9 @@ async function connect(input, resolve, ctx) {
   await setBusy(sid);
   await clearWaiting(sid);
   await clearTurnOrigin(sid);
-  await fs11.promises.rm(paths().questionsDir(sid), { recursive: true, force: true });
+  await fs12.promises.rm(paths().questionsDir(sid), { recursive: true, force: true });
   const { language, openWindow } = await loadConfig();
+  await refreshStatusline(ctx);
   let status;
   let shown;
   const notices = [];
@@ -1419,13 +1577,36 @@ async function connect(input, resolve, ctx) {
     }
   } catch (e) {
     logError(e);
-    const log = path12.join(paths().logDir, "hook.log");
+    const log = path13.join(paths().logDir, "hook.log");
     status = `AI Chat Center: the hub failed to start. See ${log}`;
     shown = t(language, "hook.hubFailed", { log });
   }
   const lines = [status, `AI Chat Center key: ${reg.key}`, ...notices];
   if (pid === null) lines.push(PID_UNKNOWN);
   return output(lines.join("\n"), [shown, ...notices].join("\n"));
+}
+async function usageCommand(on, ctx) {
+  const { language } = await loadConfig();
+  try {
+    if (on) {
+      const r2 = await (ctx.statusline?.install() ?? Promise.resolve("installed"));
+      if (r2 === "failed") throw new Error("status line install failed");
+      return output(USAGE_ON, t(language, "hook.usageOn"));
+    }
+    const r = await (ctx.statusline?.remove() ?? Promise.resolve("restored"));
+    return output(USAGE_OFF, t(language, r === "changed-since" ? "hook.usageOffChanged" : "hook.usageOff"));
+  } catch (e) {
+    logError(e);
+    const log = path13.join(paths().logDir, "hook.log");
+    return output(`${USAGE_FAILED}. See ${log}`, t(language, "hook.usageFailed", { log }));
+  }
+}
+async function refreshStatusline(ctx) {
+  try {
+    if (ctx.statusline && await readStatuslineState()) await ctx.statusline.refresh();
+  } catch (e) {
+    logError(e);
+  }
 }
 function refreshLauncher(ctx, language) {
   try {
@@ -1483,6 +1664,7 @@ ${t(language, "hook.windowLauncher")}`;
       const { language } = await saveConfig({ answersFromApp: on });
       answersResult = output(on ? ANSWERS_ON : ANSWERS_OFF, t(language, on ? "hook.answersOn" : "hook.answersOff"));
     }
+    if (cmd === "usage-on" || cmd === "usage-off") answersResult = await usageCommand(cmd === "usage-on", ctx);
     if (cmd === "on") return connect(input, resolve, ctx);
     const reg = await getRegistration(sid);
     if (!reg) return answersResult ?? nothing;
@@ -1500,18 +1682,28 @@ ${t(language, "hook.windowLauncher")}`;
           logError(e);
         }
       }
+      await recordMode(sid, input.permission_mode);
     }
     return answersResult ?? nothing;
   }
   if (event === "notification") {
     const reg = await getRegistration(sid);
     if (!reg || !isActive(reg)) return nothing;
+    await recordMode(sid, input.permission_mode);
     const type = input.notification_type;
     if (type === "permission_prompt") await setWaiting(sid, "permission");
     else if (type === "elicitation_dialog" || type === "elicitation_url_dialog" || type === "agent_needs_input")
       await setWaiting(sid, "input");
   }
   return nothing;
+}
+async function recordMode(sid, mode) {
+  if (typeof mode !== "string") return;
+  try {
+    await setMode(sid, mode);
+  } catch (e) {
+    logError(e);
+  }
 }
 async function readStdin() {
   const chunks = [];
@@ -1521,15 +1713,16 @@ async function readStdin() {
 function logError(e) {
   try {
     const dir = paths().logDir;
-    fs11.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
-    fs11.appendFileSync(
-      path12.join(dir, "hook.log"),
+    fs12.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+    fs12.appendFileSync(
+      path13.join(dir, "hook.log"),
       `${(/* @__PURE__ */ new Date()).toISOString()} ${e instanceof Error ? e.stack ?? e.message : String(e)}
 `
     );
   } catch {
   }
 }
+var wrapperSource = () => path13.join(path13.dirname(fileURLToPath3(import.meta.url)), "statusline.mjs");
 async function main() {
   let result = { exitCode: 0 };
   try {
@@ -1538,7 +1731,12 @@ async function main() {
     const input = JSON.parse(await readStdin());
     result = await handleHook(event, input, {
       ensureHub: (notice) => ensureHub({ notice }),
-      launcher: { install: (comment) => installLauncher({ comment }), remove: () => removeLauncher() }
+      launcher: { install: (comment) => installLauncher({ comment }), remove: () => removeLauncher() },
+      statusline: {
+        install: () => installStatusline({ source: wrapperSource() }),
+        remove: () => removeStatusline({}),
+        refresh: () => refreshWrapper({ source: wrapperSource() })
+      }
     });
   } catch (e) {
     logError(e);

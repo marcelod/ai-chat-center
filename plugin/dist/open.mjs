@@ -47,6 +47,9 @@ function paths() {
     backgroundFile: (sid) => (assertSessionId(sid), path.join(home, "backgrounds", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
     attachmentsDir: path.join(home, "attachments"),
+    usageFile: path.join(home, "usage.json"),
+    statuslineFile: path.join(home, "statusline.json"),
+    statuslineScript: path.join(home, "bin", "statusline.mjs"),
     logDir: path.join(home, "logs")
   };
 }
@@ -63,7 +66,7 @@ function isAlive(pid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.4.8";
+var VERSION = "0.4.9";
 
 // src/core/healthProof.ts
 import crypto from "node:crypto";

@@ -41,6 +41,9 @@ function paths() {
     backgroundFile: (sid) => (assertSessionId(sid), path.join(home, "backgrounds", `${sid}.json`)),
     presenceFile: path.join(home, "app-presence.json"),
     attachmentsDir: path.join(home, "attachments"),
+    usageFile: path.join(home, "usage.json"),
+    statuslineFile: path.join(home, "statusline.json"),
+    statuslineScript: path.join(home, "bin", "statusline.mjs"),
     logDir: path.join(home, "logs")
   };
 }
@@ -172,15 +175,41 @@ async function readGitBranch(cwd) {
 
 // src/core/meta.ts
 var EFFORT_RE = /^[a-z]{1,16}$/;
-async function getEffort(sid) {
+var MODE_RE = /^[a-zA-Z]{1,24}$/;
+async function readMeta(sid) {
   const d = await readJson(paths().metaFile(sid));
-  return d && typeof d.effort === "string" && EFFORT_RE.test(d.effort) ? d.effort : null;
+  return d && typeof d === "object" && !Array.isArray(d) ? d : {};
+}
+async function getEffort(sid) {
+  const { effort } = await readMeta(sid);
+  return typeof effort === "string" && EFFORT_RE.test(effort) ? effort : null;
+}
+async function getMode(sid) {
+  const { mode } = await readMeta(sid);
+  return typeof mode === "string" && MODE_RE.test(mode) ? mode : null;
 }
 var MODEL_RE = /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/;
 function shortModel(id) {
   const m = MODEL_RE.exec(id);
   if (!m) return id;
   return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ""}`;
+}
+
+// src/core/usage.ts
+async function readUsage() {
+  const d = await readJson(paths().usageFile);
+  if (!d || typeof d !== "object" || typeof d.updatedAt !== "string" || Number.isNaN(Date.parse(d.updatedAt))) return null;
+  const valid = (w) => {
+    if (!w || typeof w !== "object") return void 0;
+    const { usedPercentage, resetsAt } = w;
+    if (typeof usedPercentage !== "number" || !Number.isFinite(usedPercentage) || usedPercentage < 0 || usedPercentage > 100) return void 0;
+    if (typeof resetsAt !== "string" || Number.isNaN(Date.parse(resetsAt))) return void 0;
+    return { usedPercentage, resetsAt: new Date(resetsAt).toISOString() };
+  };
+  const fiveHour = valid(d.fiveHour);
+  const sevenDay = valid(d.sevenDay);
+  if (!fiveHour && !sevenDay) return null;
+  return { ...fiveHour ? { fiveHour } : {}, ...sevenDay ? { sevenDay } : {}, updatedAt: new Date(d.updatedAt).toISOString() };
 }
 
 // src/core/background.ts
@@ -716,7 +745,7 @@ async function cleanupAttachments(alive, now = Date.now(), maxAgeMs = ATTACHMENT
 }
 
 // src/core/version.ts
-var VERSION = "0.4.8";
+var VERSION = "0.4.9";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -930,6 +959,8 @@ function isCcCommand(prompt) {
   if (arg === "answers off") return "answers-off";
   if (arg === "window on") return "window-on";
   if (arg === "window off") return "window-off";
+  if (arg === "usage on") return "usage-on";
+  if (arg === "usage off") return "usage-off";
   return "unknown";
 }
 
@@ -1728,6 +1759,8 @@ var ClaudeCodeProvider = class {
       if (rawModel) view.model = shortModel(rawModel);
       const effort = await getEffort(sid);
       if (effort) view.effort = effort;
+      const mode = await getMode(sid);
+      if (mode && !disconnected) view.mode = mode;
       const background = await getBackground(sid);
       if (background) view.background = background;
       connected.push(view);
@@ -1743,7 +1776,8 @@ var ClaudeCodeProvider = class {
       return b._sort - a._sort;
     });
     const others = live.list.filter((l) => l.kind === "interactive" && !activeIds.has(l.sessionId));
-    return { connected: connected.map(({ _sort, ...v }) => v), others };
+    const usage = await readUsage();
+    return { connected: connected.map(({ _sort, ...v }) => v), others, ...usage ? { usage } : {} };
   }
   async events(sid) {
     const reg = await getRegistration(sid);
@@ -1782,9 +1816,11 @@ var ClaudeCodeProvider = class {
     for (const m of [this.readers, this.pending, this.lastEvents, this.lastModels, this.misses]) {
       for (const sid of [...m.keys()]) if (!known.has(sid)) m.delete(sid);
     }
-    const { connected, others } = await this.listSessions();
+    const { connected, others, usage } = await this.listSessions();
     const signature = JSON.stringify({
       others,
+      // updatedAt left out: an unchanged value refreshed every minute is not a change worth a refetch.
+      usage: usage ? [usage.fiveHour ?? null, usage.sevenDay ?? null] : null,
       connected: connected.map((s) => [
         s.sessionId,
         s.state,
@@ -1800,6 +1836,7 @@ var ClaudeCodeProvider = class {
         s.branch ?? null,
         s.model ?? null,
         s.effort ?? null,
+        s.mode ?? null,
         s.background ?? null,
         s.pinned ?? false
       ])
