@@ -258,10 +258,15 @@ export function openStream(onChange: (c: ProviderChange) => void, handlers: Stre
   };
   es.addEventListener('sessions', handle as EventListener);
   es.addEventListener('events', handle as EventListener);
+  // /cc asked the open page to show a session: useAppWindow pings at once to learn which one.
+  es.addEventListener('focus', () => window.dispatchEvent(new Event(WINDOW_FOCUS_EVENT)));
   es.onopen = () => handlers.onOpen?.();
   es.onerror = () => handlers.onError?.();
   return () => es.close();
 }
+
+/** Fired on window when the hub says a /cc wants this page to show a session (see useAppWindow). */
+export const WINDOW_FOCUS_EVENT = 'acc:window-focus';
 
 export type WindowFocus = { seq: number; sessionId: string } | null;
 

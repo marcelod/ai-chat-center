@@ -313,6 +313,8 @@ export async function createHub(
           try {
             assertSessionId(sid);
             focus = { seq: (focus?.seq ?? 0) + 1, sessionId: sid };
+            // A visible page holds a stream: tell it now instead of at its next ping (up to 20 s later).
+            for (const r of clients) r.write('event: focus\ndata: {}\n\n');
           } catch {
             /* no valid session to show: the open page stays as it is */
           }

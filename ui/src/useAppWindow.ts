@@ -43,13 +43,16 @@ export function useAppWindow(select: (sessionId: string) => void): void {
       if (!document.hidden) void ping();
     };
     const onHide = () => void api.pingWindow(id, true);
+    const onFocusRequest = () => void ping();
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('pagehide', onHide);
+    window.addEventListener(api.WINDOW_FOCUS_EVENT, onFocusRequest);
     return () => {
       stopped = true;
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('pagehide', onHide);
+      window.removeEventListener(api.WINDOW_FOCUS_EVENT, onFocusRequest);
       void api.pingWindow(id, true);
     };
   }, []);

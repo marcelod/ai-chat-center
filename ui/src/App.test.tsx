@@ -17,6 +17,7 @@ vi.mock('./api', () => ({
   verifyHub: vi.fn(async () => 'ok'),
   forgetToken: vi.fn(),
   pingWindow: vi.fn(async () => null),
+  WINDOW_FOCUS_EVENT: 'acc:window-focus',
 }));
 
 import * as api from './api';

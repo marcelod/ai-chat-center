@@ -623,6 +623,15 @@ describe('one app window', () => {
     expect(JSON.parse((await ping(u, { id: W1 })).body).focus.seq).toBe(2);
   });
 
+  it('a page with an open stream is told at once that a session asks for it', async () => {
+    const u = await start(fakeProvider());
+    await ping(u, { id: W1 });
+    const st = await openStream(u, '/api/stream', auth);
+    await ask(u, { sessionId: 's1' });
+    expect(await st.next(/event: focus\ndata: \{\}\n\n/)).toMatch(/event: focus/);
+    st.req.destroy();
+  });
+
   it('a page that closed or stopped pinging no longer counts', async () => {
     let t = 1_000_000;
     const u = await start(fakeProvider(), { now: () => t });

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render } from '@testing-library/react';
 
-vi.mock('./api', () => ({ pingWindow: vi.fn() }));
+vi.mock('./api', () => ({ pingWindow: vi.fn(), WINDOW_FOCUS_EVENT: 'acc:window-focus' }));
 
 import * as api from './api';
 import { useAppWindow, WINDOW_PING_MS } from './useAppWindow';
@@ -45,5 +45,18 @@ describe('useAppWindow', () => {
     await flush();
     await act(async () => vi.advanceTimersByTime(WINDOW_PING_MS));
     expect(vi.mocked(api.pingWindow).mock.calls.length).toBe(2);
+  });
+
+  it('a focus request from the stream pings at once instead of at the next tick', async () => {
+    const answers = [{ seq: 1, sessionId: 'a' }, { seq: 2, sessionId: 's2' }];
+    vi.mocked(api.pingWindow).mockImplementation(async () => answers.shift() ?? null);
+    const select = vi.fn();
+    render(<Probe select={select} />);
+    await flush();
+    await act(async () => {
+      window.dispatchEvent(new Event('acc:window-focus'));
+    });
+    await flush();
+    expect(select).toHaveBeenCalledExactlyOnceWith('s2');
   });
 });
