@@ -66,6 +66,8 @@ export type SessionView = {
   model?: string;
   /** Reasoning effort level recorded at the last prompt; absent when Claude Code does not send it. */
   effort?: string;
+  /** Claude Code permission mode sent with the last hook (default, acceptEdits, plan, auto, ...). */
+  mode?: string;
   /** Pinned to the top of the list in the app (see core/pins.ts). */
   pinned?: true;
   /** Background chosen for this conversation in the app (⋮ menu); absent when none. */

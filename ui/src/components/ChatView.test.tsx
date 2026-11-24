@@ -110,6 +110,24 @@ describe('ChatView', () => {
     expect(screen.queryByTitle('Model')).toBeNull();
     expect(screen.queryByTitle('Reasoning level')).toBeNull();
   });
+  it('header shows the permission mode with the glyph Claude Code uses', () => {
+    setup({ session: session({ mode: 'auto' }) });
+    expect(screen.getByTitle('Permission mode')).toHaveTextContent('⏵⏵ auto mode');
+  });
+  it('header shows plan mode and the default mode by name, and an unknown mode as it came', () => {
+    const { unmount } = setup({ session: session({ mode: 'plan' }) });
+    expect(screen.getByLabelText('Permission mode: plan mode')).toHaveTextContent('⏸ plan mode');
+    unmount();
+    const r = setup({ session: session({ mode: 'default' }) });
+    expect(screen.getByTitle('Permission mode')).toHaveTextContent('default');
+    r.unmount();
+    setup({ session: session({ mode: 'newMode' }) });
+    expect(screen.getByTitle('Permission mode')).toHaveTextContent('newMode');
+  });
+  it('header without a mode shows no mode part', () => {
+    setup({ session: session({ model: 'Opus 5.5' }) });
+    expect(screen.queryByTitle('Permission mode')).toBeNull();
+  });
   it('header without a branch skips only the branch', () => {
     setup({ session: session({ model: 'Opus 5.5', effort: 'low' }) });
     expect(screen.queryByTitle('Branch')).toBeNull();

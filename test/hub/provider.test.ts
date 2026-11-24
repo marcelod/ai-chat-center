@@ -686,6 +686,14 @@ describe('provider: queued messages with their text (audit R3-F5)', () => {
       await setBackground('s1', { kind: 'color', value: 'rose' });
       expect((await p.poll()).map((c) => c.type)).toContain('sessions');
     });
+    it('fills the permission mode of an active session, not of a disconnected one', async () => {
+      const { setMode } = await import('../../src/core/meta.js');
+      await reg();
+      await setMode('s1', 'plan');
+      expect((await new ClaudeCodeProvider(async () => [live()]).listSessions()).connected[0].mode).toBe('plan');
+      await markDisconnected('s1', 'off');
+      expect((await new ClaudeCodeProvider(async () => []).listSessions()).connected[0].mode).toBeUndefined();
+    });
     it('model of a disconnected session is still shown', async () => {
       await reg();
       fs.appendFileSync(transcript, modelLine('m1', 'claude-sonnet-5-5'));

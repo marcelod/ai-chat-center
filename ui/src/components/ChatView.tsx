@@ -48,6 +48,14 @@ const NOTICE_KEY = {
   compacted: 'ui.chat.compacted',
 } as const;
 
+const KNOWN_MODES = new Set(['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions', 'dontAsk']);
+/** The glyphs Claude Code shows in its own footer for these modes. */
+const MODE_GLYPH: Record<string, string> = { auto: '⏵⏵ ', acceptEdits: '⏵⏵ ', bypassPermissions: '⏵⏵ ', plan: '⏸ ' };
+/** A mode Claude Code adds later is shown as it came. */
+function modeLabel(mode: string, t: ReturnType<typeof useT>): string {
+  return KNOWN_MODES.has(mode) ? t(`ui.chat.modes.${mode}`) : mode;
+}
+
 function InfoPart({ label, value, glyph, cls }: { label: string; value: string; glyph?: string; cls: string }) {
   return (
     <span title={label} aria-label={`${label}: ${value}`} className={`min-w-0 truncate ${cls}`}>
@@ -321,13 +329,16 @@ export function ChatView({ session, events, pending, loading, onSend, onUpload, 
           />
           <div data-testid="session-info" className="flex min-w-0 flex-col overflow-hidden font-mono text-xs text-muted md:flex-row md:items-baseline md:gap-1.5">
             <span className="min-w-0 truncate md:min-w-[6ch]">{session.cwd}</span>
-            {(session.branch || session.model || session.effort) && (
+            {(session.branch || session.model || session.effort || session.mode) && (
               <span className="flex min-w-0 gap-x-2 md:shrink-0 md:gap-x-1.5">
                 {session.branch && (
                   <InfoPart label={t('ui.chat.branch')} value={session.branch} glyph="⎇ " cls="max-w-[14rem]" />
                 )}
                 {session.model && <InfoPart label={t('ui.chat.model')} value={session.model} cls="max-w-[9rem]" />}
                 {session.effort && <InfoPart label={t('ui.chat.effort')} value={session.effort} glyph="🧠 " cls="max-w-[7rem]" />}
+                {session.mode && (
+                  <InfoPart label={t('ui.chat.mode')} value={modeLabel(session.mode, t)} glyph={MODE_GLYPH[session.mode] ?? ''} cls="max-w-[10rem]" />
+                )}
               </span>
             )}
           </div>

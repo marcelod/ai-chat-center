@@ -108,6 +108,15 @@
       "branch": "Branch",
       "model": "Model",
       "effort": "Reasoning level",
+      "mode": "Permission mode",
+      "modes": {
+        "default": "default",
+        "acceptEdits": "accept edits",
+        "plan": "plan mode",
+        "auto": "auto mode",
+        "bypassPermissions": "bypass permissions",
+        "dontAsk": "don't ask"
+      },
       "loading": "Loading messages…",
       "waitingBanner": "Claude is waiting for you to approve an action in the terminal",
       "waitingInputBanner": "Claude is waiting for your answer in the terminal",

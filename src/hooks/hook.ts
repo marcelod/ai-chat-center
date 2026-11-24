@@ -25,7 +25,7 @@ import { DIR_MODE, ensureDir } from '../core/fsAtomic.js';
 import { claudeConfigDir, codeStamp, getRegistration, isActive, markDisconnected, register, stampedByThisCode, updateRegistration } from '../core/registry.js';
 import { clearWaiting, setWaiting } from '../core/waiting.js';
 import { setBusy } from '../core/busy.js';
-import { setEffort } from '../core/meta.js';
+import { setEffort, setMode } from '../core/meta.js';
 import { clearTurnOrigin, promptOrigin, setTurnOrigin } from '../core/turn.js';
 import { ensureHub } from './ensureHub.js';
 import { loadConfig, saveConfig, type Lang } from '../core/config.js';
@@ -48,6 +48,7 @@ export type HookInput = {
   notification_type?: string;
   message?: string;
   effort?: { level?: unknown };
+  permission_mode?: unknown;
 };
 export interface HookContext {
   /** Returns the hub URL; `notice` receives lines for the user (an older hub that could not be stopped). */
@@ -237,6 +238,7 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
           logError(e); // display-only data: never break the prompt hook
         }
       }
+      await recordMode(sid, input.permission_mode);
     }
     return answersResult ?? nothing;
   }
@@ -244,6 +246,7 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
   if (event === 'notification') {
     const reg = await getRegistration(sid);
     if (!reg || !isActive(reg)) return nothing;
+    await recordMode(sid, input.permission_mode);
     const type = input.notification_type;
     // idle_prompt is ignored: it fires after any idle period, not when Claude asks something.
     if (type === 'permission_prompt') await setWaiting(sid, 'permission');
@@ -251,6 +254,16 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
       await setWaiting(sid, 'input');
   }
   return nothing;
+}
+
+/** Display-only: a failure is logged, never breaks the hook. */
+async function recordMode(sid: string, mode: unknown): Promise<void> {
+  if (typeof mode !== 'string') return;
+  try {
+    await setMode(sid, mode);
+  } catch (e) {
+    logError(e);
+  }
 }
 
 async function readStdin(): Promise<string> {

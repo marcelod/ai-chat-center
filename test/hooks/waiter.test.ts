@@ -12,6 +12,7 @@ import { unwrapMessages } from '../../src/core/protocol.js';
 import { paths } from '../../src/core/paths.js';
 import { PROTOCOL, VERSION } from '../../src/core/version.js';
 import { tmpDir } from '../helpers/tmp.js';
+import { getMode } from '../../src/core/meta.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const errno = (code: string) => Object.assign(new Error(code), { code });
@@ -886,5 +887,16 @@ describe('waiter: pinned to the claude process it serves', () => {
     await enqueue('s1', 'x');
     expect(await p).toEqual({ exitCode: 0, stderr: '' });
     expect(await peek('s1')).toHaveLength(1);
+  });
+});
+
+describe('waiter: permission mode', () => {
+  it('Stop records the mode the turn ended in, for an active session only', async () => {
+    await wait('stop', { permission_mode: 'plan' });
+    expect(await getMode('s1')).toBeNull();
+    await reg('s1');
+    await enqueue('s1', 'oi'); // returns at once
+    await wait('stop', { permission_mode: 'plan' });
+    expect(await getMode('s1')).toBe('plan');
   });
 });

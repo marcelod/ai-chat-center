@@ -13,6 +13,7 @@ import { busyAge } from '../core/busy.js';
 import { queryLiveSessions } from '../hub/status.js';
 import { loadSecret, verifyMessage } from '../core/secret.js';
 import { readDelivered, recordDelivered } from '../core/delivered.js';
+import { setMode } from '../core/meta.js';
 
 export type { PidLookup };
 /**
@@ -21,7 +22,7 @@ export type { PidLookup };
  * during every turn: an interrupted turn (Esc) fires no Stop, and before this nothing re-armed delivery.
  */
 export type WaiterEvent = 'start' | 'stop' | 'prompt';
-export type WaiterInput = { session_id: string; source?: string; transcript_path?: string; prompt?: string; cwd?: string };
+export type WaiterInput = { session_id: string; source?: string; transcript_path?: string; prompt?: string; cwd?: string; permission_mode?: unknown };
 /** Live status of a session from `claude agents`, or null when the lookup failed or does not list it. */
 export type LiveStatus = 'busy' | 'idle' | 'waiting' | null;
 
@@ -251,6 +252,14 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
     // The session runs this code (restarted after a plugin update): the hub may send to it again (R5-M1).
     try {
       await updateRegistration(sid, codeStamp(), { ifConnectedAt: first.connectedAt });
+    } catch (e) {
+      logError(e);
+    }
+  }
+  if (event === 'stop' && typeof input.permission_mode === 'string') {
+    // Shift+Tab during the turn: the app shows the mode the turn ended in (display-only).
+    try {
+      await setMode(sid, input.permission_mode);
     } catch (e) {
       logError(e);
     }

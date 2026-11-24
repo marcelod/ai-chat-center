@@ -1,7 +1,7 @@
 import { isPinned } from '../core/pins.js';
 import { getDisplayName } from '../core/names.js';
 import { readGitBranch } from '../core/gitBranch.js';
-import { getEffort, shortModel } from '../core/meta.js';
+import { getEffort, getMode, shortModel } from '../core/meta.js';
 import { getBackground } from '../core/background.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -344,6 +344,8 @@ export class ClaudeCodeProvider implements Provider {
       if (rawModel) view.model = shortModel(rawModel);
       const effort = await getEffort(sid);
       if (effort) view.effort = effort;
+      const mode = await getMode(sid);
+      if (mode && !disconnected) view.mode = mode; // a stale mode would mislead
       const background = await getBackground(sid);
       if (background) view.background = background;
       connected.push(view);
@@ -422,6 +424,7 @@ export class ClaudeCodeProvider implements Provider {
         s.branch ?? null,
         s.model ?? null,
         s.effort ?? null,
+        s.mode ?? null,
         s.background ?? null,
         s.pinned ?? false,
       ]),

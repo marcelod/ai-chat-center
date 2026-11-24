@@ -15,7 +15,7 @@ import { paths } from '../../src/core/paths.js';
 import { saveConfig, loadConfig } from '../../src/core/config.js';
 import { getTurnOrigin, setTurnOrigin } from '../../src/core/turn.js';
 import { ANSWERS_ON, ANSWERS_OFF, WINDOW_ON, WINDOW_OFF } from '../../src/hooks/hook.js';
-import { getEffort } from '../../src/core/meta.js';
+import { getEffort, getMode } from '../../src/core/meta.js';
 import { tmpDir } from '../helpers/tmp.js';
 
 const URL_ = 'http://127.0.0.1:7777/#token=t';
@@ -989,5 +989,27 @@ describe('prompt-submit effort', () => {
     fs.mkdirSync(f, { recursive: true }); // a directory where the file goes: the write fails
     expect(await handleHook('prompt-submit', inp({ prompt: 'hi', effort: { level: 'high' } }), ctx())).toEqual({ exitCode: 0 });
     expect(await isBusy('s1')).toBe(true);
+  });
+});
+
+describe('permission mode', () => {
+  const active = async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42, version: VERSION, protocol: PROTOCOL });
+  };
+  it('prompt-submit and notification record permission_mode for an active session', async () => {
+    await active();
+    await handleHook('prompt-submit', inp({ prompt: 'hi', permission_mode: 'auto' }), ctx());
+    expect(await getMode('s1')).toBe('auto');
+    await handleHook('notification', inp({ notification_type: 'permission_prompt', permission_mode: 'default' }), ctx());
+    expect(await getMode('s1')).toBe('default');
+  });
+  it('a missing or bad mode, or a session not connected: nothing recorded, nothing breaks', async () => {
+    expect(await handleHook('prompt-submit', inp({ prompt: 'hi', permission_mode: 'plan' }), ctx())).toEqual({ exitCode: 0 });
+    expect(await getMode('s1')).toBeNull();
+    await active();
+    for (const m of [undefined, 5, 'x y', '../x']) {
+      expect(await handleHook('prompt-submit', inp({ prompt: 'hi', permission_mode: m as never }), ctx())).toEqual({ exitCode: 0 });
+    }
+    expect(await getMode('s1')).toBeNull();
   });
 });
