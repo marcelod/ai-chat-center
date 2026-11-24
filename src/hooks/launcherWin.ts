@@ -2,7 +2,9 @@
 // that runs `node.exe "<dist>\open.mjs"` in a minimized console, with an .ico kept outside the plugin folder
 // (which changes with every version). The .lnk is made by PowerShell (WScript.Shell); the script is fixed and
 // gets every path through its environment, so no path is ever spliced into code. A stamp of what the .lnk
-// points at keeps PowerShell (hundreds of ms) from running on every /cc.
+// points at keeps PowerShell (hundreds of ms) from running on every /cc; a failure stamp (same inputs plus
+// the time) keeps a PowerShell that keeps failing (it may block the hook up to 10 s) from running again
+// for 24 h, or until the inputs change.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,6 +23,7 @@ export interface WinLauncherPaths {
   dir: string;
   icon: string;
   stamp: string;
+  failStamp: string;
 }
 
 export function winLauncherPaths(env: Env, home: string): WinLauncherPaths {
@@ -32,6 +35,7 @@ export function winLauncherPaths(env: Env, home: string): WinLauncherPaths {
     dir,
     icon: path.join(dir, 'ai-chat-center.ico'),
     stamp: path.join(dir, 'launcher.json'),
+    failStamp: path.join(dir, 'launcher-failed.json'),
   };
 }
 
@@ -55,6 +59,21 @@ export interface WinInstallOptions {
   distDir: string;
   comment: string;
   spawn?: SpawnSyncLike;
+  /** Epoch ms (tests). Default Date.now. */
+  now?: () => number;
+}
+
+/** After a PowerShell failure, the same inputs are not tried again for this long. */
+export const RETRY_AFTER_FAILURE_MS = 24 * 3600_000;
+
+/** When PowerShell last failed for these very inputs, or null. */
+function lastFailure(file: string, stamp: string): number | null {
+  try {
+    const f = JSON.parse(fs.readFileSync(file, 'utf8')) as { stamp?: unknown; at?: unknown };
+    return f.stamp === stamp && typeof f.at === 'number' ? f.at : null;
+  } catch {
+    return null;
+  }
 }
 
 const defaultSpawn: SpawnSyncLike = (cmd, args, opts) => spawnSync(cmd, args, opts);
@@ -77,6 +96,11 @@ export function installWinLauncher(o: WinInstallOptions): true {
     /* no stamp: make the shortcut */
   }
   if (same) return true;
+  const now = (o.now ?? Date.now)();
+  const failedAt = lastFailure(p.failStamp, stamp);
+  if (failedAt !== null && now - failedAt >= 0 && now - failedAt < RETRY_AFTER_FAILURE_MS) {
+    throw new Error(`launcher: Start menu shortcut skipped: PowerShell failed at ${new Date(failedAt).toISOString()}; next try 24 h later or when the plugin or Node path changes`);
+  }
   fs.mkdirSync(path.dirname(p.shortcut), { recursive: true });
   const r = (o.spawn ?? defaultSpawn)(
     powershell(o.env),
@@ -98,15 +122,17 @@ export function installWinLauncher(o: WinInstallOptions): true {
     },
   );
   if (r.error || r.status !== 0) {
+    writeIfChanged(p.failStamp, Buffer.from(JSON.stringify({ stamp, at: now }), 'utf8'));
     throw new Error(`launcher: PowerShell could not create the Start menu shortcut (${r.error?.message ?? `exit ${r.status}`})`);
   }
   writeIfChanged(p.stamp, Buffer.from(stamp, 'utf8'));
+  fs.rmSync(p.failStamp, { force: true });
   return true;
 }
 
 export function removeWinLauncher(env: Env, home: string): void {
   const p = winLauncherPaths(env, home);
-  for (const f of [p.shortcut, p.icon, p.stamp]) fs.rmSync(f, { force: true });
+  for (const f of [p.shortcut, p.icon, p.stamp, p.failStamp]) fs.rmSync(f, { force: true });
   try {
     fs.rmdirSync(p.dir); // only when empty
   } catch {

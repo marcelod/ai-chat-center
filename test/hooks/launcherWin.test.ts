@@ -41,6 +41,7 @@ describe('Windows launcher', () => {
     expect(p.shortcut).toBe(path.join('/r', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'AI Chat Center.lnk'));
     expect(p.icon).toBe(path.join('/l', 'ai-chat-center', 'ai-chat-center.ico'));
     expect(p.stamp).toBe(path.join('/l', 'ai-chat-center', 'launcher.json'));
+    expect(p.failStamp).toBe(path.join('/l', 'ai-chat-center', 'launcher-failed.json'));
     const f = winLauncherPaths({}, '/h');
     expect(f.shortcut.startsWith(path.join('/h', 'AppData', 'Roaming'))).toBe(true);
     expect(f.icon.startsWith(path.join('/h', 'AppData', 'Local'))).toBe(true);
@@ -95,14 +96,29 @@ describe('Windows launcher', () => {
     expect(calls).toHaveLength(3);
   });
 
-  it('a failing PowerShell throws (the hook logs it) and leaves no stamp, so the next /cc tries again', () => {
+  it('a failing PowerShell throws (the hook logs it), leaves no stamp and is not run again for 24 h with the same inputs', () => {
     const { env, calls, o, home, fail } = setup();
+    let now = Date.parse('2026-11-24T10:00:00Z');
+    const at = { ...o, now: () => now };
+    const p = winLauncherPaths(env, home);
     fail(1);
-    expect(() => installLauncher(o)).toThrow(/PowerShell/);
-    expect(fs.existsSync(winLauncherPaths(env, home).stamp)).toBe(false);
-    fail(0);
-    expect(installLauncher(o)).toBe(true);
+    expect(() => installLauncher(at)).toThrow(/PowerShell/);
+    expect(fs.existsSync(p.stamp)).toBe(false);
+    expect(fs.existsSync(p.failStamp)).toBe(true);
+    // Every /cc in the next 24 h: no PowerShell (it may block up to 10 s), still reported as not made.
+    now += 23 * 3600_000;
+    expect(() => installLauncher(at)).toThrow(/skipped/);
+    expect(calls).toHaveLength(1);
+    // Other inputs (a new Node or plugin folder): try at once.
+    expect(() => installLauncher({ ...at, node: 'D:\\nvm\\node.exe' })).toThrow(/PowerShell/);
     expect(calls).toHaveLength(2);
+    // 24 h after the last failure: try again; a success clears the failure stamp.
+    now += 24 * 3600_000 + 1;
+    fail(0);
+    expect(installLauncher({ ...at, node: 'D:\\nvm\\node.exe' })).toBe(true);
+    expect(calls).toHaveLength(3);
+    expect(fs.existsSync(p.failStamp)).toBe(false);
+    expect(fs.existsSync(p.stamp)).toBe(true);
   });
 
   it('remove deletes the shortcut, the icon and the stamp', () => {
@@ -110,8 +126,19 @@ describe('Windows launcher', () => {
     installLauncher(o);
     const p = winLauncherPaths(env, home);
     removeLauncher({ platform: 'win32', env, home });
-    for (const f of [p.shortcut, p.icon, p.stamp]) expect(fs.existsSync(f)).toBe(false);
+    for (const f of [p.shortcut, p.icon, p.stamp, p.failStamp]) expect(fs.existsSync(f)).toBe(false);
     removeLauncher({ platform: 'win32', env, home }); // nothing left: no error
+    expect(fs.existsSync(p.dir)).toBe(false);
+  });
+
+  it('remove also deletes a failure stamp', () => {
+    const { env, o, home, fail } = setup();
+    fail(1);
+    expect(() => installLauncher(o)).toThrow(/PowerShell/);
+    const p = winLauncherPaths(env, home);
+    removeLauncher({ platform: 'win32', env, home });
+    expect(fs.existsSync(p.failStamp)).toBe(false);
+    expect(fs.existsSync(p.dir)).toBe(false);
   });
 
   it('never puts the token in the shortcut command, the stamp or the files', () => {

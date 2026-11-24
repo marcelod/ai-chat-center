@@ -71,6 +71,8 @@ export interface LauncherOptions {
   comment?: string;
   /** Runs PowerShell to make the Windows shortcut (tests inject a fake). */
   spawn?: SpawnSyncLike;
+  /** Epoch ms, for the Windows retry window after a PowerShell failure (tests). */
+  now?: () => number;
 }
 
 const defaultDist = () => path.dirname(fileURLToPath(import.meta.url));
@@ -88,7 +90,7 @@ export function installLauncher(o: LauncherOptions = {}): boolean {
   const distDir = o.distDir ?? defaultDist();
   const node = o.node ?? process.execPath;
   const comment = o.comment ?? DEFAULT_COMMENT;
-  if (platform === 'win32') return installWinLauncher({ env, home, node, distDir, comment, ...(o.spawn ? { spawn: o.spawn } : {}) });
+  if (platform === 'win32') return installWinLauncher({ env, home, node, distDir, comment, ...(o.spawn ? { spawn: o.spawn } : {}), ...(o.now ? { now: o.now } : {}) });
   if (platform === 'darwin') return installMacLauncher({ home, node, distDir });
   if (platform !== 'linux') return false;
   const p = launcherPaths(env, home);
