@@ -46,7 +46,14 @@ export class SessionProtocolError extends Error {
   }
 }
 
+/**
+ * How old the `claude agents` answer may be. The lookup spawns a claude process (~0.2 s of CPU), so it
+ * runs every 5 s only while something can change soon: a session is busy, waiting or has a busy marker
+ * (a prompt was just sent), or a connected session is missing from the list (exit detection). With
+ * every session idle and listed, every 30 s.
+ */
 const LIVE_TTL_MS = 5000;
+const LIVE_IDLE_TTL_MS = 30_000;
 /** A busy marker this old while the session is idle was left by a turn that ended without Stop (interrupt). */
 const STALE_BUSY_MS = 10_000;
 const GRACE_MS = 15_000;
@@ -87,9 +94,9 @@ export class ClaudeCodeProvider implements Provider {
     this.alive = opts.isAlive ?? createClaudeProcessCheck();
   }
 
-  private async live(force = false): Promise<Live> {
+  private async live(force = false, ttl = LIVE_TTL_MS): Promise<Live> {
     const t = this.now();
-    if (!force && this.liveCache && t >= this.liveCache.at && t - this.liveCache.at < LIVE_TTL_MS) {
+    if (!force && this.liveCache && t >= this.liveCache.at && t - this.liveCache.at < ttl) {
       return { list: this.liveCache.value, ok: true, fresh: false };
     }
     const value = await this.listLive();
@@ -223,10 +230,27 @@ export class ClaudeCodeProvider implements Provider {
     return gone;
   }
 
+  /** The lookup age to accept now: short while anything may change soon, long when all is idle (see LIVE_IDLE_TTL_MS). */
+  private async liveTtl(regs: Registration[]): Promise<number> {
+    const last = this.liveCache?.value;
+    if (!last) return LIVE_TTL_MS;
+    const byId = new Map(last.map((l) => [l.sessionId, l]));
+    for (const reg of regs) {
+      if (!isActive(reg)) continue;
+      const sid = reg.sessionId;
+      const l = byId.get(sid);
+      if (l ? l.status !== 'idle' : sameConfigDir(reg) && !(reg.pid !== null && this.alive(reg.pid) && !last.some((x) => x.pid === reg.pid))) {
+        return LIVE_TTL_MS;
+      }
+      if ((await busyAge(sid, this.now())) !== null || (await getWaiting(sid)) || (await getPending(sid))) return LIVE_TTL_MS;
+    }
+    return LIVE_IDLE_TTL_MS;
+  }
+
   async listSessions(): Promise<{ connected: SessionView[]; others: LiveSession[] }> {
-    const live = await this.live();
-    const liveById = new Map(live.list.map((l) => [l.sessionId, l]));
     const regs = await listRegistrations();
+    const live = await this.live(false, await this.liveTtl(regs));
+    const liveById = new Map(live.list.map((l) => [l.sessionId, l]));
     const connected: (SessionView & { _sort: number })[] = [];
     const activeIds = new Set<string>();
 

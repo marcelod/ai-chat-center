@@ -1,3 +1,4 @@
+import { setBusy } from '../../src/core/busy.js';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -37,6 +38,37 @@ describe('provider', () => {
     const p = new ClaudeCodeProvider(async () => [live()]);
     const { connected } = await p.listSessions();
     expect(connected).toMatchObject([{ sessionId: 's1', name: 'nm', state: 'busy', cwd: '/home/u/proj', pendingAppMessageIds: [] }]);
+  });
+  it('looks up live sessions every 30 s while all are idle and listed, every 5 s otherwise', async () => {
+    await reg();
+    let t = Date.now();
+    let calls = 0;
+    let status: LiveSession['status'] = 'idle';
+    const p = new ClaudeCodeProvider(async () => (calls++, [live({ status })]), { now: () => t });
+    await p.listSessions(); // first lookup
+    t += 6000;
+    await p.listSessions();
+    expect(calls).toBe(1); // idle: the 5 s answer is still good
+    t += 25_000;
+    await p.listSessions();
+    expect(calls).toBe(2);
+    status = 'busy';
+    t += 31_000;
+    await p.listSessions(); // sees busy
+    t += 6000;
+    await p.listSessions();
+    expect(calls).toBe(4); // busy: every 5 s
+  });
+  it('a busy marker (prompt just sent) brings back the 5 s lookups', async () => {
+    await reg();
+    let t = Date.now();
+    let calls = 0;
+    const p = new ClaudeCodeProvider(async () => (calls++, [live({ status: 'idle' })]), { now: () => t });
+    await p.listSessions();
+    await setBusy('s1');
+    t += 6000;
+    await p.listSessions();
+    expect(calls).toBe(2);
   });
   it('falls back to cwd basename for name', async () => {
     await reg();
