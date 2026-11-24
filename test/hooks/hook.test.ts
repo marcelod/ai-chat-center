@@ -22,6 +22,8 @@ const URL_ = 'http://127.0.0.1:7777/#token=t';
 const ctx = (parentPid = 42) => ({
   ensureHub: async () => URL_,
   resolvePid: async (): Promise<number | null> => parentPid,
+  // The window is on by default: never look for or start a real browser in tests.
+  findBrowser: () => null,
 });
 const inp = (o: Partial<HookInput> = {}): HookInput => ({
   session_id: 's1',
@@ -878,10 +880,16 @@ describe('answers command and turn origin', () => {
     };
 
     it('flag off: /cc opens no window', async () => {
+      await saveConfig({ openWindow: false });
       const r = await handleHook('prompt-submit', inp({ prompt: '/cc' }), winCtx());
       expect(out(r).hookSpecificOutput.additionalContext).toContain('AI Chat Center: connected');
       expect(fetched).toHaveLength(0);
       expect(spawned).toHaveLength(0);
+    });
+
+    it('no saved choice: the window is on by default', async () => {
+      await handleHook('prompt-submit', inp({ prompt: '/cc' }), winCtx());
+      expect(spawned).toHaveLength(1);
     });
 
     it('flag on: /cc opens the app window at #pair=<code>, never with the token, and still shows the link', async () => {

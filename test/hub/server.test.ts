@@ -233,10 +233,10 @@ describe('api', () => {
   });
   it('config roundtrip', async () => {
     const u = await start(fakeProvider());
-    expect(JSON.parse((await req(u, '/api/config', { headers: auth })).body)).toEqual({ language: 'en', answersFromApp: false, openWindow: false });
+    expect(JSON.parse((await req(u, '/api/config', { headers: auth })).body)).toEqual({ language: 'en', answersFromApp: false, openWindow: true });
     const put = await req(u, '/api/config', { method: 'PUT', headers: json, body: JSON.stringify({ language: 'pt-BR' }) });
     expect(put.status).toBe(200);
-    expect(JSON.parse((await req(u, '/api/config', { headers: auth })).body)).toEqual({ language: 'pt-BR', answersFromApp: false, openWindow: false });
+    expect(JSON.parse((await req(u, '/api/config', { headers: auth })).body)).toEqual({ language: 'pt-BR', answersFromApp: false, openWindow: true });
   });
   it('invalid language returns 400', async () => {
     const u = await start(fakeProvider());
@@ -326,13 +326,13 @@ describe('answers endpoint', () => {
     expect((await loadConfig()).answersFromApp).toBe(false);
     await saveConfig({ answersFromApp: true });
     await req(u, '/api/config', { method: 'PUT', headers: json, body: JSON.stringify({ language: 'en', answersFromApp: false }) });
-    expect(await loadConfig()).toEqual({ language: 'en', answersFromApp: true, openWindow: false });
+    expect(await loadConfig()).toEqual({ language: 'en', answersFromApp: true, openWindow: true });
   });
   it('PUT /api/config preserves openWindow', async () => {
     const u = await start(fakeProvider());
-    await saveConfig({ openWindow: true });
-    await req(u, '/api/config', { method: 'PUT', headers: json, body: JSON.stringify({ language: 'pt-BR', openWindow: false }) });
-    expect(await loadConfig()).toMatchObject({ language: 'pt-BR', openWindow: true });
+    await saveConfig({ openWindow: false });
+    await req(u, '/api/config', { method: 'PUT', headers: json, body: JSON.stringify({ language: 'pt-BR', openWindow: true }) });
+    expect(await loadConfig()).toMatchObject({ language: 'pt-BR', openWindow: false });
   });
 });
 
