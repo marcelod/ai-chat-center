@@ -239,7 +239,12 @@ export class ClaudeCodeProvider implements Provider {
       if (!isActive(reg)) continue;
       const sid = reg.sessionId;
       const l = byId.get(sid);
-      if (l ? l.status !== 'idle' : sameConfigDir(reg) && !(reg.pid !== null && this.alive(reg.pid) && !last.some((x) => x.pid === reg.pid))) {
+      // Connected after the last lookup: its first status should not wait for the long TTL.
+      if ((Date.parse(reg.connectedAt) || 0) > this.liveCache!.at) return LIVE_TTL_MS;
+      if (l) {
+        // Busy or waiting, or its claude just exited (Ctrl-D): exit detection needs fresh lookups.
+        if (l.status !== 'idle' || (reg.pid !== null && !this.alive(reg.pid))) return LIVE_TTL_MS;
+      } else if (sameConfigDir(reg) && !(reg.pid !== null && this.alive(reg.pid) && !last.some((x) => x.pid === reg.pid))) {
         return LIVE_TTL_MS;
       }
       if ((await busyAge(sid, this.now())) !== null || (await getWaiting(sid)) || (await getPending(sid))) return LIVE_TTL_MS;

@@ -44,7 +44,7 @@ describe('provider', () => {
     let t = Date.now();
     let calls = 0;
     let status: LiveSession['status'] = 'idle';
-    const p = new ClaudeCodeProvider(async () => (calls++, [live({ status })]), { now: () => t });
+    const p = new ClaudeCodeProvider(async () => (calls++, [live({ status })]), { now: () => t, isAlive: () => true });
     await p.listSessions(); // first lookup
     t += 6000;
     await p.listSessions();
@@ -63,12 +63,36 @@ describe('provider', () => {
     await reg();
     let t = Date.now();
     let calls = 0;
-    const p = new ClaudeCodeProvider(async () => (calls++, [live({ status: 'idle' })]), { now: () => t });
+    const p = new ClaudeCodeProvider(async () => (calls++, [live({ status: 'idle' })]), { now: () => t, isAlive: () => true });
     await p.listSessions();
+    t += 6000;
+    await p.listSessions();
+    expect(calls).toBe(1);
     await setBusy('s1');
     t += 6000;
     await p.listSessions();
     expect(calls).toBe(2);
+  });
+  it('a session that connects or whose claude exits brings back the 5 s lookups', async () => {
+    await reg();
+    let t = Date.now();
+    let calls = 0;
+    let alive = true;
+    const p = new ClaudeCodeProvider(async () => (calls++, [live({ status: 'idle' })]), { now: () => t, isAlive: () => alive });
+    await p.listSessions();
+    // its claude exits while idle and listed (Ctrl-D): look again soon
+    alive = false;
+    t += 6000;
+    await p.listSessions();
+    expect(calls).toBe(2);
+    // a new session connects after the last lookup
+    alive = true;
+    t += 6000;
+    await new Promise((r) => setTimeout(r, 5));
+    await reg('s2');
+    t = Math.max(t, Date.now() + 1);
+    await p.listSessions();
+    expect(calls).toBe(3);
   });
   it('falls back to cwd basename for name', async () => {
     await reg();

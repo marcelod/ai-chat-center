@@ -18,7 +18,26 @@ export function useAppWindow(select: (sessionId: string) => void): void {
     const id = newId();
     let lastSeq: number | null = null;
     let stopped = false;
-    const ping = async () => {
+    // One ping at a time: a focus request during the first ping must not be taken as the page's baseline.
+    let inFlight = false;
+    let again = false;
+    const ping = async (): Promise<void> => {
+      if (inFlight) {
+        again = true;
+        return;
+      }
+      inFlight = true;
+      try {
+        await pingOnce();
+      } finally {
+        inFlight = false;
+      }
+      if (again && !stopped) {
+        again = false;
+        await ping();
+      }
+    };
+    const pingOnce = async () => {
       try {
         const f = await api.pingWindow(id);
         if (stopped) return;

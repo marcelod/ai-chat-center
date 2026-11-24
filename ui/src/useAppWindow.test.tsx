@@ -59,4 +59,19 @@ describe('useAppWindow', () => {
     await flush();
     expect(select).toHaveBeenCalledExactlyOnceWith('s2');
   });
+
+  it('a focus request during the first ping waits for it, so that /cc is not lost', async () => {
+    let release!: (v: { seq: number; sessionId: string }) => void;
+    vi.mocked(api.pingWindow)
+      .mockImplementationOnce(() => new Promise((r) => (release = r)))
+      .mockResolvedValue({ seq: 2, sessionId: 's2' });
+    const select = vi.fn();
+    render(<Probe select={select} />);
+    await act(async () => {
+      window.dispatchEvent(new Event('acc:window-focus'));
+    });
+    await act(async () => release({ seq: 1, sessionId: 'old' }));
+    await flush();
+    expect(select).toHaveBeenCalledExactlyOnceWith('s2');
+  });
 });
