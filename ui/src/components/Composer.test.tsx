@@ -17,7 +17,7 @@ const box = () => screen.getByRole('textbox') as HTMLTextAreaElement;
 function setup() {
   render(
     <LangProvider lang="en">
-      <Composer name="x" disabled={false} onSend={async () => {}} />
+      <Composer sessionId="s" name="x" disabled={false} onSend={async () => {}} />
     </LangProvider>,
   );
 }
@@ -69,5 +69,64 @@ describe('Composer growth', () => {
   it('keeps the send button as tall as a one-line textarea', () => {
     setup();
     expect(screen.getByRole('button', { name: 'Send' })).toHaveClass('h-12');
+  });
+});
+
+describe('Composer drafts', () => {
+  const mount = (id: string, onSend: (t: string) => Promise<void> = async () => {}) => (
+    <LangProvider lang="en">
+      <Composer key={id} sessionId={id} name="x" disabled={false} onSend={onSend} />
+    </LangProvider>
+  );
+
+  it('keeps the draft per session across switching and reload', async () => {
+    sessionStorage.clear();
+    const user = userEvent.setup();
+    const { rerender, unmount } = render(mount('a'));
+    await user.type(box(), 'hello a');
+    rerender(mount('b'));
+    expect(box().value).toBe('');
+    await user.type(box(), 'hello b');
+    rerender(mount('a'));
+    expect(box().value).toBe('hello a');
+    expect(sessionStorage.getItem('acc.draft.a')).toBe('hello a');
+    unmount();
+    render(mount('b'));
+    expect(box().value).toBe('hello b');
+  });
+
+  it('clears the draft on send and removes the key when emptied', async () => {
+    sessionStorage.clear();
+    const user = userEvent.setup();
+    render(mount('a'));
+    await user.type(box(), 'x{Enter}');
+    expect(box().value).toBe('');
+    expect(sessionStorage.getItem('acc.draft.a')).toBeNull();
+  });
+
+  it('keeps the text when the send is rejected as disconnected (409)', async () => {
+    sessionStorage.clear();
+    const user = userEvent.setup();
+    render(mount('a', () => Promise.reject(Object.assign(new Error('409'), { status: 409 }))));
+    await user.type(box(), 'keep{Enter}');
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(box().value).toBe('keep');
+    expect(sessionStorage.getItem('acc.draft.a')).toBe('keep');
+  });
+
+  it('works in memory when sessionStorage throws', async () => {
+    const spy = vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    try {
+      const user = userEvent.setup();
+      const { rerender } = render(mount('m1'));
+      await user.type(box(), 'mem');
+      rerender(mount('m2'));
+      rerender(mount('m1'));
+      expect(box().value).toBe('mem');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
