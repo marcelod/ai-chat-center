@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ChatEvent, LiveSession, ProviderChange, SessionView } from '../shared/types.js';
 import { getRegistration, isActive, listRegistrations, markDisconnected, sameConfigDir, trustedKeys, type Registration } from '../core/registry.js';
-import { busyAge, clearBusy } from '../core/busy.js';
+import { busyAge, clearBusy, isBusy } from '../core/busy.js';
 import { countUnsigned, enqueue, peek } from '../core/inbox.js';
 import { getPending } from '../core/questions.js';
 import { getWaiting } from '../core/waiting.js';
@@ -293,7 +293,9 @@ export class ClaudeCodeProvider implements Provider {
       let waitingKind: SessionView['waitingKind'];
       if (disconnected) state = 'disconnected';
       else if (live.ok && l) {
-        state = l.status;
+        // `claude agents` says busy while a background task (shell, monitor) runs after the turn ended: busy
+        // needs the hub's turn marker too, otherwise the session is idle.
+        state = l.status === 'busy' && !(await isBusy(sid)) ? 'idle' : l.status;
         if (l.status === 'waiting') waitingKind = waiting?.kind ?? 'permission';
       } else if (waiting) {
         state = 'waiting';

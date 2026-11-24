@@ -1,4 +1,3 @@
-import { setBusy } from '../../src/core/busy.js';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,6 +6,7 @@ import { PROTOCOL, VERSION } from '../../src/core/version.js';
 import { listLiveSessions } from '../../src/hub/status.js';
 import type { LiveSession } from '../../src/shared/types.js';
 import { register, getRegistration, markDisconnected } from '../../src/core/registry.js';
+import { setBusy } from '../../src/core/busy.js';
 import { setWaiting } from '../../src/core/waiting.js';
 import { putPending, removePending } from '../../src/core/questions.js';
 import { setDisplayName } from '../../src/core/names.js';
@@ -32,9 +32,35 @@ const reg = (sid = 's1') =>
 const line = (uuid: string, text: string) =>
   JSON.stringify({ type: 'assistant', uuid, timestamp: '2026-01-01T00:00:00Z', message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n';
 
+describe('provider: busy needs the turn marker', () => {
+  it('claude agents busy + turn marker -> busy', async () => {
+    await reg();
+    await setBusy('s1');
+    const p = new ClaudeCodeProvider(async () => [live({ status: 'busy' })]);
+    expect((await p.listSessions()).connected[0].state).toBe('busy');
+  });
+  it('claude agents busy without a marker (background task only) -> idle', async () => {
+    await reg();
+    const p = new ClaudeCodeProvider(async () => [live({ status: 'busy' })]);
+    expect((await p.listSessions()).connected[0].state).toBe('idle');
+  });
+  it('claude agents idle + old marker -> idle', async () => {
+    await reg();
+    await setBusy('s1');
+    const p = new ClaudeCodeProvider(async () => [live({ status: 'idle' })]);
+    expect((await p.listSessions()).connected[0].state).toBe('idle');
+  });
+  it('waiting is unchanged without a marker', async () => {
+    await reg();
+    const p = new ClaudeCodeProvider(async () => [live({ status: 'waiting' })]);
+    expect((await p.listSessions()).connected[0].state).toBe('waiting');
+  });
+});
+
 describe('provider', () => {
   it('merges registration with live status', async () => {
     await reg();
+    await setBusy('s1');
     const p = new ClaudeCodeProvider(async () => [live()]);
     const { connected } = await p.listSessions();
     expect(connected).toMatchObject([{ sessionId: 's1', name: 'nm', state: 'busy', cwd: '/home/u/proj', pendingAppMessageIds: [] }]);
@@ -252,6 +278,7 @@ describe('provider', () => {
   it('live busy overrides a stale waiting file', async () => {
     await reg();
     await setWaiting('s1', 'permission');
+    await setBusy('s1');
     const p = new ClaudeCodeProvider(async () => [live({ status: 'busy' })]);
     const v = (await p.listSessions()).connected[0];
     expect(v.state).toBe('busy');
@@ -537,6 +564,7 @@ describe('provider: delivery stalled', () => {
     lockAt('s1', t - 45_000);
     expect((await p.listSessions()).connected[0].deliveryStalled).toBe(true); // heartbeat stopped
     status = 'busy';
+    await setBusy('s1');
     await new Promise((r) => setTimeout(r, 5));
     const p2 = new ClaudeCodeProvider(async () => [live({ status })], { now: () => t });
     expect((await p2.listSessions()).connected[0].deliveryStalled).toBeUndefined(); // the turn will end with Stop
