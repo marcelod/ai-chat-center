@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { register, getRegistration, listRegistrations, markDisconnected, isActive, updateRegistration, pruneRegistrations } from '../../src/core/registry.js';
+import { register, getRegistration, listRegistrations, markDisconnected, markRemoved, isActive, isRemoved, updateRegistration, pruneRegistrations } from '../../src/core/registry.js';
 import { enqueue } from '../../src/core/inbox.js';
 import { setBusy, clearBusy, isBusy } from '../../src/core/busy.js';
 import { paths } from '../../src/core/paths.js';
@@ -148,3 +148,48 @@ describe('registry: pruning (audit RT13)', () => {
     expect(await isBusy('recent')).toBe(true);
   });
 });
+
+describe('registry: removed from the app', () => {
+  it('markRemoved disconnects an active session with reason removed, drops its inbox and busy marker, and marks it', async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    await enqueue('s1', 'one');
+    await setBusy('s1');
+    expect(await markRemoved('s1')).toBe(true);
+    const r = (await getRegistration('s1'))!;
+    expect(isActive(r)).toBe(false);
+    expect(r.disconnectReason).toBe('removed');
+    expect(isRemoved(r)).toBe(true);
+    expect(await peekCount('s1')).toBe(0);
+    expect(await isBusy('s1')).toBe(false);
+  });
+  it('markRemoved keeps the reason of an already disconnected session and still marks it', async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    await markDisconnected('s1', 'exited');
+    const before = (await getRegistration('s1'))!;
+    expect(await markRemoved('s1')).toBe(true);
+    const r = (await getRegistration('s1'))!;
+    expect(r.disconnectReason).toBe('exited');
+    expect(r.disconnectedAt).toBe(before.disconnectedAt);
+    expect(isRemoved(r)).toBe(true);
+  });
+  it('markRemoved returns false for an unknown session', async () => {
+    expect(await markRemoved('nope')).toBe(false);
+    expect(await getRegistration('nope')).toBeNull();
+  });
+  it('a new register clears the mark', async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    await markRemoved('s1');
+    await register({ sessionId: 's1', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    const r = (await getRegistration('s1'))!;
+    expect(isActive(r)).toBe(true);
+    expect(isRemoved(r)).toBe(false);
+  });
+});
+
+async function peekCount(sid: string): Promise<number> {
+  try {
+    return fs.readdirSync(paths().inboxDir(sid)).filter((n) => n.endsWith('.msg')).length;
+  } catch {
+    return 0;
+  }
+}

@@ -6,7 +6,7 @@ import { ClaudeCodeProvider, SessionDisconnectedError, SessionProtocolError } fr
 import { PROTOCOL, VERSION } from '../../src/core/version.js';
 import { listLiveSessions } from '../../src/hub/status.js';
 import type { LiveSession } from '../../src/shared/types.js';
-import { register, getRegistration, markDisconnected } from '../../src/core/registry.js';
+import { register, getRegistration, markDisconnected, markRemoved } from '../../src/core/registry.js';
 import { setWaiting } from '../../src/core/waiting.js';
 import { putPending, removePending } from '../../src/core/questions.js';
 import { setDisplayName } from '../../src/core/names.js';
@@ -648,4 +648,37 @@ describe('provider: queued messages with their text (audit R3-F5)', () => {
     });
   });
 
+});
+
+describe('provider: sessions removed from the app', () => {
+  it('a removed active session leaves the list and poll reports the change', async () => {
+    await reg('s1');
+    await reg('s2');
+    const p = new ClaudeCodeProvider(async () => [live(), live({ sessionId: 's2', pid: 2 })]);
+    await p.poll();
+    await markRemoved('s1');
+    expect((await p.poll()).map((c) => c.type)).toContain('sessions');
+    expect((await p.listSessions()).connected.map((s) => s.sessionId)).toEqual(['s2']);
+  });
+  it('a removed ended session leaves the list', async () => {
+    await reg('s1');
+    await markDisconnected('s1', 'exited');
+    await markRemoved('s1');
+    const p = new ClaudeCodeProvider(async () => []);
+    expect((await p.listSessions()).connected).toEqual([]);
+  });
+  it('a new /cc (register) brings it back', async () => {
+    await reg('s1');
+    await markRemoved('s1');
+    const p = new ClaudeCodeProvider(async () => [live()]);
+    expect((await p.listSessions()).connected).toEqual([]);
+    await reg('s1');
+    expect((await p.listSessions()).connected).toMatchObject([{ sessionId: 's1', state: 'busy' }]);
+  });
+  it('sending to a removed session fails as disconnected', async () => {
+    await reg('s1');
+    await markRemoved('s1');
+    const p = new ClaudeCodeProvider(async () => [live()]);
+    await expect(p.send('s1', 'hi')).rejects.toBeInstanceOf(SessionDisconnectedError);
+  });
 });

@@ -36,7 +36,12 @@ export type Registration = {
   /** The message protocol of that code (see PROTOCOL; missing before 0.2.4). The hub sends only on its own. */
   protocol?: number;
   disconnectedAt?: string;
-  disconnectReason?: 'off' | 'clear' | 'exited';
+  disconnectReason?: 'off' | 'clear' | 'exited' | 'removed';
+  /**
+   * Set when the user removed the session from the app: it stays out of the session list. Only a new
+   * registration (a later /cc) clears it, since register() writes the whole record anew.
+   */
+  removedAt?: string;
 };
 
 function regFile(sid: string): string {
@@ -45,6 +50,9 @@ function regFile(sid: string): string {
 }
 
 export const isActive = (r: Registration): boolean => !r.disconnectedAt;
+
+/** The user removed the session from the app (see markRemoved). */
+export const isRemoved = (r: Registration): boolean => !!r.removedAt;
 
 /** The Claude config dir of this process (CLAUDE_CONFIG_DIR, else ~/.claude), resolved. */
 export function claudeConfigDir(): string {
@@ -143,6 +151,28 @@ export async function markDisconnected(
   if (!done) return;
   await clearInbox(sid);
   await clearBusy(sid);
+}
+
+/**
+ * Removes the session from the app: an active one is disconnected as by /cc off (reason `removed`: its
+ * waiter stops, queued messages and the busy marker are dropped); an ended one keeps its reason. Either
+ * way it is marked removed and stays out of the app's list until a new /cc registers it again.
+ * Returns false (and writes nothing) for an unknown session.
+ */
+export async function markRemoved(sid: string): Promise<boolean> {
+  const done = await locked(sid, async () => {
+    const r = await getRegistration(sid);
+    if (!r) return false;
+    const at = new Date().toISOString();
+    const next: Registration = isActive(r) ? { ...r, disconnectedAt: at, disconnectReason: 'removed' } : { ...r };
+    next.removedAt = r.removedAt ?? at;
+    await writeJsonAtomic(regFile(sid), next);
+    return true;
+  });
+  if (!done) return false;
+  await clearInbox(sid);
+  await clearBusy(sid);
+  return true;
 }
 
 /**

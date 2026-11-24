@@ -11,7 +11,7 @@ import { loadConfig, saveConfig, type Lang } from '../core/config.js';
 import { writePresence } from '../core/presence.js';
 import { assertToolUseId, getPending, validAnswers, writeAnswer, type AnswerFile } from '../core/questions.js';
 import { setDisplayName, validDisplayName } from '../core/names.js';
-import { getRegistration, isActive } from '../core/registry.js';
+import { getRegistration, isActive, markRemoved } from '../core/registry.js';
 import { VERSION } from '../core/version.js';
 import { CHALLENGE_RE, healthProof } from '../core/healthProof.js';
 import { createPairing } from './pairing.js';
@@ -343,7 +343,7 @@ export async function createHub(
       await saveConfig({ language: body.language as Lang });
       return sendJson(res, 200, { language: body.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|questions\/([^/]+))$/.exec(p);
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|remove|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid: string;
       try {
@@ -404,6 +404,14 @@ export async function createHub(
         let shown = name;
         if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path.basename(reg.cwd);
         return sendJson(res, 200, { name: shown });
+      }
+      if (m[2] === 'remove' && method === 'POST') {
+        // Takes the session out of the app (spec 2026-11-24-chat-menu-remove): an active one is disconnected.
+        req.resume();
+        if (!(await markRemoved(sid))) throw new HttpError(404, 'no such session');
+        // Every open page drops it now, not at the next poll.
+        fanOut({ type: 'sessions' });
+        return sendJson(res, 200, { ok: true });
       }
       if (m[2] === 'events' && method === 'GET') return sendJson(res, 200, await provider.events(sid));
       if (m[2] === 'messages' && method === 'POST') {
