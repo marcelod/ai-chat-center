@@ -131,7 +131,7 @@ var LANGS = ["en", "pt-BR"];
 async function loadConfig() {
   const c = await readJson(paths().config);
   const language = LANGS.includes(c?.language) ? c.language : "en";
-  return { language, answersFromApp: c?.answersFromApp === true, openWindow: c?.openWindow === true };
+  return { language, answersFromApp: c?.answersFromApp === true, openWindow: c?.openWindow !== false };
 }
 
 // src/core/turn.ts

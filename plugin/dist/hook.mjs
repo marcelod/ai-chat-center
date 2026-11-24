@@ -272,7 +272,7 @@ var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
 var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
 
 // src/core/version.ts
-var VERSION = "0.4.9";
+var VERSION = "0.4.10";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -630,7 +630,7 @@ var LANGS = ["en", "pt-BR"];
 async function loadConfig() {
   const c = await readJson(paths().config);
   const language = LANGS.includes(c?.language) ? c.language : "en";
-  return { language, answersFromApp: c?.answersFromApp === true, openWindow: c?.openWindow === true };
+  return { language, answersFromApp: c?.answersFromApp === true, openWindow: c?.openWindow !== false };
 }
 async function saveConfig(patch) {
   const next = { ...await loadConfig(), ...patch };
