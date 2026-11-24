@@ -59,7 +59,7 @@ function isAlive(pid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.4.6";
+var VERSION = "0.4.7";
 
 // src/core/healthProof.ts
 import crypto from "node:crypto";

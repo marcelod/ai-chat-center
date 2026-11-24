@@ -477,7 +477,7 @@ async function clearDelivered(sid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.4.6";
+var VERSION = "0.4.7";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -732,6 +732,21 @@ function agentMessages(content, names = /* @__PURE__ */ new Map()) {
   }
   return out;
 }
+function toAgentMessage(name, input) {
+  if (!isRecord(input)) return null;
+  const str = (v) => typeof v === "string" ? v.trim() : "";
+  if (name === "Agent" || name === "Task") {
+    const text = str(input.prompt);
+    if (!text) return null;
+    return { to: str(input.name) || str(input.description), text: truncate(text, RESULT_MAX * 4) };
+  }
+  if (name === "SendMessage") {
+    const text = str(input.message);
+    if (!text) return null;
+    return { to: str(input.to), text: truncate(text, RESULT_MAX * 4) };
+  }
+  return null;
+}
 function isRecord(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -780,6 +795,8 @@ var TranscriptParser = class {
   questions = /* @__PURE__ */ new Map();
   /** Subagent id → its description (from the Agent tool result), to name a subagent's hand-back. */
   agentNames = /* @__PURE__ */ new Map();
+  /** Agent tool_use id → the name shown for that agent, until its result gives the agent id. */
+  agentCalls = /* @__PURE__ */ new Map();
   /** Queued prompts already shown, to skip a later identical user entry. */
   queued = [];
   /** The last `!` command, for the output entry that follows it. */
@@ -857,6 +874,13 @@ var TranscriptParser = class {
           const q = { kind: "question", id: uuid, ts, toolUseId: block.id, questions };
           this.questions.set(block.id, q);
           created.push(q);
+          continue;
+        }
+        const toAgent = toAgentMessage(name, block.input);
+        if (toAgent) {
+          this.open = null;
+          created.push({ kind: "toAgent", id: uuid, ts, ...toAgent });
+          if (name !== "SendMessage") this.agentCalls.set(block.id, toAgent.to);
           continue;
         }
         const action = { toolUseId: block.id, name, summary: summarize(name, block.input) };
@@ -973,6 +997,13 @@ var TranscriptParser = class {
         else q.answerText = truncate(resultText(block.content), RESULT_MAX);
         this.questions.delete(block.tool_use_id);
         out.set(q.id, { ...q });
+        continue;
+      }
+      const call = this.agentCalls.get(block.tool_use_id);
+      if (call !== void 0) {
+        const id = /agentId:\s*([\w-]+)/.exec(resultText(block.content))?.[1];
+        if (id && call) this.agentNames.set(id, call);
+        this.agentCalls.delete(block.tool_use_id);
         continue;
       }
       const ev = this.byToolUse.get(block.tool_use_id);

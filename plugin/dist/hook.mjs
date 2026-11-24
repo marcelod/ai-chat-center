@@ -258,7 +258,7 @@ async function clearWaiting(sid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.4.6";
+var VERSION = "0.4.7";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -620,6 +620,9 @@ var en_default = {
       typing: "Claude is working",
       agent: "Agent",
       agentFrom: "Agent {name}",
+      toAgent: "Claude \u2192",
+      showAll: "Show all",
+      showLess: "Show less",
       branch: "Branch",
       model: "Model",
       effort: "Reasoning level",
@@ -755,6 +758,9 @@ var pt_BR_default = {
       typing: "Claude est\xE1 trabalhando",
       agent: "Agente",
       agentFrom: "Agente {name}",
+      toAgent: "Claude \u2192",
+      showAll: "Ver tudo",
+      showLess: "Ver menos",
       branch: "Branch",
       model: "Modelo",
       effort: "N\xEDvel de racioc\xEDnio",
