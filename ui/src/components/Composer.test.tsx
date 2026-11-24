@@ -114,6 +114,31 @@ describe('Composer drafts', () => {
     expect(sessionStorage.getItem('acc.draft.a')).toBe('keep');
   });
 
+  it('a send that fails after switching chat keeps the text as that chat\'s draft', async () => {
+    sessionStorage.clear();
+    const user = userEvent.setup();
+    let fail!: (e: Error) => void;
+    const onSend = () => new Promise<void>((_, reject) => (fail = reject));
+    const { rerender } = render(mount('fa', onSend));
+    await user.type(box(), 'lost?{Enter}');
+    rerender(mount('fb'));
+    await act(async () => fail(new Error('500')));
+    rerender(mount('fa'));
+    expect(box().value).toBe('lost?');
+  });
+
+  it('a failed send keeps the text when the chat is switched while the retry banner shows', async () => {
+    sessionStorage.clear();
+    const user = userEvent.setup();
+    const { rerender } = render(mount('fc', () => Promise.reject(new Error('500'))));
+    await user.type(box(), 'retry me{Enter}');
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(box().value).toBe('');
+    rerender(mount('fd'));
+    rerender(mount('fc'));
+    expect(box().value).toBe('retry me');
+  });
+
   it('works in memory when sessionStorage throws', async () => {
     const spy = vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
       throw new Error('blocked');

@@ -51,11 +51,37 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
     return () => ro.disconnect();
   }, [resize]);
 
+  // A failed send keeps its text (drafts spec): put back in the box (409), or held by the retry banner.
+  // Either is gone once the chat is switched, so the text then becomes the chat's draft unless it has one.
+  const mounted = useRef(false);
+  const textRef = useRef(text);
+  textRef.current = text;
+  const failureRef = useRef(failure);
+  failureRef.current = failure;
+  const keepAsDraft = useCallback(
+    (body: string) => {
+      if (!loadDraft(sessionId)) saveDraft(sessionId, body);
+    },
+    [sessionId],
+  );
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      const f = failureRef.current;
+      if (f?.kind === 'failed' && !textRef.current) keepAsDraft(f.text);
+    };
+  }, [keepAsDraft]);
+
   const deliver = async (body: string) => {
     setFailure(null);
     try {
       await onSend(body);
     } catch (e) {
+      if (!mounted.current) {
+        keepAsDraft(body);
+        return;
+      }
       if (statusOf(e) === 409) {
         setText((cur) => (cur === '' ? body : cur));
         const direction = versionOf(e);
