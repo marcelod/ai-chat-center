@@ -473,7 +473,7 @@ async function recordDelivered(sid, ids) {
 }
 
 // src/core/version.ts
-var VERSION = "0.4.3";
+var VERSION = "0.4.4";
 var PROTOCOL = 2;
 
 // src/core/registry.ts

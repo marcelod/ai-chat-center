@@ -447,6 +447,14 @@ import fs6 from "node:fs/promises";
 async function clearBusy(sid) {
   await removeFile(paths().busyFile(sid));
 }
+async function isBusy(sid) {
+  try {
+    await fs6.access(paths().busyFile(sid));
+    return true;
+  } catch {
+    return false;
+  }
+}
 async function busyAge(sid, now = Date.now()) {
   try {
     return now - (await fs6.stat(paths().busyFile(sid))).mtimeMs;
@@ -469,7 +477,7 @@ async function clearDelivered(sid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.4.3";
+var VERSION = "0.4.4";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -480,6 +488,7 @@ function regFile(sid) {
   return path6.join(paths().sessionsDir, `${sid}.json`);
 }
 var isActive = (r) => !r.disconnectedAt;
+var isRemoved = (r) => !!r.removedAt;
 function claudeConfigDir() {
   const raw = process.env.CLAUDE_CONFIG_DIR;
   return path6.resolve(raw && raw.trim() ? raw : path6.join(os2.homedir(), ".claude"));
@@ -519,6 +528,21 @@ async function markDisconnected(sid, reason) {
   if (!done) return;
   await clearInbox(sid);
   await clearBusy(sid);
+}
+async function markRemoved(sid) {
+  const done = await locked(sid, async () => {
+    const r = await getRegistration(sid);
+    if (!r) return false;
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    const next = isActive(r) ? { ...r, disconnectedAt: at, disconnectReason: "removed" } : { ...r };
+    next.removedAt = r.removedAt ?? at;
+    await writeJsonAtomic(regFile(sid), next);
+    return true;
+  });
+  if (!done) return false;
+  await clearInbox(sid);
+  await clearBusy(sid);
+  return true;
 }
 async function pruneRegistrations(maxAgeMs, now = Date.now()) {
   const pruned = [];
@@ -1263,6 +1287,7 @@ var ClaudeCodeProvider = class {
     const connected = [];
     const activeIds = /* @__PURE__ */ new Set();
     for (const reg of regs) {
+      if (isRemoved(reg)) continue;
       const sid = reg.sessionId;
       const l = liveById.get(sid);
       let disconnected = !isActive(reg);
@@ -1292,7 +1317,7 @@ var ClaudeCodeProvider = class {
       let waitingKind;
       if (disconnected) state = "disconnected";
       else if (live.ok && l) {
-        state = l.status;
+        state = l.status === "busy" && !await isBusy(sid) ? "idle" : l.status;
         if (l.status === "waiting") waitingKind = waiting?.kind ?? "permission";
       } else if (waiting) {
         state = "waiting";
@@ -1507,6 +1532,7 @@ var MIME = {
   ".gif": "image/gif",
   ".webp": "image/webp",
   ".ico": "image/x-icon",
+  ".webmanifest": "application/manifest+json",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
   ".txt": "text/plain; charset=utf-8",
@@ -1770,7 +1796,7 @@ data: ${JSON.stringify(c)}
       await saveConfig({ language: body.language });
       return sendJson(res, 200, { language: body.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|questions\/([^/]+))$/.exec(p);
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|remove|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid;
       try {
@@ -1830,6 +1856,12 @@ data: ${JSON.stringify(c)}
         let shown = name;
         if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path9.basename(reg.cwd);
         return sendJson(res, 200, { name: shown });
+      }
+      if (m[2] === "remove" && method === "POST") {
+        req.resume();
+        if (!await markRemoved(sid)) throw new HttpError(404, "no such session");
+        fanOut({ type: "sessions" });
+        return sendJson(res, 200, { ok: true });
       }
       if (m[2] === "events" && method === "GET") return sendJson(res, 200, await provider.events(sid));
       if (m[2] === "messages" && method === "POST") {
