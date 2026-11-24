@@ -62,6 +62,8 @@ export type SessionView = {
   model?: string;
   /** Reasoning effort level recorded at the last prompt; absent when Claude Code does not send it. */
   effort?: string;
+  /** Pinned to the top of the list in the app (see core/pins.ts). */
+  pinned?: true;
   state: 'busy' | 'idle' | 'waiting' | 'disconnected';
   waitingKind?: 'permission' | 'input' | 'question';
   /** An AskUserQuestion the app can answer; only for an active session. */

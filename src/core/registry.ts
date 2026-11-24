@@ -203,6 +203,7 @@ export async function pruneRegistrations(maxAgeMs: number, now = Date.now()): Pr
     await clearBusy(sid);
     await clearWaiting(sid);
     await clearDelivered(sid);
+    await removeFile(paths().pinsFile(sid)).catch(() => {});
   }
   return pruned;
 }

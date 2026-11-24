@@ -14,6 +14,7 @@ import { saveConfig, loadConfig } from '../../src/core/config.js';
 import { putPending, readAnswer } from '../../src/core/questions.js';
 import { paths } from '../../src/core/paths.js';
 import { getDisplayName } from '../../src/core/names.js';
+import { isPinned } from '../../src/core/pins.js';
 import { register, markDisconnected, getRegistration, isRemoved } from '../../src/core/registry.js';
 
 const TOKEN = 'a'.repeat(64);
@@ -652,6 +653,47 @@ describe('one app window', () => {
     expect((await ping(u, { id: W1 }, { 'content-type': 'application/json' })).status).toBe(401);
     for (const body of [{}, { id: 'x' }, { id: 'A'.repeat(32) }, []]) expect((await ping(u, body)).status).toBe(400);
     expect(JSON.parse((await ask(u)).body).code).toBeDefined();
+  });
+});
+
+describe('pin and disconnect endpoints', () => {
+  const call = (u: URL, what: string, method: string, body?: unknown, sid = 's1', headers: Record<string, string> = auth) =>
+    req(u, `/api/sessions/${sid}/${what}`, { method, headers: { ...headers, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  beforeEach(async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
+  });
+  it('pin: 200 stores and clears; 400 bad body; 404 unknown; 401/403 without checks', async () => {
+    const u = await start(fakeProvider());
+    const r = await call(u, 'pin', 'PUT', { pinned: true });
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.body)).toEqual({ pinned: true });
+    expect(await isPinned('s1')).toBe(true);
+    expect((await call(u, 'pin', 'PUT', { pinned: false })).status).toBe(200);
+    expect(await isPinned('s1')).toBe(false);
+    for (const b of [{}, { pinned: 'yes' }, [], { pinned: 1 }]) expect((await call(u, 'pin', 'PUT', b)).status).toBe(400);
+    expect((await call(u, 'pin', 'PUT', { pinned: true }, 'nope')).status).toBe(404);
+    expect((await call(u, 'pin', 'PUT', { pinned: true }, 's1', {})).status).toBe(401);
+    expect((await call(u, 'pin', 'PUT', { pinned: true }, 's1', { ...auth, origin: 'http://evil.com' })).status).toBe(403);
+    expect(await isPinned('s1')).toBe(false);
+    expect((await call(u, 'pin', 'POST', { pinned: true })).status).toBe(404);
+  });
+  it('disconnect: 200 ends an active session like /cc off and keeps it listed (not removed); 409 when already ended', async () => {
+    const u = await start(fakeProvider());
+    const r = await call(u, 'disconnect', 'POST');
+    expect(r.status).toBe(200);
+    const reg = (await getRegistration('s1'))!;
+    expect(reg.disconnectReason).toBe('off');
+    expect(reg.disconnectedAt).toBeDefined();
+    expect(isRemoved(reg)).toBe(false);
+    expect((await call(u, 'disconnect', 'POST')).status).toBe(409);
+  });
+  it('disconnect: 404 unknown, 401/403 without checks (nothing changes), only POST', async () => {
+    const u = await start(fakeProvider());
+    expect((await call(u, 'disconnect', 'POST', undefined, 'nope')).status).toBe(404);
+    expect((await call(u, 'disconnect', 'POST', undefined, 's1', {})).status).toBe(401);
+    expect((await call(u, 'disconnect', 'POST', undefined, 's1', { ...auth, origin: 'http://evil.com' })).status).toBe(403);
+    expect((await call(u, 'disconnect', 'GET')).status).toBe(404);
+    expect((await getRegistration('s1'))!.disconnectedAt).toBeUndefined();
   });
 });
 

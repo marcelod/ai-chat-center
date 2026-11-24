@@ -1,3 +1,4 @@
+import { isPinned } from '../core/pins.js';
 import { getDisplayName } from '../core/names.js';
 import { readGitBranch } from '../core/gitBranch.js';
 import { getEffort, shortModel } from '../core/meta.js';
@@ -322,6 +323,7 @@ export class ClaudeCodeProvider implements Provider {
         _sort: Date.parse(reg.connectedAt) || 0,
       };
       if (custom) view.originalName = originalName;
+      if (await isPinned(sid)) view.pinned = true;
       if (waitingKind) view.waitingKind = waitingKind;
       if (pendingQuestion) view.pendingQuestion = pendingQuestion;
       if (state === 'idle' && (await this.deliveryStalled(sid, queued))) view.deliveryStalled = true;

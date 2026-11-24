@@ -11,7 +11,8 @@ import { loadConfig, saveConfig, type Lang } from '../core/config.js';
 import { writePresence } from '../core/presence.js';
 import { assertToolUseId, getPending, validAnswers, writeAnswer, type AnswerFile } from '../core/questions.js';
 import { setDisplayName, validDisplayName } from '../core/names.js';
-import { getRegistration, isActive, markRemoved } from '../core/registry.js';
+import { setPinned } from '../core/pins.js';
+import { getRegistration, isActive, markDisconnected, markRemoved } from '../core/registry.js';
 import { VERSION } from '../core/version.js';
 import { CHALLENGE_RE, healthProof } from '../core/healthProof.js';
 import { createPairing } from './pairing.js';
@@ -344,7 +345,7 @@ export async function createHub(
       await saveConfig({ language: body.language as Lang });
       return sendJson(res, 200, { language: body.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|remove|questions\/([^/]+))$/.exec(p);
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|pin|disconnect|remove|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid: string;
       try {
@@ -405,6 +406,24 @@ export async function createHub(
         let shown = name;
         if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path.basename(reg.cwd);
         return sendJson(res, 200, { name: shown });
+      }
+      if (m[2] === 'pin' && method === 'PUT') {
+        const body = (await readJsonBody(req)) as { pinned?: unknown } | null;
+        if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.pinned !== 'boolean') throw new HttpError(400, 'invalid body');
+        if (!(await getRegistration(sid))) throw new HttpError(404, 'no such session');
+        await setPinned(sid, body.pinned);
+        fanOut({ type: 'sessions' });
+        return sendJson(res, 200, { pinned: body.pinned });
+      }
+      if (m[2] === 'disconnect' && method === 'POST') {
+        // Like /cc off, from the app: the session keeps running in the terminal and stays in the list.
+        req.resume();
+        const reg = await getRegistration(sid);
+        if (!reg) throw new HttpError(404, 'no such session');
+        if (!isActive(reg)) throw new HttpError(409, 'already disconnected');
+        await markDisconnected(sid, 'off');
+        fanOut({ type: 'sessions' });
+        return sendJson(res, 200, { ok: true });
       }
       if (m[2] === 'remove' && method === 'POST') {
         // Takes the session out of the app (spec 2026-11-24-chat-menu-remove): an active one is disconnected.

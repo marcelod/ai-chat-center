@@ -9,6 +9,7 @@ import { register, getRegistration, markDisconnected, markRemoved } from '../../
 import { setBusy } from '../../src/core/busy.js';
 import { setWaiting } from '../../src/core/waiting.js';
 import { putPending, removePending } from '../../src/core/questions.js';
+import { setPinned } from '../../src/core/pins.js';
 import { setDisplayName } from '../../src/core/names.js';
 import { setEffort } from '../../src/core/meta.js';
 import { peek } from '../../src/core/inbox.js';
@@ -676,6 +677,18 @@ describe('provider: queued messages with their text (audit R3-F5)', () => {
     });
   });
 
+});
+
+describe('provider: pinned', () => {
+  it('pinned: true only for pinned sessions, also after disconnect', async () => {
+    await reg();
+    const p = new ClaudeCodeProvider(async () => [live()]);
+    expect((await p.listSessions()).connected[0].pinned).toBeUndefined();
+    await setPinned('s1', true);
+    expect((await p.listSessions()).connected[0].pinned).toBe(true);
+    await markDisconnected('s1', 'off');
+    expect((await p.listSessions()).connected[0]).toMatchObject({ pinned: true, state: 'disconnected' });
+  });
 });
 
 describe('provider: sessions removed from the app', () => {
