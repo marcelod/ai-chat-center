@@ -2,10 +2,11 @@ import { isPinned } from '../core/pins.js';
 import { getDisplayName } from '../core/names.js';
 import { readGitBranch } from '../core/gitBranch.js';
 import { getEffort, getMode, shortModel } from '../core/meta.js';
+import { readUsage } from '../core/usage.js';
 import { getBackground } from '../core/background.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { ChatEvent, LiveSession, ProviderChange, SessionView } from '../shared/types.js';
+import type { ChatEvent, LiveSession, ProviderChange, SessionsResponse, SessionView } from '../shared/types.js';
 import { getRegistration, isActive, isRemoved, listRegistrations, markDisconnected, sameConfigDir, trustedKeys, type Registration } from '../core/registry.js';
 import { busyAge, clearBusy, isBusy } from '../core/busy.js';
 import { countUnsigned, enqueue, peek } from '../core/inbox.js';
@@ -261,7 +262,7 @@ export class ClaudeCodeProvider implements Provider {
     return LIVE_IDLE_TTL_MS;
   }
 
-  async listSessions(): Promise<{ connected: SessionView[]; others: LiveSession[] }> {
+  async listSessions(): Promise<SessionsResponse> {
     const regs = await listRegistrations();
     const live = await this.live(false, await this.liveTtl(regs));
     const liveById = new Map(live.list.map((l) => [l.sessionId, l]));
@@ -363,7 +364,8 @@ export class ClaudeCodeProvider implements Provider {
     });
 
     const others = live.list.filter((l) => l.kind === 'interactive' && !activeIds.has(l.sessionId));
-    return { connected: connected.map(({ _sort, ...v }) => v), others };
+    const usage = await readUsage();
+    return { connected: connected.map(({ _sort, ...v }) => v), others, ...(usage ? { usage } : {}) };
   }
 
   async events(sid: string): Promise<ChatEvent[]> {
@@ -406,9 +408,11 @@ export class ClaudeCodeProvider implements Provider {
       for (const sid of [...m.keys()]) if (!known.has(sid)) m.delete(sid);
     }
 
-    const { connected, others } = await this.listSessions();
+    const { connected, others, usage } = await this.listSessions();
     const signature = JSON.stringify({
       others,
+      // updatedAt left out: an unchanged value refreshed every minute is not a change worth a refetch.
+      usage: usage ? [usage.fiveHour ?? null, usage.sevenDay ?? null] : null,
       connected: connected.map((s) => [
         s.sessionId,
         s.state,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
-import { ANSWERS_OFF, ANSWERS_ON, WINDOW_OFF, WINDOW_ON, CONNECTED, UNKNOWN_ARG } from '../../src/hooks/hook.js';
+import { ANSWERS_OFF, ANSWERS_ON, WINDOW_OFF, WINDOW_ON, USAGE_ON, USAGE_OFF, USAGE_FAILED, CONNECTED, UNKNOWN_ARG } from '../../src/hooks/hook.js';
 
 const md = fs.readFileSync('plugin/commands/cc.md', 'utf8');
 
@@ -68,8 +68,15 @@ describe('plugin/commands/cc.md answers from the app', () => {
     expect(md.indexOf(WINDOW_ON)).toBeLessThan(md.indexOf('the plugin hook did not run'));
     expect(UNKNOWN_ARG).toContain('/ai-chat-center:cc window on');
   });
+  it('has a branch for the usage ON, OFF and failed status lines, before the "did not run" catch-all', () => {
+    for (const line of [USAGE_ON, USAGE_OFF, USAGE_FAILED]) {
+      expect(md).toContain(`"${line}"`);
+      expect(md.indexOf(line)).toBeLessThan(md.indexOf('the plugin hook did not run'));
+    }
+    expect(UNKNOWN_ARG).toContain('/ai-chat-center:cc usage off');
+  });
   it('the unknown-argument branch names every form of /cc', () => {
     expect(UNKNOWN_ARG).toContain('/ai-chat-center:cc answers on');
-    expect(md).toMatch(/saying to use \/cc, \/ai-chat-center:cc off, \/ai-chat-center:cc answers on, \/ai-chat-center:cc answers off, \/ai-chat-center:cc window on or \/ai-chat-center:cc window off\./);
+    expect(md).toMatch(/saying to use \/cc, \/ai-chat-center:cc off, \/ai-chat-center:cc answers on, \/ai-chat-center:cc answers off, \/ai-chat-center:cc window on, \/ai-chat-center:cc window off, \/ai-chat-center:cc usage on or \/ai-chat-center:cc usage off\./);
   });
 });

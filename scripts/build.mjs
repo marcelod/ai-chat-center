@@ -19,6 +19,7 @@ await build({
     waiter: path.join(root, 'src/bin/waiter.ts'),
     hub: path.join(root, 'src/bin/hub.ts'),
     open: path.join(root, 'src/bin/open.ts'),
+    statusline: path.join(root, 'src/bin/statusline.ts'),
   },
   outdir: dist,
   bundle: true,

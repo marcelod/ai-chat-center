@@ -104,4 +104,9 @@ export type ProviderChange =
   | { type: 'events'; sessionId: string; events: ChatEvent[] }
   | { type: 'sessions' };
 
-export type SessionsResponse = { connected: SessionView[]; others: LiveSession[] };
+/** One rate-limit window of the account, as the status line reports it. */
+export type UsageWindow = { usedPercentage: number; resetsAt: string };
+/** The account's usage of its rate-limit windows, recorded by the status line wrapper. */
+export type Usage = { fiveHour?: UsageWindow; sevenDay?: UsageWindow; updatedAt: string };
+
+export type SessionsResponse = { connected: SessionView[]; others: LiveSession[]; usage?: Usage };

@@ -2,14 +2,18 @@
   "hook": {
     "ready": "AI Chat Center is ready: {url}",
     "hubFailed": "AI Chat Center: the hub failed to start. See {log}",
-    "unknownArg": "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on or /ai-chat-center:cc window off.",
+    "unknownArg": "AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on, /ai-chat-center:cc window off, /ai-chat-center:cc usage on or /ai-chat-center:cc usage off.",
     "answersOn": "AI Chat Center: you can now answer multiple-choice questions from the app, including confirmations. To turn off: /ai-chat-center:cc answers off",
     "answersOff": "AI Chat Center: multiple-choice questions are answered only in the terminal again.",
     "windowOn": "AI Chat Center: the app will open in its own window when you connect. To turn off: /ai-chat-center:cc window off",
     "windowOff": "AI Chat Center: the app will no longer open in its own window.",
     "windowNoBrowser": "No Chrome, Chromium or Edge found: the link is still shown.",
     "windowLauncher": "The “AI Chat Center” shortcut was added to your apps (the app menu on Linux, the Start menu on Windows, Applications in your home folder on macOS): it opens the app (and starts the hub if needed).",
-    "launcherComment": "Follow and answer your Claude Code sessions"
+    "launcherComment": "Follow and answer your Claude Code sessions",
+    "usageOn": "AI Chat Center: the app now shows the 5-hour usage. Your status line stays the same (it runs through a small AI Chat Center wrapper). To undo: /ai-chat-center:cc usage off",
+    "usageOff": "AI Chat Center: your status line is back as it was; the app no longer receives the 5-hour usage.",
+    "usageOffChanged": "AI Chat Center: your status line was changed since usage on, so it was left as it is; the app no longer receives the 5-hour usage.",
+    "usageFailed": "AI Chat Center: could not change the status line in settings.json. See {log}"
   },
   "ui": {
     "rename": {
@@ -153,6 +157,20 @@
       "attachFailed": "Could not upload the attachments. Try again.",
       "uploading": "Uploading attachments…",
       "dropHere": "Drop files to attach them"
+    },
+    "usage": {
+      "label": "5-hour usage",
+      "fiveHour": "5-hour window",
+      "sevenDay": "7-day window",
+      "summary": "{pct}% · resets in {left}",
+      "used": "{pct}% used",
+      "resetsAt": "Resets at {time} (in {left})",
+      "resetsOn": "Resets {time}",
+      "restarted": "Window restarted",
+      "updated": "Updated at {time} (from a session's status line)",
+      "hours": "{h}h{m}",
+      "minutes": "{m} min",
+      "hint": "5-hour usage: turn it on with /ai-chat-center:cc usage on"
     },
     "notifications": {
       "label": "Browser notifications",

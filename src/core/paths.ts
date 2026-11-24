@@ -35,6 +35,12 @@ export interface Paths {
   presenceFile: string;
   /** Files attached in the app, one folder per session (see attachments.ts). */
   attachmentsDir: string;
+  /** The account's rate limits, written by the status line wrapper (see usage.ts). */
+  usageFile: string;
+  /** The status line the wrapper replaced, to call it and to restore it (see statusline.ts). */
+  statuslineFile: string;
+  /** A copy of dist/statusline.mjs at a path that survives plugin updates (settings.json points to it). */
+  statuslineScript: string;
   logDir: string;
 }
 
@@ -71,6 +77,9 @@ export function paths(): Paths {
     backgroundFile: (sid) => (assertSessionId(sid), path.join(home, 'backgrounds', `${sid}.json`)),
     presenceFile: path.join(home, 'app-presence.json'),
     attachmentsDir: path.join(home, 'attachments'),
+    usageFile: path.join(home, 'usage.json'),
+    statuslineFile: path.join(home, 'statusline.json'),
+    statuslineScript: path.join(home, 'bin', 'statusline.mjs'),
     logDir: path.join(home, 'logs'),
   };
 }

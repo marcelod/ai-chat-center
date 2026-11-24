@@ -2,14 +2,18 @@
   "hook": {
     "ready": "AI Chat Center pronto: {url}",
     "hubFailed": "AI Chat Center: o hub não iniciou. Veja {log}",
-    "unknownArg": "AI Chat Center: argumento desconhecido. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on ou /ai-chat-center:cc window off.",
+    "unknownArg": "AI Chat Center: argumento desconhecido. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on, /ai-chat-center:cc window off, /ai-chat-center:cc usage on ou /ai-chat-center:cc usage off.",
     "answersOn": "AI Chat Center: agora você pode responder pelo app as perguntas de múltipla escolha, inclusive confirmações. Para desligar: /ai-chat-center:cc answers off",
     "answersOff": "AI Chat Center: perguntas de múltipla escolha voltam a ser respondidas só no terminal.",
     "windowOn": "AI Chat Center: o app vai abrir em janela própria ao conectar. Para desligar: /ai-chat-center:cc window off",
     "windowOff": "AI Chat Center: o app não abre mais em janela própria.",
     "windowNoBrowser": "Nenhum Chrome, Chromium ou Edge encontrado: o link continua sendo mostrado.",
     "windowLauncher": "O atalho “AI Chat Center” foi adicionado aos seus aplicativos (menu de aplicativos no Linux, menu Iniciar no Windows, Aplicativos da sua pasta pessoal no macOS): ele abre o app (e inicia o hub, se preciso).",
-    "launcherComment": "Acompanhe e responda suas sessões do Claude Code"
+    "launcherComment": "Acompanhe e responda suas sessões do Claude Code",
+    "usageOn": "AI Chat Center: o app agora mostra o uso do período de 5 horas. Sua status line continua igual (ela passa por um pequeno wrapper do AI Chat Center). Para desfazer: /ai-chat-center:cc usage off",
+    "usageOff": "AI Chat Center: sua status line voltou a ser a de antes; o app não recebe mais o uso do período de 5 horas.",
+    "usageOffChanged": "AI Chat Center: sua status line foi alterada depois do usage on, então ficou como está; o app não recebe mais o uso do período de 5 horas.",
+    "usageFailed": "AI Chat Center: não foi possível alterar a status line no settings.json. Veja {log}"
   },
   "ui": {
     "rename": {
@@ -153,6 +157,20 @@
       "attachFailed": "Não foi possível enviar os anexos. Tente de novo.",
       "uploading": "Enviando anexos…",
       "dropHere": "Solte os arquivos para anexá-los"
+    },
+    "usage": {
+      "label": "Uso de 5 horas",
+      "fiveHour": "Período de 5 horas",
+      "sevenDay": "Período de 7 dias",
+      "summary": "{pct}% · reinicia em {left}",
+      "used": "{pct}% usado",
+      "resetsAt": "Reinicia às {time} (em {left})",
+      "resetsOn": "Reinicia {time}",
+      "restarted": "Período reiniciado",
+      "updated": "Atualizado às {time} (pela status line de uma sessão)",
+      "hours": "{h}h{m}",
+      "minutes": "{m} min",
+      "hint": "Uso de 5 horas: ative com /ai-chat-center:cc usage on"
     },
     "notifications": {
       "label": "Notificações do navegador",

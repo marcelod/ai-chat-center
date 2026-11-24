@@ -1,15 +1,18 @@
 import { useState } from 'react';
-import type { LiveSession, SessionView } from '@shared/types';
+import type { LiveSession, SessionView, Usage } from '@shared/types';
 import { formatTime, initials, previewText } from '../format';
 import { useLang, useT } from '../i18n';
 import { Logo } from './Logo';
 import { ChevronIcon, PanelIcon, PinIcon, SearchIcon } from './icons';
 import { SettingsMenu, type NotificationsControl } from './SettingsMenu';
+import { UsageMeter } from './UsageMeter';
 import type { Language } from '../api';
 
 type Props = {
   connected: SessionView[];
   others: LiveSession[];
+  /** The account's rate-limit usage, when `/cc usage on` records it. */
+  usage?: Usage;
   unread: Record<string, number>;
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -27,7 +30,7 @@ const dotColor: Record<SessionView['state'], string> = {
   disconnected: 'bg-disconnected',
 };
 
-export function SessionList({ connected, others, unread, selectedId, onSelect, onLanguage, error, notifications, collapsed = false, onToggleCollapsed }: Props) {
+export function SessionList({ connected, others, usage, unread, selectedId, onSelect, onLanguage, error, notifications, collapsed = false, onToggleCollapsed }: Props) {
   const t = useT();
   const lang = useLang();
   const [query, setQuery] = useState('');
@@ -46,7 +49,7 @@ export function SessionList({ connected, others, unread, selectedId, onSelect, o
           <>
             <Logo size={34} />
             <h1 className="flex-1 font-display text-xl font-semibold">{t('ui.title')}</h1>
-            <SettingsMenu onLanguage={onLanguage} notifications={notifications} />
+            <SettingsMenu onLanguage={onLanguage} notifications={notifications} usageHint={!usage?.fiveHour} />
           </>
         )}
         {onToggleCollapsed && (
@@ -186,6 +189,8 @@ export function SessionList({ connected, others, unread, selectedId, onSelect, o
           )}
         </section>
       )}
+
+      <UsageMeter usage={usage} collapsed={collapsed} />
     </div>
   );
 }

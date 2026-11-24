@@ -18,6 +18,7 @@
 //  auth_success, auth_storage_failure, elicitation_dialog, elicitation_url_dialog,
 //  elicitation_complete, elicitation_response, agent_needs_input, agent_completed, ...
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { assertSessionId, paths } from '../core/paths.js';
@@ -26,6 +27,8 @@ import { claudeConfigDir, codeStamp, getRegistration, isActive, markDisconnected
 import { clearWaiting, setWaiting } from '../core/waiting.js';
 import { setBusy } from '../core/busy.js';
 import { setEffort, setMode } from '../core/meta.js';
+import { installStatusline, refreshWrapper, removeStatusline, type InstallResult, type RemoveResult } from './statusline.js';
+import { readStatuslineState } from '../core/statuslineState.js';
 import { clearTurnOrigin, promptOrigin, setTurnOrigin } from '../core/turn.js';
 import { ensureHub } from './ensureHub.js';
 import { loadConfig, saveConfig, type Lang } from '../core/config.js';
@@ -64,6 +67,8 @@ export interface HookContext {
   spawn?: typeof import('node:child_process').spawn;
   /** The launcher icon (src/hooks/launcher.ts). Absent (tests): no launcher is written or removed. */
   launcher?: { install(comment: string): boolean; remove(): void };
+  /** The status line wrapper of `/cc usage on|off` (src/hooks/statusline.ts). Absent (tests): settings.json untouched. */
+  statusline?: { install(): Promise<InstallResult>; remove(): Promise<RemoveResult>; refresh(): Promise<void> };
 }
 export interface HookResult {
   stdout?: string;
@@ -72,9 +77,12 @@ export interface HookResult {
 
 const MAX_PREVIOUS_KEYS = 20;
 
-export const UNKNOWN_ARG = 'AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on or /ai-chat-center:cc window off.';
+export const UNKNOWN_ARG = 'AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on, /ai-chat-center:cc window off, /ai-chat-center:cc usage on or /ai-chat-center:cc usage off.';
 export const WINDOW_ON = 'AI Chat Center: opening the app in its own window is ON';
 export const WINDOW_OFF = 'AI Chat Center: opening the app in its own window is OFF';
+export const USAGE_ON = 'AI Chat Center: showing the 5-hour usage in the app is ON';
+export const USAGE_OFF = 'AI Chat Center: showing the 5-hour usage in the app is OFF';
+export const USAGE_FAILED = 'AI Chat Center: the status line could not be changed';
 export const ANSWERS_ON = 'AI Chat Center: answering questions from the app is ON';
 export const ANSWERS_OFF = 'AI Chat Center: answering questions from the app is OFF';
 export const CONNECTED = 'AI Chat Center: connected';
@@ -128,6 +136,7 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
   // A question left by a hook killed without cleanup would keep the session waiting in the app.
   await fs.promises.rm(paths().questionsDir(sid), { recursive: true, force: true });
   const { language, openWindow } = await loadConfig();
+  await refreshStatusline(ctx);
   // The token URL is shown to the user only (systemMessage). The model gets the key and a status
   // line: the token must not end up in the model context or be repeated in its reply.
   let status: string;
@@ -145,6 +154,7 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
       // The plugin folder and the Node path change with updates: keep the launcher pointing at this copy.
       refreshLauncher(ctx, language);
       await openWindowQuietly(url, ctx, sid);
+
     }
   } catch (e) {
     // Keep the registration: the hub will show the session once it is up.
@@ -159,6 +169,33 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
 }
 
 /** Writes or refreshes the launcher icon; true when there is one (Linux, Windows, macOS). Never fails the hook. */
+/** `/cc usage on|off`: points the status line at the wrapper, or puts the user's back. */
+async function usageCommand(on: boolean, ctx: HookContext): Promise<HookResult> {
+  const { language } = await loadConfig();
+  try {
+    if (on) {
+      const r = await (ctx.statusline?.install() ?? Promise.resolve<InstallResult>('installed'));
+      if (r === 'failed') throw new Error('status line install failed');
+      return output(USAGE_ON, t(language, 'hook.usageOn'));
+    }
+    const r = await (ctx.statusline?.remove() ?? Promise.resolve<RemoveResult>('restored'));
+    return output(USAGE_OFF, t(language, r === 'changed-since' ? 'hook.usageOffChanged' : 'hook.usageOff'));
+  } catch (e) {
+    logError(e);
+    const log = path.join(paths().logDir, 'hook.log');
+    return output(`${USAGE_FAILED}. See ${log}`, t(language, 'hook.usageFailed', { log }));
+  }
+}
+
+/** While `usage on` is set, every /cc copies the wrapper of this plugin version to its stable path. */
+async function refreshStatusline(ctx: HookContext): Promise<void> {
+  try {
+    if (ctx.statusline && (await readStatuslineState())) await ctx.statusline.refresh();
+  } catch (e) {
+    logError(e);
+  }
+}
+
 function refreshLauncher(ctx: HookContext, language: Lang): boolean {
   try {
     return ctx.launcher?.install(t(language, 'hook.launcherComment')) ?? false;
@@ -218,6 +255,7 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
       const { language } = await saveConfig({ answersFromApp: on });
       answersResult = output(on ? ANSWERS_ON : ANSWERS_OFF, t(language, on ? 'hook.answersOn' : 'hook.answersOff'));
     }
+    if (cmd === 'usage-on' || cmd === 'usage-off') answersResult = await usageCommand(cmd === 'usage-on', ctx);
     if (cmd === 'on') return connect(input, resolve, ctx);
     // `/cc answers on|off` and `/cc window on|off` are typed turns too: they get the same bookkeeping as any other prompt.
     const reg = await getRegistration(sid);
@@ -285,6 +323,9 @@ function logError(e: unknown): void {
   }
 }
 
+/** dist/statusline.mjs, next to this bundle (dist/hook.mjs). */
+const wrapperSource = () => path.join(path.dirname(fileURLToPath(import.meta.url)), 'statusline.mjs');
+
 export async function main(): Promise<void> {
   let result: HookResult = { exitCode: 0 };
   try {
@@ -294,6 +335,11 @@ export async function main(): Promise<void> {
     result = await handleHook(event, input, {
       ensureHub: (notice) => ensureHub({ notice }),
       launcher: { install: (comment) => installLauncher({ comment }), remove: () => removeLauncher() },
+      statusline: {
+        install: () => installStatusline({ source: wrapperSource() }),
+        remove: () => removeStatusline({}),
+        refresh: () => refreshWrapper({ source: wrapperSource() }),
+      },
     });
   } catch (e) {
     logError(e);

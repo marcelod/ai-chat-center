@@ -51,6 +51,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
         <SessionList
           connected={data.connected}
           others={data.others}
+          usage={data.usage}
           unread={unread.counts}
           selectedId={selectedId}
           onSelect={select}

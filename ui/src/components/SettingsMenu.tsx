@@ -9,9 +9,12 @@ export type NotificationsControl = { supported: boolean; enabled: boolean; onTog
 export function SettingsMenu({
   onLanguage,
   notifications,
+  usageHint = false,
 }: {
   onLanguage: (l: Language) => void;
   notifications?: NotificationsControl;
+  /** No usage recorded: say how to turn it on. */
+  usageHint?: boolean;
 }) {
   const t = useT();
   const lang = useLang();
@@ -86,6 +89,7 @@ export function SettingsMenu({
               {t('ui.notifications.enable')}
             </label>
           )}
+          {usageHint && <p className="mt-3 rounded-[10px] bg-field p-2 text-xs text-muted">{t('ui.usage.hint')}</p>}
         </div>
       )}
     </div>

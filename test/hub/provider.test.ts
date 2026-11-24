@@ -686,6 +686,21 @@ describe('provider: queued messages with their text (audit R3-F5)', () => {
       await setBackground('s1', { kind: 'color', value: 'rose' });
       expect((await p.poll()).map((c) => c.type)).toContain('sessions');
     });
+    it('carries the recorded usage, and poll reports a change of it (not a mere refresh)', async () => {
+      const { recordUsage } = await import('../../src/core/usage.js');
+      await reg();
+      const p = new ClaudeCodeProvider(async () => [live()]);
+      expect((await p.listSessions()).usage).toBeUndefined();
+      await p.poll();
+      const w = { usedPercentage: 5, resetsAt: '2026-11-24T14:38:00.000Z' };
+      await recordUsage({ fiveHour: w, updatedAt: '2026-11-24T12:00:00.000Z' });
+      expect((await p.listSessions()).usage).toEqual({ fiveHour: w, updatedAt: '2026-11-24T12:00:00.000Z' });
+      expect((await p.poll()).map((c) => c.type)).toContain('sessions');
+      await recordUsage({ fiveHour: w, updatedAt: '2026-11-24T12:05:00.000Z' });
+      expect((await p.poll()).map((c) => c.type)).toEqual([]);
+      await recordUsage({ fiveHour: { ...w, usedPercentage: 6 }, updatedAt: '2026-11-24T12:06:00.000Z' });
+      expect((await p.poll()).map((c) => c.type)).toContain('sessions');
+    });
     it('fills the permission mode of an active session, not of a disconnected one', async () => {
       const { setMode } = await import('../../src/core/meta.js');
       await reg();

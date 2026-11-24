@@ -14,7 +14,7 @@ import { getWaiting, setWaiting } from '../../src/core/waiting.js';
 import { paths } from '../../src/core/paths.js';
 import { saveConfig, loadConfig } from '../../src/core/config.js';
 import { getTurnOrigin, setTurnOrigin } from '../../src/core/turn.js';
-import { ANSWERS_ON, ANSWERS_OFF, WINDOW_ON, WINDOW_OFF } from '../../src/hooks/hook.js';
+import { ANSWERS_ON, ANSWERS_OFF, WINDOW_ON, WINDOW_OFF, USAGE_ON, USAGE_OFF, USAGE_FAILED } from '../../src/hooks/hook.js';
 import { getEffort, getMode } from '../../src/core/meta.js';
 import { tmpDir } from '../helpers/tmp.js';
 
@@ -92,8 +92,8 @@ describe('hook', () => {
     const f = await handleHook('prompt-submit', inp({ prompt: '/cc' }), { ...ctx(), ensureHub: async () => { throw new Error('x'); } });
     expect(out(f).systemMessage).toBe(`AI Chat Center: o hub não iniciou. Veja ${path.join(paths().logDir, 'hook.log')}`);
     const u = await handleHook('prompt-submit', inp({ prompt: '/cc foo' }), ctx());
-    expect(out(u).systemMessage).toBe('AI Chat Center: argumento desconhecido. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on ou /ai-chat-center:cc window off.');
-    expect(out(u).hookSpecificOutput.additionalContext).toBe('AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on or /ai-chat-center:cc window off.');
+    expect(out(u).systemMessage).toBe('AI Chat Center: argumento desconhecido. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on, /ai-chat-center:cc window off, /ai-chat-center:cc usage on ou /ai-chat-center:cc usage off.');
+    expect(out(u).hookSpecificOutput.additionalContext).toBe('AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on, /ai-chat-center:cc window off, /ai-chat-center:cc usage on or /ai-chat-center:cc usage off.');
   });
 
   // Audit S4-U3: the registration records the Claude config dir of the session.
@@ -157,7 +157,7 @@ describe('hook', () => {
   });
 
   it('/cc with an unknown argument changes nothing', async () => {
-    const msg = 'AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on or /ai-chat-center:cc window off.';
+    const msg = 'AI Chat Center: unknown argument. Use /cc, /ai-chat-center:cc off, /ai-chat-center:cc answers on, /ai-chat-center:cc answers off, /ai-chat-center:cc window on, /ai-chat-center:cc window off, /ai-chat-center:cc usage on or /ai-chat-center:cc usage off.';
     const r = await handleHook('prompt-submit', inp({ prompt: '/cc foo' }), ctx());
     expect(out(r).hookSpecificOutput.additionalContext).toBe(msg);
     expect(fs.readdirSync(paths().home)).toEqual([]);
@@ -765,6 +765,46 @@ describe('answers command and turn origin', () => {
     expect(isCcCommand('/ai-chat-center:cc  WINDOW  off ')).toBe('window-off');
     expect(isCcCommand('/cc window')).toBe('unknown');
     expect(isCcCommand('/cc window maybe')).toBe('unknown');
+  });
+
+  it('isCcCommand parses usage on/off', () => {
+    expect(isCcCommand('/cc usage on')).toBe('usage-on');
+    expect(isCcCommand('/ai-chat-center:cc USAGE off')).toBe('usage-off');
+    expect(isCcCommand('/cc usage')).toBe('unknown');
+  });
+
+  it('/cc usage on|off runs the status line installer, works without a session, reports a failure', async () => {
+    const calls: string[] = [];
+    let removed: 'restored' | 'changed-since' = 'restored';
+    let fail = false;
+    const statusline = {
+      install: async () => (calls.push('install'), fail ? ('failed' as const) : ('installed' as const)),
+      remove: async () => (calls.push('remove'), removed),
+      refresh: async () => void calls.push('refresh'),
+    };
+    const on = await handleHook('prompt-submit', inp({ prompt: '/cc usage on' }), { ...ctx(), statusline });
+    expect(out(on).hookSpecificOutput.additionalContext).toBe(USAGE_ON);
+    expect(out(on).systemMessage).toMatch(/usage off/);
+    const off = await handleHook('prompt-submit', inp({ prompt: '/cc usage off' }), { ...ctx(), statusline });
+    expect(out(off).hookSpecificOutput.additionalContext).toBe(USAGE_OFF);
+    removed = 'changed-since';
+    const off2 = await handleHook('prompt-submit', inp({ prompt: '/cc usage off' }), { ...ctx(), statusline });
+    expect(out(off2).systemMessage).not.toBe(out(off).systemMessage);
+    fail = true;
+    const bad = await handleHook('prompt-submit', inp({ prompt: '/cc usage on' }), { ...ctx(), statusline });
+    expect(out(bad).hookSpecificOutput.additionalContext).toContain(USAGE_FAILED);
+    expect(calls).toEqual(['install', 'remove', 'remove', 'install']);
+  });
+
+  it('/cc refreshes the wrapper only while usage is on', async () => {
+    const calls: string[] = [];
+    const statusline = { install: async () => 'installed' as const, remove: async () => 'restored' as const, refresh: async () => void calls.push('refresh') };
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), { ...ctx(), statusline });
+    expect(calls).toEqual([]);
+    fs.mkdirSync(paths().home, { recursive: true });
+    fs.writeFileSync(paths().statuslineFile, JSON.stringify({ original: null }));
+    await handleHook('prompt-submit', inp({ prompt: '/cc' }), { ...ctx(), statusline });
+    expect(calls).toEqual(['refresh']);
   });
 
   it('/cc window on|off saves the flag, works without a session', async () => {

@@ -270,6 +270,8 @@ describe('TranscriptParser: current transcript shapes', () => {
     const cmd = (uuid: string, args: string) => ({ type: 'user', uuid, timestamp: 't', message: { role: 'user', content: `<command-name>/ai-chat-center:cc</command-name><command-args>${args}</command-args>` } });
     expect(p.push(cmd('w1', 'window on'))).toEqual([]);
     expect(p.push(cmd('w2', 'window off'))).toEqual([]);
+    expect(p.push(cmd('w3', 'usage on'))).toEqual([]);
+    expect(p.push(cmd('w4', 'usage off'))).toEqual([]);
   });
 
   it('an interrupt marker is not a message', () => {
