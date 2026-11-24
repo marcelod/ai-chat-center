@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import { createHub, WINDOW_FRESH_MS } from '../../src/hub/server.js';
 import { SessionDisconnectedError, SessionProtocolError, type Provider } from '../../src/hub/provider.js';
 import type { ProviderChange } from '../../src/shared/types.js';
-import { VERSION } from '../../src/core/version.js';
+import { PROTOCOL, VERSION } from '../../src/core/version.js';
 import { tmpDir } from '../helpers/tmp.js';
 import { fakePng } from '../helpers/png.js';
 import { saveConfig, loadConfig } from '../../src/core/config.js';
@@ -901,7 +901,7 @@ describe('attachments endpoint', () => {
     return fs.existsSync(dir) ? fs.readdirSync(dir) : [];
   };
   beforeEach(async () => {
-    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42, protocol: PROTOCOL });
   });
   it('stores the raw body and returns its absolute path', async () => {
     const u = await start(fakeProvider());
@@ -959,6 +959,16 @@ describe('attachments endpoint', () => {
     const r = await up(u, 'x');
     expect(r.status).toBe(409);
     expect(JSON.parse(r.body).code).toBe('session-disconnected');
+    expect(stored()).toEqual([]);
+  });
+  it('409 with the version code for a session of another protocol, and nothing is stored', async () => {
+    const u = await start(fakeProvider());
+    for (const [protocol, direction] of [[PROTOCOL - 1, 'older'], [PROTOCOL + 1, 'newer'], [undefined, 'older']] as const) {
+      await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42, protocol });
+      const r = await up(u, 'x');
+      expect(r.status).toBe(409);
+      expect(JSON.parse(r.body).code).toBe(`session-${direction}-version`);
+    }
     expect(stored()).toEqual([]);
   });
   it('401 without token and 403 for a foreign Origin; nothing is stored', async () => {

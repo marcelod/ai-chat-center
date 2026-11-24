@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import type { Provider } from './provider.js';
-import { SessionDisconnectedError, SessionProtocolError } from './provider.js';
+import { SessionDisconnectedError, SessionProtocolError, assertSameProtocol } from './provider.js';
 import type { ProviderChange } from '../shared/types.js';
 import { assertSessionId } from '../core/paths.js';
 import { loadConfig, saveConfig, type Lang } from '../core/config.js';
@@ -479,6 +479,12 @@ export async function createHub(
         if (!isActive(reg)) {
           req.resume();
           throw new SessionDisconnectedError(sid);
+        }
+        try {
+          assertSameProtocol(reg); // a send to it would be refused: do not leave the file behind
+        } catch (e) {
+          req.resume();
+          throw e;
         }
         const rawName = req.headers['x-file-name'];
         let name: string;

@@ -48,6 +48,13 @@ export class SessionProtocolError extends Error {
   }
 }
 
+/** Throws SessionProtocolError when the session's plugin speaks another protocol than this hub. */
+export function assertSameProtocol(reg: Registration): void {
+  if (reg.protocol !== PROTOCOL) {
+    throw new SessionProtocolError(reg.sessionId, typeof reg.protocol === 'number' && reg.protocol > PROTOCOL ? 'newer' : 'older');
+  }
+}
+
 /**
  * How old the `claude agents` answer may be. The lookup spawns a claude process (~0.2 s of CPU), so it
  * runs every 5 s only while something can change soon: a session is busy, waiting or has a busy marker
@@ -429,9 +436,7 @@ export class ClaudeCodeProvider implements Provider {
   async send(sid: string, text: string): Promise<{ id: string }> {
     const reg = await getRegistration(sid);
     if (!reg || !isActive(reg)) throw new SessionDisconnectedError(sid);
-    if (reg.protocol !== PROTOCOL) {
-      throw new SessionProtocolError(sid, typeof reg.protocol === 'number' && reg.protocol > PROTOCOL ? 'newer' : 'older');
-    }
+    assertSameProtocol(reg);
     const msg = await enqueue(sid, text);
     const again = await getRegistration(sid);
     if (!again || !isActive(again)) {
