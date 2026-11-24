@@ -154,7 +154,7 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
   return output(lines.join('\n'), [shown, ...notices].join('\n'));
 }
 
-/** Writes or refreshes the launcher icon; true when there is one (Linux). Never fails the hook. */
+/** Writes or refreshes the launcher icon; true when there is one (Linux, Windows, macOS). Never fails the hook. */
 function refreshLauncher(ctx: HookContext, language: Lang): boolean {
   try {
     return ctx.launcher?.install(t(language, 'hook.launcherComment')) ?? false;

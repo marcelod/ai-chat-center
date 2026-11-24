@@ -1,11 +1,15 @@
-// The "AI Chat Center" icon in the Linux app launcher (a freedesktop .desktop entry). Clicking it runs
-// dist/open.mjs, which starts the hub if needed and opens the app window with a pairing code (never the
+// The "AI Chat Center" icon of the system's app launcher. On Linux a freedesktop .desktop entry (here); on
+// Windows a Start menu shortcut (launcherWin.ts); on macOS an app bundle in ~/Applications (launcherMac.ts).
+// Clicking it runs dist/open.mjs, which starts the hub if needed and opens the app window with a pairing code (never the
 // token). The entry is written by `/cc window on` and refreshed by every /cc while the option is on (the
 // plugin folder and the Node path change with updates); `/cc window off` removes it.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeIfChanged } from './launcherFiles.js';
+import { installMacLauncher, removeMacLauncher } from './launcherMac.js';
+import { installWinLauncher, removeWinLauncher, type SpawnSyncLike } from './launcherWin.js';
 
 type Env = Record<string, string | undefined>;
 
@@ -62,46 +66,46 @@ export interface LauncherOptions {
   home?: string;
   /** The Node that runs the hook: an absolute path, so the launcher works without the shell's PATH (nvm). */
   node?: string;
-  /** plugin/dist: holds open.mjs and ui/icons/icon-512.png. */
+  /** plugin/dist: holds open.mjs and ui/icons/icon-512.png (icon-256.png for Windows). */
   distDir?: string;
   comment?: string;
+  /** Runs PowerShell to make the Windows shortcut (tests inject a fake). */
+  spawn?: SpawnSyncLike;
 }
 
 const defaultDist = () => path.dirname(fileURLToPath(import.meta.url));
 
-/** Writes (or refreshes) the launcher. Linux only; false elsewhere. Rewrites files only when they changed. */
+const DEFAULT_COMMENT = 'Follow and answer your Claude Code sessions';
+
+/**
+ * Writes (or refreshes) the launcher of this system: true on Linux, Windows and macOS, false elsewhere.
+ * Rewrites files only when they changed. Throws on failure (the hook logs it and carries on).
+ */
 export function installLauncher(o: LauncherOptions = {}): boolean {
-  if ((o.platform ?? process.platform) !== 'linux') return false;
-  const dist = o.distDir ?? defaultDist();
-  const p = launcherPaths(o.env, o.home);
-  const iconSrc = path.join(dist, 'ui', 'icons', 'icon-512.png');
-  const icon = fs.readFileSync(iconSrc);
-  writeIfChanged(p.iconFile, icon);
-  const entry = desktopEntry({
-    node: o.node ?? process.execPath,
-    openScript: path.join(dist, 'open.mjs'),
-    icon: p.iconFile,
-    comment: o.comment ?? 'Follow and answer your Claude Code sessions',
-  });
+  const platform = o.platform ?? process.platform;
+  const env = o.env ?? process.env;
+  const home = o.home ?? os.homedir();
+  const distDir = o.distDir ?? defaultDist();
+  const node = o.node ?? process.execPath;
+  const comment = o.comment ?? DEFAULT_COMMENT;
+  if (platform === 'win32') return installWinLauncher({ env, home, node, distDir, comment, ...(o.spawn ? { spawn: o.spawn } : {}) });
+  if (platform === 'darwin') return installMacLauncher({ home, node, distDir });
+  if (platform !== 'linux') return false;
+  const p = launcherPaths(env, home);
+  writeIfChanged(p.iconFile, fs.readFileSync(path.join(distDir, 'ui', 'icons', 'icon-512.png')));
+  const entry = desktopEntry({ node, openScript: path.join(distDir, 'open.mjs'), icon: p.iconFile, comment });
   writeIfChanged(p.desktopFile, Buffer.from(entry, 'utf8'));
   return true;
 }
 
-/** Removes the launcher, if there is one. */
+/** Removes the launcher of this system, if there is one. */
 export function removeLauncher(o: Pick<LauncherOptions, 'platform' | 'env' | 'home'> = {}): void {
-  if ((o.platform ?? process.platform) !== 'linux') return;
-  const p = launcherPaths(o.env, o.home);
+  const platform = o.platform ?? process.platform;
+  const env = o.env ?? process.env;
+  const home = o.home ?? os.homedir();
+  if (platform === 'win32') return removeWinLauncher(env, home);
+  if (platform === 'darwin') return removeMacLauncher(home);
+  if (platform !== 'linux') return;
+  const p = launcherPaths(env, home);
   for (const f of [p.desktopFile, p.iconFile]) fs.rmSync(f, { force: true });
-}
-
-function writeIfChanged(file: string, data: Buffer): void {
-  try {
-    if (fs.readFileSync(file).equals(data)) return;
-  } catch {
-    /* missing: write it */
-  }
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, data, { mode: 0o644 });
-  fs.renameSync(tmp, file);
 }
