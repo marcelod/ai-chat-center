@@ -121,6 +121,27 @@ describe('provider', () => {
     await p.listSessions();
     expect(calls).toBe(3);
   });
+  // Only the connectedAt rule: s2 is already listed (idle, live pid) before it connects, so the
+  // "not listed" rule cannot be the one that brings back the short lookups.
+  it('a session that connects after the last lookup brings back the 5 s lookups, even when already listed', async () => {
+    await reg();
+    let t = Date.now();
+    let calls = 0;
+    const both = () => [live({ status: 'idle' }), live({ sessionId: 's2', pid: 2, status: 'idle' })];
+    const p = new ClaudeCodeProvider(async () => (calls++, both()), { now: () => t, isAlive: () => true });
+    await p.listSessions();
+    t += 6000;
+    await p.listSessions();
+    expect(calls).toBe(1); // all idle and listed: the long TTL holds
+    await new Promise((r) => setTimeout(r, 5));
+    await register({ sessionId: 's2', transcriptPath: transcript, cwd: '/home/u/proj', pid: 2, version: VERSION, protocol: PROTOCOL });
+    t = Math.max(t + 6000, Date.now() + 1);
+    await p.listSessions();
+    expect(calls).toBe(2); // connected after the lookup
+    t += 6000;
+    await p.listSessions();
+    expect(calls).toBe(2); // now connected before the last lookup: back to the long TTL
+  });
   it('falls back to cwd basename for name', async () => {
     await reg();
     const p = new ClaudeCodeProvider(async () => [live({ name: '' })]);
