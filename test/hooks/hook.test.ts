@@ -734,7 +734,7 @@ describe('answers command and turn origin', () => {
     const launcher = { install: (c: string) => (calls.push(`install:${c}`), true), remove: () => void calls.push('remove') };
     const c = { ...ctx(), findBrowser: () => '/usr/bin/chromium', launcher };
     const on = await handleHook('prompt-submit', inp({ prompt: '/cc window on' }), c);
-    expect(out(on).systemMessage).toMatch(/icon was added to your app launcher/);
+    expect(out(on).systemMessage).toMatch(/shortcut was added to your apps .*Start menu on Windows/);
     expect(calls).toEqual(['install:Follow and answer your Claude Code sessions']);
     await handleHook('prompt-submit', inp({ prompt: '/cc' }), { ...c, fetch: (async () => new Response('{"live":true}')) as never });
     expect(calls).toHaveLength(2);

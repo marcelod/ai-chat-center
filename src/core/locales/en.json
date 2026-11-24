@@ -8,7 +8,7 @@
     "windowOn": "AI Chat Center: the app will open in its own window when you connect. To turn off: /ai-chat-center:cc window off",
     "windowOff": "AI Chat Center: the app will no longer open in its own window.",
     "windowNoBrowser": "No Chrome, Chromium or Edge found: the link is still shown.",
-    "windowLauncher": "The “AI Chat Center” icon was added to your app launcher: it opens the app (and starts the hub if needed).",
+    "windowLauncher": "The “AI Chat Center” shortcut was added to your apps (the app menu on Linux, the Start menu on Windows, Applications in your home folder on macOS): it opens the app (and starts the hub if needed).",
     "launcherComment": "Follow and answer your Claude Code sessions"
   },
   "ui": {

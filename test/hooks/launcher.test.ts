@@ -47,9 +47,11 @@ describe('launcher', () => {
     removeLauncher({ platform: 'linux', env, home }); // nothing left: no error
   });
 
-  it('does nothing outside Linux', () => {
+  it('does nothing on other systems', () => {
     const home = tmpDir();
-    expect(installLauncher({ platform: 'darwin', env: {}, home, distDir: fakeDist() })).toBe(false);
+    expect(installLauncher({ platform: 'freebsd', env: {}, home, distDir: fakeDist() })).toBe(false);
     expect(fs.existsSync(launcherPaths({}, home).desktopFile)).toBe(false);
+    expect(fs.readdirSync(home)).toEqual([]);
+    removeLauncher({ platform: 'aix', env: {}, home });
   });
 });
