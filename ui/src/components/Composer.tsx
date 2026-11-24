@@ -208,6 +208,8 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const pasted = Array.from(e.clipboardData?.files ?? []);
     if (pasted.length === 0 || !onUpload) return;
+    // Text wins (e.g. cells copied from a spreadsheet also carry an image): let the browser paste it.
+    if (Array.from(e.clipboardData?.types ?? []).includes('text/plain')) return;
     e.preventDefault();
     addFiles(pasted);
   };

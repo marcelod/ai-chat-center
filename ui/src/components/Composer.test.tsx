@@ -265,6 +265,15 @@ describe('Composer attachments', () => {
     expect(within(chips()[0]).getByText('image.png')).toBeInTheDocument();
   });
 
+  it('a paste with text and files pastes the text and attaches nothing', () => {
+    mountA();
+    const ev = fireEvent.paste(box(), {
+      clipboardData: { files: [file('cell.png', 'image/png')], types: ['text/plain', 'Files'], getData: (k: string) => (k === 'text/plain' ? 'cell' : '') },
+    });
+    expect(ev).toBe(true); // left to the browser
+    expect(chips()).toHaveLength(0);
+  });
+
   it('a text-only paste is left to the browser', () => {
     mountA();
     const ev = fireEvent.paste(box(), { clipboardData: { files: [], types: ['text/plain'], getData: () => 'hi' } });
