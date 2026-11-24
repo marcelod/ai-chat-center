@@ -452,6 +452,26 @@ describe('useLiveSessions remove', () => {
     await act(() => result.current.remove('s2'));
     expect(result.current.selectedId).toBeNull();
   });
+  it('picks the neighbour from the list as it was before the hub call, even if a refresh lands during it', async () => {
+    const three: SessionsResponse = {
+      ...sessions,
+      connected: [...sessions.connected, { sessionId: 's3', name: 'three', cwd: '/c', state: 'idle', pendingAppMessageIds: [] }],
+    };
+    vi.mocked(api.getSessions).mockResolvedValue(three);
+    const { result } = renderHook(() => useLiveSessions());
+    await waitFor(() => expect(result.current.data.connected).toHaveLength(3));
+    act(() => result.current.select('s2'));
+    const after = { ...three, connected: three.connected.filter((s) => s.sessionId !== 's2') };
+    vi.mocked(api.removeSession).mockImplementation(async () => {
+      // The hub's SSE "sessions" change arrives before the DELETE answers: the list already lacks s2.
+      vi.mocked(api.getSessions).mockResolvedValue(after);
+      push({ type: 'sessions' });
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await act(() => result.current.remove('s2'));
+    expect(result.current.selectedId).toBe('s3');
+  });
   it('a failed remove changes nothing and rejects', async () => {
     vi.mocked(api.removeSession).mockRejectedValue(new Error('boom'));
     const { result } = renderHook(() => useLiveSessions());

@@ -46,6 +46,21 @@ export function mergeEvents(current: ChatEvent[], incoming: ChatEvent[]): ChatEv
 const appIds = (events: ChatEvent[]) =>
   new Set(events.flatMap((e) => (e.kind === 'user' && e.appMessageId ? [e.appMessageId] : [])));
 
+type Session = SessionsResponse['connected'][number];
+
+/**
+ * The session to show once `gone` left the list: the nearest one after it in `before` (the list that still
+ * had it) that `now` lists, else the nearest one before it, else the first of `now`, else none.
+ */
+export function neighbourOf(before: Session[], gone: string, now: Session[]): string | null {
+  const at = Math.max(before.findIndex((s) => s.sessionId === gone), 0);
+  const order = before.map((s) => s.sessionId).filter((id) => id !== gone);
+  const live = new Set(now.map((s) => s.sessionId));
+  const after = order.slice(at).find((id) => live.has(id));
+  const prior = order.slice(0, at).reverse().find((id) => live.has(id));
+  return after ?? prior ?? now[0]?.sessionId ?? null;
+}
+
 export function useLiveSessions() {
   const [data, setData] = useState<SessionsResponse>({ connected: [], others: [] });
   const [eventsById, setEventsById] = useState<Record<string, ChatEvent[]>>({});
@@ -411,18 +426,16 @@ export function useLiveSessions() {
   /** Removes the session from the app (hub first), drops it from the list now and selects a neighbour if it was open. */
   const remove = useCallback(
     async (sid: string) => {
+      // The neighbour comes from the list as it is now: a refresh landing during the hub call (the SSE
+      // "sessions" change) may already lack the session, and its position with it.
+      const before = dataRef.current.connected;
       await api.removeSession(sid);
-      const list = dataRef.current.connected;
-      const at = list.findIndex((s) => s.sessionId === sid);
-      const rest = list.filter((s) => s.sessionId !== sid);
+      const rest = dataRef.current.connected.filter((s) => s.sessionId !== sid);
       const next = { ...dataRef.current, connected: rest };
       dataRef.current = next;
       setData(next);
       fetched.current.delete(sid);
-      if (selectedRef.current === sid) {
-        const neighbour = rest[Math.min(Math.max(at, 0), rest.length - 1)];
-        select(neighbour ? neighbour.sessionId : null);
-      }
+      if (selectedRef.current === sid) select(neighbourOf(before, sid, rest));
       // A refresh already in flight may have read the list before the removal: drop its answer, read again.
       seq.current++;
       void refresh();
