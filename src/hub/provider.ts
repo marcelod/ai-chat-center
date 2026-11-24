@@ -2,6 +2,7 @@ import { isPinned } from '../core/pins.js';
 import { getDisplayName } from '../core/names.js';
 import { readGitBranch } from '../core/gitBranch.js';
 import { getEffort, shortModel } from '../core/meta.js';
+import { getBackground } from '../core/background.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ChatEvent, LiveSession, ProviderChange, SessionView } from '../shared/types.js';
@@ -336,6 +337,8 @@ export class ClaudeCodeProvider implements Provider {
       if (rawModel) view.model = shortModel(rawModel);
       const effort = await getEffort(sid);
       if (effort) view.effort = effort;
+      const background = await getBackground(sid);
+      if (background) view.background = background;
       connected.push(view);
     }
 
@@ -412,6 +415,7 @@ export class ClaudeCodeProvider implements Provider {
         s.branch ?? null,
         s.model ?? null,
         s.effort ?? null,
+        s.background ?? null,
       ]),
     });
     if (signature !== this.lastSignature) {

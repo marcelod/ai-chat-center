@@ -7,6 +7,7 @@ import { clearInbox } from './inbox.js';
 import { clearBusy } from './busy.js';
 import { clearWaiting } from './waiting.js';
 import { clearDelivered } from './delivered.js';
+import { clearBackground } from './background.js';
 import { withLock } from './lock.js';
 import { PROTOCOL, VERSION } from './version.js';
 
@@ -204,6 +205,7 @@ export async function pruneRegistrations(maxAgeMs: number, now = Date.now()): Pr
     await clearWaiting(sid);
     await clearDelivered(sid);
     await removeFile(paths().pinsFile(sid)).catch(() => {});
+    await clearBackground(sid).catch(() => {});
   }
   return pruned;
 }

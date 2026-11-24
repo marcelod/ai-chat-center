@@ -88,6 +88,9 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
               await api.disconnectSession(selected.sessionId);
               await live.refresh();
             }}
+            onSetBackground={(bg) => api.setBackground(selected.sessionId, bg)}
+            onUploadBackground={(file) => api.uploadBackgroundImage(selected.sessionId, file)}
+            onLoadBackgroundImage={() => api.getBackgroundImage(selected.sessionId)}
             onBack={() => select(null)}
           />
         ) : (

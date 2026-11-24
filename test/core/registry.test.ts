@@ -147,6 +147,19 @@ describe('registry: pruning (audit RT13)', () => {
     expect(await getWaiting('old')).toBeNull();
     expect(await isBusy('recent')).toBe(true);
   });
+  it('also deletes the background setting and image of a pruned session', async () => {
+    const { saveBackgroundImage, getBackground } = await import('../../src/core/background.js');
+    const { fakePng } = await import('../helpers/png.js');
+    const day = 86_400_000;
+    const now = Date.parse('2026-06-01T00:00:00Z');
+    await register({ sessionId: 'old', transcriptPath: '/t', cwd: '/c', pid: 1 });
+    await markDisconnected('old', 'off');
+    await updateRegistration('old', { disconnectedAt: new Date(now - 31 * day).toISOString() });
+    await saveBackgroundImage('old', fakePng(1, 1));
+    expect(await pruneRegistrations(30 * day, now)).toEqual(['old']);
+    expect(await getBackground('old')).toBeNull();
+    expect(fs.readdirSync(paths().backgroundsDir)).toEqual([]);
+  });
 });
 
 describe('registry: removed from the app', () => {

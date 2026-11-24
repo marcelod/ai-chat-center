@@ -256,3 +256,47 @@ describe('hub verification', () => {
     expect(seen.map((r) => r.method)).toEqual(['GET', 'POST']);
   });
 });
+
+describe('background', () => {
+  const withToken = async () => {
+    window.history.replaceState(null, '', '/#token=tok');
+    return load();
+  };
+  it('setBackground PUTs the preset (or null) as JSON with the bearer token', async () => {
+    const f = vi.fn(async () => new Response(JSON.stringify({ background: null }), { status: 200 }));
+    vi.stubGlobal('fetch', f);
+    const api = await withToken();
+    await api.setBackground('s 1', { kind: 'color', value: 'rose' });
+    await api.setBackground('s1', null);
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/sessions/s%201/background');
+    expect(init.method).toBe('PUT');
+    expect(init.body).toBe(JSON.stringify({ kind: 'color', value: 'rose' }));
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer tok', 'Content-Type': 'application/json' });
+    expect((f.mock.calls[1] as unknown as [string, RequestInit])[1].body).toBe('null');
+  });
+  it('uploadBackgroundImage POSTs the raw file with its type; errors carry the status', async () => {
+    const f = vi.fn(async () => new Response(JSON.stringify({ background: { kind: 'image', file: 'x' } }), { status: 200 }));
+    vi.stubGlobal('fetch', f);
+    const api = await withToken();
+    const file = new File([new Uint8Array([1, 2, 3])], 'a.png', { type: 'image/png' });
+    await api.uploadBackgroundImage('s1', file);
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/sessions/s1/background-image');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe(file);
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer tok', 'Content-Type': 'image/png' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 413 })));
+    await expect(api.uploadBackgroundImage('s1', file)).rejects.toMatchObject({ status: 413 });
+  });
+  it('getBackgroundImage fetches the image with the bearer token as a Blob', async () => {
+    const f = vi.fn(async () => new Response(new Uint8Array([9]), { status: 200, headers: { 'Content-Type': 'image/png' } }));
+    vi.stubGlobal('fetch', f);
+    const api = await withToken();
+    const b = await api.getBackgroundImage('s1');
+    expect(b.size).toBe(1);
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/sessions/s1/background-image');
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer tok' });
+  });
+});

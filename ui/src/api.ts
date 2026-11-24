@@ -1,4 +1,5 @@
 import type { ChatEvent, ProviderChange, SessionsResponse } from '@shared/types';
+import type { BackgroundPreset } from '@shared/background';
 
 export type Language = 'en' | 'pt-BR';
 export type UiConfig = { language: Language; answersFromApp: boolean };
@@ -251,6 +252,30 @@ export async function pinSession(sid: string, pinned: boolean): Promise<void> {
 /** Disconnects an active session like /cc off; it stays in the list as disconnected. */
 export async function disconnectSession(sid: string): Promise<void> {
   await request<unknown>(`/api/sessions/${encodeURIComponent(sid)}/disconnect`, { method: 'POST' });
+}
+const backgroundPath = (sid: string) => `/api/sessions/${encodeURIComponent(sid)}/background`;
+/** Sets a preset background (ids only) or none. */
+export async function setBackground(sid: string, bg: BackgroundPreset | null): Promise<void> {
+  await request<unknown>(backgroundPath(sid), { method: 'PUT', body: JSON.stringify(bg) });
+}
+/** Uploads the raw image (the hub checks its bytes and the 5 MB cap). Rejects with ApiError (413, 415…). */
+export async function uploadBackgroundImage(sid: string, file: Blob): Promise<void> {
+  if (pairing) await pairing;
+  const res = await fetch(`${backgroundPath(sid)}-image`, {
+    method: 'POST',
+    headers: { 'Content-Type': file.type || 'application/octet-stream', Authorization: `Bearer ${token ?? ''}` },
+    body: file,
+  });
+  if (res.status === 401) dropToken();
+  if (!res.ok) throw new ApiError(res.status, await errorCode(res));
+}
+/** The background image, fetched with the token (an <img> or CSS url() could not send it): show it from a blob: URL. */
+export async function getBackgroundImage(sid: string): Promise<Blob> {
+  if (pairing) await pairing;
+  const res = await fetch(`${backgroundPath(sid)}-image`, { headers: { Authorization: `Bearer ${token ?? ''}` } });
+  if (res.status === 401) dropToken();
+  if (!res.ok) throw new ApiError(res.status);
+  return res.blob();
 }
 export const getConfig = () => request<UiConfig>('/api/config');
 export const setConfig = (c: Pick<UiConfig, 'language'>) =>

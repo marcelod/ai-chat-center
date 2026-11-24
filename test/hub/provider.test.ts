@@ -652,6 +652,19 @@ describe('provider: queued messages with their text (audit R3-F5)', () => {
       v = (await new ClaudeCodeProvider(async () => [live({ cwd })]).listSessions()).connected[0];
       expect(v).toMatchObject({ branch: 'feat', model: 'Opus 5.5', effort: 'high' });
     });
+    it('carries the background, and poll reports a change of it', async () => {
+      const { setBackground } = await import('../../src/core/background.js');
+      await reg();
+      const p = new ClaudeCodeProvider(async () => [live()]);
+      expect((await p.listSessions()).connected[0].background).toBeUndefined();
+      await p.poll();
+      await setBackground('s1', { kind: 'gradient', value: 'ocean' });
+      expect((await p.listSessions()).connected[0].background).toEqual({ kind: 'gradient', value: 'ocean' });
+      expect((await p.poll()).map((c) => c.type)).toContain('sessions');
+      expect((await p.poll()).map((c) => c.type)).toEqual([]);
+      await setBackground('s1', { kind: 'color', value: 'rose' });
+      expect((await p.poll()).map((c) => c.type)).toContain('sessions');
+    });
     it('model of a disconnected session is still shown', async () => {
       await reg();
       fs.appendFileSync(transcript, modelLine('m1', 'claude-sonnet-5-5'));

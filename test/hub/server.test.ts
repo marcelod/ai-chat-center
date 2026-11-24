@@ -10,6 +10,7 @@ import { SessionDisconnectedError, SessionProtocolError, type Provider } from '.
 import type { ProviderChange } from '../../src/shared/types.js';
 import { VERSION } from '../../src/core/version.js';
 import { tmpDir } from '../helpers/tmp.js';
+import { fakePng } from '../helpers/png.js';
 import { saveConfig, loadConfig } from '../../src/core/config.js';
 import { putPending, readAnswer } from '../../src/core/questions.js';
 import { paths } from '../../src/core/paths.js';
@@ -159,7 +160,7 @@ describe('auth and host checks', () => {
     expect(Object.keys(r.headers).some((h) => h.startsWith('access-control-'))).toBe(false);
     const h = await req(u, '/');
     expect(h.headers['content-security-policy']).toBe(
-      "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
+      "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'",
     );
     expect(h.headers['x-content-type-options']).toBe('nosniff');
     const bad = await req(u, '/api/sessions');
@@ -550,6 +551,141 @@ describe('name endpoint', () => {
     expect((await put(u, { name: 'x' }, 's1', { 'content-type': 'application/json' })).status).toBe(401);
     expect((await put(u, { name: 'x' }, 's1', { ...json, origin: 'http://evil.com' })).status).toBe(403);
     expect(await getDisplayName('s1')).toBeNull();
+  });
+});
+
+describe('background endpoints', () => {
+  const put = (u: URL, body: unknown, sid = 's1', headers: Record<string, string> = json) =>
+    req(u, `/api/sessions/${sid}/background`, { method: 'PUT', headers, body: typeof body === 'string' ? body : JSON.stringify(body) });
+  const upload = (u: URL, body: Buffer, sid = 's1', headers: Record<string, string> = { ...auth, 'content-type': 'application/octet-stream' }) =>
+    req(u, `/api/sessions/${sid}/background-image`, { method: 'POST', headers, body });
+  const image = (u: URL, sid = 's1', headers: Record<string, string> = auth) => req(u, `/api/sessions/${sid}/background-image`, { headers });
+  /** Like req, but keeps the body as bytes. */
+  const rawGet = (u: URL, p: string) =>
+    new Promise<{ status: number; headers: http.IncomingHttpHeaders; body: Buffer }>((resolve, reject) => {
+      const r = http.request({ host: '127.0.0.1', port: u.port, path: p, headers: { host: `127.0.0.1:${u.port}`, ...auth } }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => resolve({ status: res.statusCode!, headers: res.headers, body: Buffer.concat(chunks) }));
+      });
+      r.on('error', reject);
+      r.end();
+    });
+  const imagesOnDisk = () => {
+    try {
+      return fs.readdirSync(paths().backgroundsDir).filter((n) => !n.endsWith('.json'));
+    } catch {
+      return [];
+    }
+  };
+  beforeEach(async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
+  });
+
+  it('PUT sets a preset or none, and tells open pages at once', async () => {
+    const { getBackground } = await import('../../src/core/background.js');
+    const u = await start(fakeProvider(), { pollMs: 60_000 });
+    const s = await openStream(u, '/api/stream', auth);
+    try {
+      const r = await put(u, { kind: 'gradient', value: 'aurora' });
+      expect(r.status).toBe(200);
+      expect(JSON.parse(r.body)).toEqual({ background: { kind: 'gradient', value: 'aurora' } });
+      expect(await getBackground('s1')).toEqual({ kind: 'gradient', value: 'aurora' });
+      await s.next(/event: sessions/);
+      expect((await put(u, null)).status).toBe(200);
+      expect(await getBackground('s1')).toBeNull();
+    } finally {
+      s.req.destroy();
+    }
+  });
+  it('PUT: 400 for raw CSS, unknown ids or an image; 404 for an unknown session; 401/403', async () => {
+    const { getBackground } = await import('../../src/core/background.js');
+    const u = await start(fakeProvider());
+    for (const b of ['nope', '[]', '"rose"', {}, { kind: 'color', value: 'url(x)' }, { kind: 'image', file: 's1-0123456789abcdef.png' }]) {
+      expect((await put(u, b)).status).toBe(400);
+    }
+    expect((await put(u, { kind: 'color', value: 'rose' }, 'nope')).status).toBe(404);
+    expect((await put(u, { kind: 'color', value: 'rose' }, '..%2Fx')).status).toBe(404);
+    expect((await put(u, { kind: 'color', value: 'rose' }, 's1', { 'content-type': 'application/json' })).status).toBe(401);
+    expect((await put(u, { kind: 'color', value: 'rose' }, 's1', { ...json, origin: 'http://evil.com' })).status).toBe(403);
+    expect(await getBackground('s1')).toBeNull();
+  });
+
+  it('POST image stores it; GET returns it with its type; a new upload replaces it; a preset removes it', async () => {
+    const u = await start(fakeProvider());
+    const png = fakePng(3, 3);
+    const r = await upload(u, png);
+    expect(r.status).toBe(200);
+    const bg = JSON.parse(r.body).background;
+    expect(bg).toMatchObject({ kind: 'image' });
+    const g = await rawGet(u, '/api/sessions/s1/background-image');
+    expect(g.status).toBe(200);
+    expect(g.headers['content-type']).toBe('image/png');
+    expect(g.headers['cache-control']).toBe('no-store');
+    expect(g.body.equals(png)).toBe(true);
+    const gif = Buffer.from('GIF89a\x01\x00\x01\x00', 'latin1');
+    const r2 = await upload(u, gif, 's1', { ...auth, 'content-type': 'image/gif' });
+    expect(r2.status).toBe(200);
+    expect(imagesOnDisk()).toEqual([JSON.parse(r2.body).background.file]);
+    if (process.platform !== 'win32') expect(fs.statSync(path.join(paths().backgroundsDir, imagesOnDisk()[0])).mode & 0o777).toBe(0o600);
+    expect((await put(u, { kind: 'color', value: 'slate' })).status).toBe(200);
+    expect(imagesOnDisk()).toEqual([]);
+    expect((await image(u)).status).toBe(404);
+  });
+  it('POST image: 415 for something that is not png/jpeg/webp/gif (an SVG, say)', async () => {
+    const u = await start(fakeProvider());
+    const r = await upload(u, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'), 's1', {
+      ...auth,
+      'content-type': 'image/png',
+    });
+    expect(r.status).toBe(415);
+    expect(imagesOnDisk()).toEqual([]);
+  });
+  it('POST image: 413 over 5 MB, declared or streamed, and nothing is stored', async () => {
+    const u = await start(fakeProvider());
+    const big = Buffer.concat([fakePng(1, 1), Buffer.alloc(5 * 1024 * 1024)]);
+    expect((await upload(u, big)).status).toBe(413);
+    // Chunked: no content-length, the limit applies while reading.
+    const status = await new Promise<number>((resolve, reject) => {
+      const r = http.request(
+        {
+          host: '127.0.0.1',
+          port: u.port,
+          path: '/api/sessions/s1/background-image',
+          method: 'POST',
+          headers: { host: `127.0.0.1:${u.port}`, ...auth, 'transfer-encoding': 'chunked' },
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode!);
+        },
+      );
+      r.on('error', (e) => ((e as NodeJS.ErrnoException).code === 'EPIPE' || (e as NodeJS.ErrnoException).code === 'ECONNRESET' ? undefined : reject(e)));
+      r.write(fakePng(1, 1));
+      for (let i = 0; i < 6; i++) r.write(Buffer.alloc(1024 * 1024));
+      r.end();
+    });
+    expect(status).toBe(413);
+    expect(imagesOnDisk()).toEqual([]);
+  });
+  it('image routes: 404 for an unknown session; 401 without the bearer (also with ?token=); 403 for a foreign Origin', async () => {
+    const u = await start(fakeProvider());
+    expect((await upload(u, fakePng(1, 1), 'nope')).status).toBe(404);
+    expect((await upload(u, fakePng(1, 1), 's1', {})).status).toBe(401);
+    expect((await upload(u, fakePng(1, 1), 's1', { ...auth, origin: 'http://evil.com' })).status).toBe(403);
+    expect(imagesOnDisk()).toEqual([]);
+    expect((await upload(u, fakePng(1, 1))).status).toBe(200);
+    expect((await image(u, 's1', {})).status).toBe(401);
+    expect((await req(u, `/api/sessions/s1/background-image?token=${TOKEN}`)).status).toBe(401);
+    expect((await image(u, 's1', { ...auth, origin: 'http://evil.com' })).status).toBe(403);
+    expect((await image(u, 'nope')).status).toBe(404);
+  });
+  it('the page CSP lets the app show the image from a blob: URL', async () => {
+    const dir = tmpDir('acc-static-');
+    fs.writeFileSync(path.join(dir, 'index.html'), '<!doctype html>');
+    const u = await start(fakeProvider(), { staticDir: dir });
+    const r = await req(u, '/', { headers: { accept: 'text/html' } });
+    expect(r.headers['content-security-policy']).toMatch(/img-src 'self' data: blob:/);
   });
 });
 

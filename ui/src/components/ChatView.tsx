@@ -8,6 +8,9 @@ import { QuestionCard } from './QuestionCard';
 import { Composer } from './Composer';
 import { BackIcon, WarningIcon } from './icons';
 import { ChatMenu } from './ChatMenu';
+import type { BackgroundPreset } from '@shared/background';
+import { BackgroundPicker } from './BackgroundPicker';
+import { ChatBackground } from './ChatBackground';
 import { AgentBubble, AssistantBubble, ToAgentBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
 
 type Props = {
@@ -27,6 +30,11 @@ type Props = {
   onPin?: (pinned: boolean) => Promise<void>;
   /** Disconnects the session from the app, keeping it listed (⋮ menu; only for an active session). */
   onDisconnect?: () => Promise<void>;
+  /** Background of the conversation (⋮ menu → Background); absent: no Background item. */
+  onSetBackground?: (bg: BackgroundPreset | null) => Promise<void>;
+  onUploadBackground?: (file: File) => Promise<void>;
+  /** Fetches the background image (with the token) when the background is an image. */
+  onLoadBackgroundImage?: () => Promise<Blob>;
   onBack: () => void;
 };
 
@@ -95,6 +103,8 @@ function SessionTitle({
   onRemove,
   onPin,
   onDisconnect,
+  onSetBackground,
+  onUploadBackground,
 }: {
   session: SessionView;
   name: string;
@@ -103,8 +113,11 @@ function SessionTitle({
   onRemove?: () => Promise<void>;
   onPin?: (pinned: boolean) => Promise<void>;
   onDisconnect?: () => Promise<void>;
+  onSetBackground?: (bg: BackgroundPreset | null) => Promise<void>;
+  onUploadBackground?: (file: File) => Promise<void>;
 }) {
   const t = useT();
+  const [picking, setPicking] = useState(false);
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
   const [failed, setFailed] = useState(false);
@@ -194,12 +207,31 @@ function SessionTitle({
       >
         {name}
       </h2>
-      <ChatMenu ref={menuButton} onRename={onRename ? open : undefined} onRemove={onRemove} onPin={onPin} pinned={!!session.pinned} onDisconnect={session.state === 'disconnected' ? undefined : onDisconnect} />
+      <ChatMenu
+        ref={menuButton}
+        onRename={onRename ? open : undefined}
+        onRemove={onRemove}
+        onPin={onPin}
+        pinned={!!session.pinned}
+        onDisconnect={session.state === 'disconnected' ? undefined : onDisconnect}
+        onBackground={onSetBackground && onUploadBackground ? () => setPicking(true) : undefined}
+      />
+      {picking && onSetBackground && onUploadBackground && (
+        <BackgroundPicker
+          current={session.background}
+          onSelect={onSetBackground}
+          onUpload={onUploadBackground}
+          onClose={() => {
+            setPicking(false);
+            menuButton.current?.focus();
+          }}
+        />
+      )}
     </div>
   );
 }
 
-export function ChatView({ session, events, pending, loading, onSend, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect }: Props) {
+export function ChatView({ session, events, pending, loading, onSend, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, ...bg }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -282,6 +314,8 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
             onRemove={onRemove}
             onPin={onPin}
             onDisconnect={onDisconnect}
+            onSetBackground={bg.onSetBackground}
+            onUploadBackground={bg.onUploadBackground}
           />
           <div data-testid="session-info" className="flex min-w-0 flex-col overflow-hidden font-mono text-xs text-muted md:flex-row md:items-baseline md:gap-1.5">
             <span className="min-w-0 truncate md:min-w-[6ch]">{session.cwd}</span>
@@ -299,12 +333,14 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
         <StatusPill state={state} asking={session.waitingKind === 'question'} />
       </header>
 
+      <div className="relative flex min-h-0 flex-1 flex-col bg-page">
+      {session.background && <ChatBackground background={session.background} loadImage={bg.onLoadBackgroundImage} />}
       <div
         ref={scroller}
         onScroll={onScroll}
         role="log"
         aria-label={t('ui.chat.messages')}
-        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto bg-page px-4 py-5 md:px-12"
+        className="relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 md:px-12"
       >
         {loading && events.length === 0 && <p className="self-center text-sm text-muted">{t('ui.chat.loading')}</p>}
         {events.map(render)}
@@ -377,6 +413,7 @@ export function ChatView({ session, events, pending, loading, onSend, onRetry, o
             </div>
           </div>
         )}
+      </div>
       </div>
 
       <Composer key={session.sessionId} sessionId={session.sessionId} name={session.name} disabled={state === 'disconnected'}
