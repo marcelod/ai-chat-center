@@ -26,6 +26,9 @@ export interface Paths {
   namesFile: (sid: string) => string;
   /** Per-session info recorded by the hooks: effort level (see meta.ts). */
   metaFile: (sid: string) => string;
+  /** Per-session background settings and uploaded background images (see background.ts). */
+  backgroundsDir: string;
+  backgroundFile: (sid: string) => string;
   /** Written by the hub while an app tab is open (see presence.ts). */
   presenceFile: string;
   logDir: string;
@@ -59,6 +62,8 @@ export function paths(): Paths {
     questionsDir: (sid) => (assertSessionId(sid), path.join(home, 'questions', sid)),
     namesFile: (sid) => (assertSessionId(sid), path.join(home, 'names', `${sid}.json`)),
     metaFile: (sid) => (assertSessionId(sid), path.join(home, 'meta', `${sid}.json`)),
+    backgroundsDir: path.join(home, 'backgrounds'),
+    backgroundFile: (sid) => (assertSessionId(sid), path.join(home, 'backgrounds', `${sid}.json`)),
     presenceFile: path.join(home, 'app-presence.json'),
     logDir: path.join(home, 'logs'),
   };

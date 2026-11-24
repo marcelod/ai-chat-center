@@ -11,6 +11,8 @@ import { loadConfig, saveConfig, type Lang } from '../core/config.js';
 import { writePresence } from '../core/presence.js';
 import { assertToolUseId, getPending, validAnswers, writeAnswer, type AnswerFile } from '../core/questions.js';
 import { setDisplayName, validDisplayName } from '../core/names.js';
+import { readBackgroundImage, saveBackgroundImage, setBackground, validBackgroundPreset } from '../core/background.js';
+import { BACKGROUND_IMAGE_MAX } from '../shared/background.js';
 import { getRegistration, isActive, markRemoved } from '../core/registry.js';
 import { VERSION } from '../core/version.js';
 import { CHALLENGE_RE, healthProof } from '../core/healthProof.js';
@@ -41,7 +43,7 @@ const WINDOW_ID_RE = /^[0-9a-f]{32}$/;
 const LANGS: Lang[] = ['en', 'pt-BR'];
 
 const CSP =
-  "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'";
+  "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'";
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -80,10 +82,11 @@ function tokenOk(given: string | null | undefined, expected: string): boolean {
   return crypto.timingSafeEqual(a, b);
 }
 
-function readBody(req: http.IncomingMessage): Promise<string> {
+/** Reads at most `max` bytes: over that (declared or while streaming) the rest is discarded and it fails with 413. */
+function readRawBody(req: http.IncomingMessage, max: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const declared = Number(req.headers['content-length']);
-    if (Number.isFinite(declared) && declared > MAX_BODY) {
+    if (Number.isFinite(declared) && declared > max) {
       req.resume();
       return reject(new HttpError(413, 'body too large'));
     }
@@ -93,16 +96,20 @@ function readBody(req: http.IncomingMessage): Promise<string> {
     req.on('data', (c: Buffer) => {
       if (tooBig) return;
       size += c.length;
-      if (size > MAX_BODY) {
+      if (size > max) {
         tooBig = true;
         chunks.length = 0;
         return;
       }
       chunks.push(c);
     });
-    req.on('end', () => (tooBig ? reject(new HttpError(413, 'body too large')) : resolve(Buffer.concat(chunks).toString('utf8'))));
+    req.on('end', () => (tooBig ? reject(new HttpError(413, 'body too large')) : resolve(Buffer.concat(chunks))));
     req.on('error', reject);
   });
+}
+
+async function readBody(req: http.IncomingMessage): Promise<string> {
+  return (await readRawBody(req, MAX_BODY)).toString('utf8');
 }
 
 async function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
@@ -344,7 +351,7 @@ export async function createHub(
       await saveConfig({ language: body.language as Lang });
       return sendJson(res, 200, { language: body.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|remove|questions\/([^/]+))$/.exec(p);
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|remove|background|background-image|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid: string;
       try {
@@ -413,6 +420,32 @@ export async function createHub(
         // Every open page drops it now, not at the next poll.
         fanOut({ type: 'sessions' });
         return sendJson(res, 200, { ok: true });
+      }
+      if (m[2] === 'background' && method === 'PUT') {
+        // Preset ids only (never CSS from the client); null clears. Images come by the upload route below.
+        const v = validBackgroundPreset(await readJsonBody(req));
+        if (!v.ok) throw new HttpError(400, 'invalid background');
+        if (!(await getRegistration(sid))) throw new HttpError(404, 'no such session');
+        await setBackground(sid, v.value);
+        fanOut({ type: 'sessions' });
+        return sendJson(res, 200, { background: v.value });
+      }
+      if (m[2] === 'background-image' && method === 'POST') {
+        if (!(await getRegistration(sid))) {
+          req.resume();
+          throw new HttpError(404, 'no such session');
+        }
+        const data = await readRawBody(req, BACKGROUND_IMAGE_MAX);
+        const background = await saveBackgroundImage(sid, data); // the format comes from the bytes, not the headers
+        if (!background) throw new HttpError(415, 'png, jpeg, webp or gif only');
+        fanOut({ type: 'sessions' });
+        return sendJson(res, 200, { background });
+      }
+      if (m[2] === 'background-image' && method === 'GET') {
+        const img = await readBackgroundImage(sid);
+        if (!img) throw new HttpError(404, 'no background image');
+        res.writeHead(200, { 'Content-Type': img.type, 'Content-Length': img.data.length });
+        return void res.end(img.data);
       }
       if (m[2] === 'events' && method === 'GET') return sendJson(res, 200, await provider.events(sid));
       if (m[2] === 'messages' && method === 'POST') {

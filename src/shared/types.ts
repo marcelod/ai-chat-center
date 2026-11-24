@@ -1,6 +1,8 @@
 // Shared contract between the hub (src/hub) and the web UI (ui/).
 // Copied verbatim from the implementation plan (Tasks 5 and 7); change only together with both sides.
 
+import type { ChatBackground } from './background.js';
+
 export type ToolAction = {
   toolUseId: string;
   name: string;
@@ -62,6 +64,8 @@ export type SessionView = {
   model?: string;
   /** Reasoning effort level recorded at the last prompt; absent when Claude Code does not send it. */
   effort?: string;
+  /** Background chosen for this conversation in the app (⋮ menu); absent when none. */
+  background?: ChatBackground;
   state: 'busy' | 'idle' | 'waiting' | 'disconnected';
   waitingKind?: 'permission' | 'input' | 'question';
   /** An AskUserQuestion the app can answer; only for an active session. */
