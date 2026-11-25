@@ -52,7 +52,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 3. **Parar, reiniciar e remover pelo menu ⋮:** `claude stop`, `claude respawn` (roda a versão nova do Claude Code depois de um update) e `claude rm`. Também limpar sessões paradas que sobraram.
 4. ✅ 0.6.0 **Lista de comandos ao digitar `/`.**
 5. ✅ 0.6.0 **Aviso de que o comando terminou.**
-6. **Pergunta esperando resposta com `answers off`** (ver "A fazer").
+6. ✅ 0.6.2 **Pergunta esperando resposta com `answers off`.**
 7. ✅ 0.6.0 **Trocar modelo e esforço pelo app:** `/model <nome>` e `/effort <nível>` levam argumento e funcionam pelo attach. Botões no cabeçalho.
 8. **Sessão num worktree:** "nova sessão isolada" com `claude --bg -w <nome>`, para tarefas paralelas no mesmo projeto.
 
