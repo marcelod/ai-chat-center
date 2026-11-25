@@ -152,11 +152,11 @@ describe('openTerminal', () => {
     expect(c.opts).toMatchObject({ cwd: 'C:\\Users\\u\\my %proj% & co', shell: false, detached: true });
     expect(c.args.join(' ')).not.toContain('proj');
   });
-  it('Windows: without wt.exe, a detached cmd.exe /k (its own console), the folder never on the command line', async () => {
+  it('Windows: without wt.exe, cmd.exe start opens a console window with cmd.exe /k, the folder never on the command line', async () => {
     const r = recorder();
     await openTerminal({ bgId: ID, cwd: 'C:\\p & x' }, { spawn: r.spawn, platform: 'win32', env: winEnv, exists: () => false });
     expect(r.calls[0].cmd).toBe('C:\\Windows\\System32\\cmd.exe');
-    expect(r.calls[0].args).toEqual(['/k', 'claude', 'attach', ID]);
+    expect(r.calls[0].args).toEqual(['/d', '/c', 'start', '', 'C:\\Windows\\System32\\cmd.exe', '/k', 'claude', 'attach', ID]);
     expect(r.calls[0].opts).toMatchObject({ cwd: 'C:\\p & x', shell: false, detached: true });
     expect(await openTerminal({ bgId: ID, cwd: 'C:\\p' }, { spawn: r.spawn, platform: 'win32', env: {}, exists: () => false })).toMatchObject({
       ok: false,

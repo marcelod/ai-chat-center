@@ -139,9 +139,11 @@ export async function openTerminal(t: TerminalTarget, deps: OpenTerminalDeps = {
       cmd = wt;
       args = ['-d', '.', ...run];
     } else {
-      // A detached cmd.exe gets a console window of its own: no `start` (a cmd builtin) needed.
+      // `start` (a cmd builtin) opens a new console window; a detached process alone gets none (libuv
+      // starts it with DETACHED_PROCESS). The line holds constants and the id only; `start` without /D
+      // opens the window in cmd's own cwd, the session folder.
       cmd = cmdExe;
-      args = run.slice(1);
+      args = ['/d', '/c', 'start', '', ...run];
     }
   } else {
     const term = linuxTerminal(t.bgId, t.cwd, env, deps.exists ?? ((p) => isExecutableFile(p, platform)));
