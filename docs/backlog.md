@@ -17,11 +17,13 @@ Hoje uma sessão sai do app quando o terminal dela fecha. Para continuar no dia 
 
 ### Instalação mais fácil no Windows
 
+Em avaliação pelo autor (2026-11-24).
+
 No primeiro teste no Windows (2026-11-24), o atalho funcionou, mas a pessoa teve de instalar o Node, ajustar o PATH e fechar todos os VS Code e terminais antes de funcionar. Ideias: o `/cc` dizer claramente quando o Node não está no PATH que o Claude Code vê (e como corrigir); um guia curto de instalação no Windows; avaliar se os hooks podem achar o Node em locais comuns sem depender do PATH.
 
 ### Entrada por voz
 
-Ideia antiga, ainda sem detalhes.
+Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
 
 ### Memória dos waiters
 
@@ -30,10 +32,6 @@ Cada sessão conectada mantém um processo Node de cerca de 60 MB esperando mens
 ### Medir a CPU ao vivo
 
 A queda esperada de consultas ao `claude agents` com tudo parado (de 12 para 2 por minuto, desde a 0.4.3) ainda não foi medida ao vivo; precisa de `/reload-plugins` e de um hub novo.
-
-### PWA sem service worker
-
-O manifesto entrou na 0.4.5. Confirmar que o Chrome oferece "Instalar app" na barra de endereço sem service worker (desde o Chrome 108 não é exigido). Se oferecer, o item sai; o service worker só serviria para abrir offline, e sem o hub o app não funciona.
 
 ## A testar no uso
 
@@ -58,6 +56,8 @@ O manifesto entrou na 0.4.5. Confirmar que o Chrome oferece "Instalar app" na ba
 - 0.4.4 a 0.4.7: "trabalhando" preso corrigido, rascunho por conversa, menu ⋮ com Renomear e Remover do app, atalhos do Windows e do macOS, manifesto do PWA, conversa em grupo com os agentes.
 - 0.4.8: anexos (📎, arrastar, Ctrl+V), fundo por conversa, Fixar no topo e Desconectar no menu ⋮.
 - 0.4.9: modo da sessão no cabeçalho da conversa, uso de 5 horas no rodapé da lista (`/ai-chat-center:cc usage on|off`), teste do `connectedAt` isolado.
+- 0.4.10: app na própria janela por padrão (`/ai-chat-center:cc window off` desliga).
+- PWA: o Chrome oferece "Instalar app" sem service worker (confirmado em 2026-11-24).
 - Push da `main` para o origin.
 
 ## Lembretes de processo
