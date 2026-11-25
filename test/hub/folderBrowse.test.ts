@@ -7,7 +7,7 @@ import { browseFolder, FolderError, isInside, resolveHomeFolder } from '../../sr
 // Spec 2026-11-25-any-folder: the folder browser of the "+" dialog. Only folders inside the home folder.
 
 function tree() {
-  const root = fs.realpathSync(tmpDir('acc-browse-'));
+  const root = fs.realpathSync.native(tmpDir('acc-browse-'));
   const home = path.join(root, 'ana');
   const mk = (...p: string[]) => fs.mkdirSync(path.join(home, ...p), { recursive: true });
   mk('b-proj', 'src');

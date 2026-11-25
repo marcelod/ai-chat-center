@@ -1187,7 +1187,7 @@ describe('folder browser and any folder (spec 2026-11-25-any-folder)', () => {
   let me: string;
   let root: string;
   beforeEach(() => {
-    root = fs.realpathSync(tmpDir('acc-anyfolder-'));
+    root = fs.realpathSync.native(tmpDir('acc-anyfolder-'));
     me = path.join(root, 'me');
     fs.mkdirSync(path.join(me, 'new-proj', 'src'), { recursive: true });
     fs.mkdirSync(path.join(me, '.secret'));
