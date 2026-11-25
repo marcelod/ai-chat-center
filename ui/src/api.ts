@@ -190,14 +190,27 @@ export async function searchAll(q: string): Promise<SearchHit[]> {
 }
 
 export type Folder = { cwd: string; lastUsed: string };
-/** The folders the user already ran sessions in: the only ones a new session may start in. */
+/** The folders the user already ran sessions in (the "recent" list of the "+" dialog). */
 export async function listFolders(): Promise<Folder[]> {
   return (await request<{ folders: Folder[] }>('/api/folders')).folders;
+}
+export type FolderListing = { path: string; parent: string | null; entries: { name: string; path: string }[]; truncated: boolean };
+/**
+ * The subfolders of a folder inside the home folder (default: the home folder itself). Rejects with ApiError
+ * (`code`: folder-invalid, folder-outside, folder-not-found, folder-denied).
+ */
+export async function browseFolders(path?: string, hidden = false): Promise<FolderListing> {
+  const q = new URLSearchParams();
+  if (path) q.set('path', path);
+  if (hidden) q.set('hidden', '1');
+  const qs = q.toString();
+  return request<FolderListing>(`/api/folders/browse${qs ? `?${qs}` : ''}`);
 }
 export type NewSessionInput = { cwd: string; name?: string; model?: string; effort?: string };
 /**
  * Starts a new background session that connects to the app at once. Resolves to its short id when
- * `claude --bg` showed one. Rejects with ApiError (`detail`: the output of `claude --bg` on a 502).
+ * `claude --bg` showed one. Rejects with ApiError (`detail`: the output of `claude --bg` on a 502; `code`
+ * `untrusted` when the folder was never trusted in Claude Code).
  */
 export async function newSession(input: NewSessionInput): Promise<{ bgId?: string }> {
   const check = await verifyHub();

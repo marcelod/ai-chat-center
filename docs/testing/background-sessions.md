@@ -14,6 +14,14 @@ Verificado ao vivo em 2026-11-24 (Linux, Claude Code 2.1.331): o módulo `src/hu
 - [ ] Retomar uma sessão que você desconectou com `/cc off` mas que continua aberta no terminal: o app diz que ela ainda está aberta e não abre uma segunda cópia.
 - [ ] Pasta sem confiança: o app mostra o erro do `claude --bg` ("Workspace not trusted").
 
+### Nova sessão em qualquer pasta (0.6.2)
+- [ ] No "+", **Procurar pastas…** abre na pasta pessoal; entrar, subir (desativado na pasta pessoal), caminho atual visível; **Usar esta pasta** coloca a pasta no topo da lista e fecha o navegador.
+- [ ] Pastas ocultas só com "Mostrar pastas ocultas". Um link simbólico para fora da pasta pessoal não aparece.
+- [ ] Colar um caminho e Enter: vai para a pasta (não inicia a sessão). `/etc` ou `/home/outra-pessoa`: "Só dá para usar pastas dentro da sua pasta pessoal."
+- [ ] Iniciar numa pasta que já teve sessão e numa pasta nova **já confiada** no Claude Code: a sessão nasce conectada.
+- [ ] Pasta nunca aberta no Claude Code (crie uma pasta vazia de teste): o app diz para abrir um terminal na pasta, rodar `claude` uma vez e aceitar a confiança. Confirme o texto exato do erro do `claude --bg` no log do hub (`isUntrustedError` em `src/hub/server.ts` procura "not trusted").
+- [ ] Com `CLAUDE_CONFIG_DIR` próprio: uma pasta nova roda com a configuração padrão (`~/.claude`); só pastas com sessão anterior herdam o `CLAUDE_CONFIG_DIR` dela.
+
 ## macOS
 - [ ] O mesmo roteiro. Atenção ao `/compact`: o `script` do macOS tem outra sintaxe (`script -q /dev/null claude attach <id>`), que não foi testada ao vivo.
 
