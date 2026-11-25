@@ -52,6 +52,8 @@ export type LiveSession = {
   sessionId: string;
   name: string;
   status: 'busy' | 'idle' | 'waiting';
+  /** Short id of a background session (`claude attach <id>`); only for kind background. */
+  bgId?: string;
 };
 
 export type SessionView = {
@@ -92,6 +94,12 @@ export type SessionView = {
    * kept aside, not delivered. The app says so.
    */
   undeliveredUnsigned?: number;
+  /** Runs as a Claude Code background session: its short id, for `claude attach <id>` and app commands. */
+  bgId?: string;
+  /** The app asked to resume this ended session and it has not reconnected yet. */
+  resuming?: true;
+  /** Why the last resume from the app failed (output of `claude --bg`, or a timeout). */
+  resumeError?: string;
 };
 
 export type QuestionOption = { label: string; description?: string };

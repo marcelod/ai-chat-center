@@ -14,12 +14,16 @@ import { setDisplayName, validDisplayName } from '../core/names.js';
 import { setPinned } from '../core/pins.js';
 import { readBackgroundImage, saveBackgroundImage, setBackground, validBackgroundPreset } from '../core/background.js';
 import { BACKGROUND_IMAGE_MAX } from '../shared/background.js';
-import { getRegistration, isActive, markDisconnected, markRemoved } from '../core/registry.js';
+import { getRegistration, isActive, isRemoved, markDisconnected, markRemoved, type Registration } from '../core/registry.js';
 import { VERSION } from '../core/version.js';
 import { CHALLENGE_RE, healthProof } from '../core/healthProof.js';
 import { createPairing } from './pairing.js';
 import { AttachmentTooLargeError, storeAttachment } from '../core/attachments.js';
 import { MAX_ATTACHMENT_BYTES } from '../shared/attachments.js';
+import type { LiveSession } from '../shared/types.js';
+import { queryLiveSessions } from './status.js';
+import { CommandUnsupportedError, isValidCommand, resumeInBackground, typeCommand, type ResumeResult } from './bgSessions.js';
+import { failResume, isResuming, startResume } from './resumeState.js';
 
 export interface HubOptions {
   provider: Provider;
@@ -30,6 +34,13 @@ export interface HubOptions {
   log?: (msg: string) => void;
   /** For tests: the clock of the window pings. */
   now?: () => number;
+  /** For tests: background sessions (spec 2026-11-24-background-sessions). Defaults: the real commands. */
+  bg?: {
+    listLive?: () => Promise<LiveSession[] | null>;
+    resume?: (reg: Registration) => Promise<ResumeResult>;
+    type?: (id: string, text: string) => Promise<void>;
+    platform?: NodeJS.Platform;
+  };
 }
 
 const MAX_BODY = 64 * 1024;
@@ -138,6 +149,12 @@ export async function createHub(
   let port = opts.port;
 
   const pairing = createPairing();
+  const listLive = opts.bg?.listLive ?? (() => queryLiveSessions());
+  const resume = opts.bg?.resume ?? ((reg: Registration) => resumeInBackground(reg));
+  const type = opts.bg?.type ?? ((id: string, text: string) => typeCommand(id, text));
+  const bgPlatform = opts.bg?.platform ?? process.platform;
+  /** Sessions with a command being typed: one at a time each. */
+  const typing = new Set<string>();
   const now = opts.now ?? Date.now;
   /** App pages alive: page id -> last ping. Map keeps insertion order (oldest first). */
   const windows = new Map<string, number>();
@@ -354,7 +371,7 @@ export async function createHub(
       await saveConfig({ language: body.language as Lang });
       return sendJson(res, 200, { language: body.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|pin|disconnect|remove|background|background-image|attachments|questions\/([^/]+))$/.exec(p);
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|pin|disconnect|remove|resume|command|background|background-image|attachments|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid: string;
       try {
@@ -440,6 +457,59 @@ export async function createHub(
         if (!(await markRemoved(sid))) throw new HttpError(404, 'no such session');
         // Every open page drops it now, not at the next poll.
         fanOut({ type: 'sessions' });
+        return sendJson(res, 200, { ok: true });
+      }
+      if (m[2] === 'resume' && method === 'POST') {
+        // Resumes an ended session in the background, reconnected by a /cc (spec 2026-11-24-background-sessions).
+        req.resume();
+        const reg = await getRegistration(sid);
+        if (!reg || isRemoved(reg)) throw new HttpError(404, 'no such session');
+        if (isActive(reg)) throw new HttpError(409, 'session is connected');
+        if (isResuming(sid)) throw new HttpError(409, 'already resuming');
+        // A session left with /cc off (or replaced by /clear) may still run in its terminal: two copies of
+        // one conversation must never run. A failed lookup refuses rather than guess.
+        const live = await listLive();
+        if (live === null) throw new HttpError(503, 'could not list running sessions');
+        if (live.some((l) => l.sessionId === sid)) throw new HttpError(409, 'session is still running');
+        startResume(sid, now());
+        fanOut({ type: 'sessions' });
+        void resume(reg)
+          .then((r) => {
+            if (!r.ok) {
+              log(`resume of ${sid} failed: ${r.error}`);
+              failResume(sid, r.error, now());
+              fanOut({ type: 'sessions' });
+            }
+          })
+          .catch((e) => {
+            failResume(sid, (e as Error).message, now());
+            fanOut({ type: 'sessions' });
+          });
+        return sendJson(res, 202, { ok: true });
+      }
+      if (m[2] === 'command' && method === 'POST') {
+        // Types a slash command into a background session through `claude attach` (same spec).
+        const body = (await readJsonBody(req)) as { text?: unknown } | null;
+        const text = body && typeof body === 'object' && !Array.isArray(body) ? body.text : undefined;
+        if (!isValidCommand(text)) throw new HttpError(400, 'invalid command');
+        const reg = await getRegistration(sid);
+        if (!reg || !isActive(reg)) throw new HttpError(404, 'no such session');
+        if (bgPlatform === 'win32') throw new HttpError(501, 'not available on Windows yet');
+        const live = await listLive();
+        if (live === null) throw new HttpError(503, 'could not list running sessions');
+        const l = live.find((x) => x.sessionId === sid);
+        if (!l || l.kind !== 'background' || !l.bgId) throw new HttpError(404, 'not a background session');
+        if (l.status !== 'idle' || typing.has(sid)) throw new HttpError(409, 'session is busy');
+        typing.add(sid);
+        try {
+          await type(l.bgId, text);
+        } catch (e) {
+          if (e instanceof CommandUnsupportedError) throw new HttpError(501, 'not available on Windows yet');
+          log(`command for ${sid} failed: ${(e as Error).message}`);
+          throw new HttpError(502, 'could not type the command');
+        } finally {
+          typing.delete(sid);
+        }
         return sendJson(res, 200, { ok: true });
       }
       if (m[2] === 'background' && method === 'PUT') {

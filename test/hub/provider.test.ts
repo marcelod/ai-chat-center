@@ -15,6 +15,8 @@ import { setEffort } from '../../src/core/meta.js';
 import { peek } from '../../src/core/inbox.js';
 import { paths } from '../../src/core/paths.js';
 import { tmpDir } from '../helpers/tmp.js';
+import { failResume, resetResumeStates, startResume } from '../../src/hub/resumeState.js';
+import { queryLiveSessions } from '../../src/hub/status.js';
 
 let dir: string;
 let transcript: string;
@@ -793,5 +795,47 @@ describe('provider: pinning changes the sessions signature', () => {
     expect((await p.poll()).map((c) => c.type)).toEqual([]);
     await setPinned('s1', false);
     expect((await p.poll()).map((c) => c.type)).toEqual(['sessions']);
+  });
+});
+
+describe('provider: background sessions (spec 2026-11-24-background-sessions)', () => {
+  beforeEach(() => resetResumeStates());
+  it('status keeps the short id of a background session only', async () => {
+    const list = await queryLiveSessions(async () => JSON.stringify([
+      { pid: 1, cwd: '/a', kind: 'background', id: '5e1b5e9b', sessionId: 's1', name: 'n', status: 'idle' },
+      { pid: 2, cwd: '/a', kind: 'background', id: 'bad id', sessionId: 's2', name: 'n', status: 'idle' },
+      { pid: 3, cwd: '/a', kind: 'interactive', id: '5e1b5e9b', sessionId: 's3', name: 'n', status: 'idle' },
+    ]));
+    expect(list!.map((l) => l.bgId)).toEqual(['5e1b5e9b', undefined, undefined]);
+  });
+  it('a connected background session carries bgId, and poll reports it', async () => {
+    await reg();
+    let l = live({ status: 'idle' });
+    const p = new ClaudeCodeProvider(async () => [l]);
+    expect((await p.listSessions()).connected[0].bgId).toBeUndefined();
+    await p.poll();
+    l = live({ status: 'idle', kind: 'background', bgId: '5e1b5e9b' });
+    const p2 = new ClaudeCodeProvider(async () => [l]);
+    expect((await p2.listSessions()).connected[0].bgId).toBe('5e1b5e9b');
+  });
+  it('resuming until the session reconnects; a failure shows; a timeout becomes a failure', async () => {
+    await reg();
+    await markDisconnected('s1', 'exited');
+    let t = Date.parse('2026-11-24T10:00:00Z');
+    const p = new ClaudeCodeProvider(async () => [], { now: () => t });
+    startResume('s1', t);
+    expect((await p.listSessions()).connected[0]).toMatchObject({ state: 'disconnected', resuming: true });
+    t += 61_000;
+    expect((await p.listSessions()).connected[0]).toMatchObject({ resumeError: 'the session did not reconnect within 60 s' });
+    expect((await p.listSessions()).connected[0].resuming).toBeUndefined();
+    startResume('s1', t);
+    failResume('s1', 'Workspace not trusted.', t);
+    expect((await p.listSessions()).connected[0].resumeError).toBe('Workspace not trusted.');
+    startResume('s1', t);
+    await register({ sessionId: 's1', transcriptPath: transcript, cwd: '/home/u/proj', pid: 1, version: VERSION, protocol: PROTOCOL, connectedAt: new Date(t + 5000).toISOString() });
+    const v = (await new ClaudeCodeProvider(async () => [live({ status: 'idle' })], { now: () => t + 6000 }).listSessions()).connected[0];
+    expect(v.state).toBe('idle');
+    expect(v.resuming).toBeUndefined();
+    expect(v.resumeError).toBeUndefined();
   });
 });

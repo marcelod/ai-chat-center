@@ -17,6 +17,7 @@ import { TranscriptReader } from './transcript/reader.js';
 import { queryLiveSessions } from './status.js';
 import { PROTOCOL } from '../core/version.js';
 import { createClaudeProcessCheck } from '../hooks/parentClaude.js';
+import { resumeView } from './resumeState.js';
 
 export type { LiveSession, SessionView, ProviderChange };
 
@@ -349,6 +350,8 @@ export class ClaudeCodeProvider implements Provider {
       if (mode && !disconnected) view.mode = mode; // a stale mode would mislead
       const background = await getBackground(sid);
       if (background) view.background = background;
+      if (!disconnected && l?.bgId) view.bgId = l.bgId;
+      Object.assign(view, resumeView(sid, disconnected ? null : reg.connectedAt, this.now()));
       connected.push(view);
     }
 
@@ -431,6 +434,9 @@ export class ClaudeCodeProvider implements Provider {
         s.mode ?? null,
         s.background ?? null,
         s.pinned ?? false,
+        s.bgId ?? null,
+        s.resuming ?? false,
+        s.resumeError ?? null,
       ]),
     });
     if (signature !== this.lastSignature) {

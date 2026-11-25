@@ -5,7 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { createHub, WINDOW_FRESH_MS } from '../../src/hub/server.js';
+import { createHub, WINDOW_FRESH_MS, type HubOptions } from '../../src/hub/server.js';
+import { isResuming, resetResumeStates, resumeView } from '../../src/hub/resumeState.js';
+import type { LiveSession } from '../../src/shared/types.js';
 import { SessionDisconnectedError, SessionProtocolError, type Provider } from '../../src/hub/provider.js';
 import type { ProviderChange } from '../../src/shared/types.js';
 import { PROTOCOL, VERSION } from '../../src/core/version.js';
@@ -16,7 +18,7 @@ import { putPending, readAnswer } from '../../src/core/questions.js';
 import { paths } from '../../src/core/paths.js';
 import { getDisplayName } from '../../src/core/names.js';
 import { isPinned } from '../../src/core/pins.js';
-import { register, markDisconnected, getRegistration, isRemoved } from '../../src/core/registry.js';
+import { register, markDisconnected, markRemoved, getRegistration, isRemoved } from '../../src/core/registry.js';
 
 const TOKEN = 'a'.repeat(64);
 let home: string;
@@ -50,8 +52,8 @@ function fakeProvider(over: Partial<Provider> = {}): Provider & { pollCalls: num
   return p;
 }
 
-async function start(provider: Provider, extra: { staticDir?: string; pollMs?: number; now?: () => number } = {}) {
-  hub = await createHub({ provider, token: TOKEN, port: 0, staticDir: extra.staticDir ?? path.join(home, 'nope'), pollMs: extra.pollMs ?? 20, now: extra.now });
+async function start(provider: Provider, extra: { staticDir?: string; pollMs?: number; now?: () => number; bg?: HubOptions['bg'] } = {}) {
+  hub = await createHub({ provider, token: TOKEN, port: 0, staticDir: extra.staticDir ?? path.join(home, 'nope'), pollMs: extra.pollMs ?? 20, now: extra.now, bg: extra.bg });
   return new URL(hub.url);
 }
 
@@ -980,5 +982,109 @@ describe('attachments endpoint', () => {
   it('only POST', async () => {
     const u = await start(fakeProvider());
     expect((await req(u, '/api/sessions/s1/attachments', { headers: auth })).status).toBe(404);
+  });
+});
+
+describe('resume endpoint (background sessions)', () => {
+  const post = (u: URL, sid = 's1', headers: Record<string, string> = auth) => req(u, `/api/sessions/${sid}/resume`, { method: 'POST', headers });
+  const live = (over: Partial<LiveSession> = {}): LiveSession => ({ pid: 7, cwd: '/x', kind: 'interactive', sessionId: 's1', name: 'n', status: 'idle', ...over });
+  beforeEach(async () => {
+    resetResumeStates();
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
+  });
+  it('202 starts claude --bg --resume for an ended session that no longer runs', async () => {
+    await markDisconnected('s1', 'exited');
+    const resume = vi.fn(async () => ({ ok: true as const }));
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [live({ sessionId: 'other' })], resume } });
+    const r = await post(u);
+    expect(r.status).toBe(202);
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect((resume.mock.calls[0] as unknown as [{ sessionId: string; cwd: string }])[0]).toMatchObject({ sessionId: 's1', cwd: '/x' });
+    expect(isResuming('s1')).toBe(true);
+    expect((await post(u)).status).toBe(409); // already resuming
+  });
+  it('409 for a connected session, and for one still running in a terminal (after /cc off)', async () => {
+    const resume = vi.fn(async () => ({ ok: true as const }));
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [live()], resume } });
+    expect((await post(u)).status).toBe(409);
+    await markDisconnected('s1', 'off');
+    expect((await post(u)).status).toBe(409);
+    expect(resume).not.toHaveBeenCalled();
+  });
+  it('503 when running sessions cannot be listed: never guesses', async () => {
+    await markDisconnected('s1', 'exited');
+    const resume = vi.fn(async () => ({ ok: true as const }));
+    const u = await start(fakeProvider(), { bg: { listLive: async () => null, resume } });
+    expect((await post(u)).status).toBe(503);
+    expect(resume).not.toHaveBeenCalled();
+  });
+  it('a failure of claude --bg becomes the resume error', async () => {
+    await markDisconnected('s1', 'exited');
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [], resume: async () => ({ ok: false as const, error: 'Workspace not trusted.' }) } });
+    expect((await post(u)).status).toBe(202);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(resumeView('s1', null)).toEqual({ resumeError: 'Workspace not trusted.' });
+  });
+  it('404 for unknown or removed sessions; 401 without token', async () => {
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [], resume: async () => ({ ok: true as const }) } });
+    expect((await post(u, 'nope')).status).toBe(404);
+    expect((await post(u, 's1', {})).status).toBe(401);
+    await markRemoved('s1');
+    expect((await post(u)).status).toBe(404);
+  });
+});
+
+describe('command endpoint (background sessions)', () => {
+  const post = (u: URL, body: unknown, sid = 's1', headers: Record<string, string> = json) =>
+    req(u, `/api/sessions/${sid}/command`, { method: 'POST', headers, body: JSON.stringify(body) });
+  const bgLive = (over: Partial<LiveSession> = {}): LiveSession => ({ pid: 7, cwd: '/x', kind: 'background', bgId: '5e1b5e9b', sessionId: 's1', name: 'n', status: 'idle', ...over });
+  beforeEach(async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
+  });
+  it('200 types the command into the background session', async () => {
+    const type = vi.fn(async () => {});
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [bgLive()], type, platform: 'linux' } });
+    const r = await post(u, { text: '/compact' });
+    expect(r.status).toBe(200);
+    expect(type).toHaveBeenCalledWith('5e1b5e9b', '/compact');
+  });
+  it('400 for anything but a one-line slash command', async () => {
+    const type = vi.fn(async () => {});
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [bgLive()], type, platform: 'linux' } });
+    for (const text of ['compact', '/compact\n/clear', 7, '']) expect((await post(u, { text })).status).toBe(400);
+    expect(type).not.toHaveBeenCalled();
+  });
+  it('404 for an interactive session or an ended one; 409 while busy; 501 on Windows', async () => {
+    const type = vi.fn(async () => {});
+    let list: LiveSession[] = [bgLive({ kind: 'interactive', bgId: undefined })];
+    const u = await start(fakeProvider(), { bg: { listLive: async () => list, type, platform: 'linux' } });
+    expect((await post(u, { text: '/compact' })).status).toBe(404);
+    list = [bgLive({ status: 'busy' })];
+    expect((await post(u, { text: '/compact' })).status).toBe(409);
+    list = [bgLive({ status: 'waiting' })];
+    expect((await post(u, { text: '/compact' })).status).toBe(409);
+    await markDisconnected('s1', 'exited');
+    list = [bgLive()];
+    expect((await post(u, { text: '/compact' })).status).toBe(404);
+    expect(type).not.toHaveBeenCalled();
+    await hub!.close();
+    hub = undefined;
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
+    const w = await start(fakeProvider(), { bg: { listLive: async () => list, type, platform: 'win32' } });
+    expect((await post(w, { text: '/compact' })).status).toBe(501);
+  });
+  it('one command at a time per session; a failure is 502', async () => {
+    let release!: () => void;
+    const type = vi.fn(() => new Promise<void>((r) => (release = r)));
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [bgLive()], type, platform: 'linux' } });
+    const first = post(u, { text: '/compact' });
+    await vi.waitFor(() => expect(type).toHaveBeenCalledTimes(1));
+    expect((await post(u, { text: '/compact' })).status).toBe(409);
+    release();
+    expect((await first).status).toBe(200);
+    await hub!.close();
+    hub = undefined;
+    const f = await start(fakeProvider(), { bg: { listLive: async () => [bgLive()], type: async () => { throw new Error('the session prompt did not show'); }, platform: 'linux' } });
+    expect((await post(f, { text: '/compact' })).status).toBe(502);
   });
 });

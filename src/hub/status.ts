@@ -1,5 +1,6 @@
 import { runClaudeAgentsJson } from '../core/claudeAgents.js';
 import type { LiveSession } from '../shared/types.js';
+import { isBgId } from './bgSessions.js';
 
 export type { LiveSession };
 
@@ -9,7 +10,7 @@ function toLive(x: unknown): LiveSession | null {
   if (typeof o.sessionId !== 'string' || !o.sessionId) return null;
   if (typeof o.pid !== 'number' || typeof o.cwd !== 'string') return null;
   if (o.kind !== 'interactive' && o.kind !== 'background') return null;
-  return {
+  const live: LiveSession = {
     pid: o.pid,
     cwd: o.cwd,
     kind: o.kind,
@@ -18,6 +19,8 @@ function toLive(x: unknown): LiveSession | null {
     // Presence never depends on status: unknown values degrade to idle.
     status: o.status === 'busy' || o.status === 'waiting' ? o.status : 'idle',
   };
+  if (o.kind === 'background' && isBgId(o.id)) live.bgId = o.id;
+  return live;
 }
 
 /** Like listLiveSessions but returns null when the lookup itself failed (error, timeout, non-JSON). */
