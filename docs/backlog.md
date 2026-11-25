@@ -30,6 +30,14 @@ Visto em 2026-11-25 (print do autor): um bloco de código longo (um prompt para 
 
 Visto em 2026-11-25 (print do autor, 0.6.4): numa conversa com fundo, a mensagem em que o Claude pede algo a um agente ("Claude → nome", com "Show all") parece solta, sem balão. Causa no código: `ToAgentBubble` (`ui/src/components/MessageBubble.tsx`) só tem borda tracejada e texto apagado (`text-muted`), sem cor de fundo; as outras mensagens têm `bg-surface` ou `bg-field`. Sobre o fundo da conversa, a borda quase some. Ideia: dar um fundo ao balão (por exemplo `bg-field` ou `bg-surface` com um pouco de transparência), mantendo a borda tracejada para diferenciar, e conferir nos dois temas e com e sem fundo. Conferir também o contraste do texto apagado sobre o fundo.
 
+### Cor do fundo também no nome da conversa
+
+Ideia de colegas do autor (2026-11-25). Quando a pessoa escolhe um fundo para a conversa, a cor dele aparece também na identificação da conversa: no cabeçalho (o círculo com as iniciais e/ou o nome) e na lista à esquerda (o círculo das iniciais). Ajuda a achar a conversa na lista pela cor. Detalhes:
+
+- Cor sólida: usar a cor (`COLOR_CSS` em `ui/src/components/backgrounds.ts`). Gradiente: usar o próprio gradiente no círculo, ou a primeira cor. Imagem: tirar a cor média da imagem, ou manter o círculo padrão.
+- Preferir pintar o círculo das iniciais, ou uma barrinha ao lado do nome, em vez do texto do nome: texto colorido perde contraste em alguns tons (o `sand` e o `mint` no tema claro). Conferir o contraste das iniciais brancas sobre cada cor, nos dois temas.
+- Sem fundo escolhido, fica como hoje.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
