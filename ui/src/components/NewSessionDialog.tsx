@@ -175,6 +175,7 @@ export function NewSessionDialog({ loadFolders, browse, onStart, onClose }: Prop
             </select>
           </label>
         </div>
+        <p className="-mt-1 mb-3 text-xs text-muted">{t('ui.newSession.chosenApply')}</p>
         {error && (
           <p role="alert" className="mb-2 break-words text-sm text-danger">
             {error}

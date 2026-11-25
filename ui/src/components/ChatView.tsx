@@ -532,8 +532,8 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
               </span>
             )}
           </div>
-          {runCommand && session.bgId && state !== 'disconnected' && <SessionControls onCommand={runCommand} disabled={state !== 'idle'} />}
-          {!session.bgId && state !== 'disconnected' && <SessionControls onCommand={async () => {}} disabled unavailable />}
+          {runCommand && session.bgId && state !== 'disconnected' && <SessionControls key={session.sessionId} onCommand={runCommand} working={state !== 'idle'} />}
+          {!session.bgId && state !== 'disconnected' && <SessionControls onCommand={async () => {}} working={false} unavailable />}
           <VersionInfo session={session} hubVersion={hubVersion} />
         </div>
         <button

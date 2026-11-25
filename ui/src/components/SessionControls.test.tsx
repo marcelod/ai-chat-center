@@ -26,10 +26,27 @@ describe('model and effort controls', () => {
     expect(onCommand).toHaveBeenCalledWith('/effort high');
   });
 
-  it('disabled while the session works; a busy answer is shown', async () => {
-    const { unmount } = chat(session({ bgId: '5e1b5e9b', state: 'busy' }), vi.fn(async () => {}));
-    expect(screen.getByRole('combobox', { name: 'Switch model' })).toBeDisabled();
-    unmount();
+  it('while the session works the choice is kept and sent once it is idle', async () => {
+    const onCommand = vi.fn(async (_line: string) => {});
+    const view = (s: SessionView) => (
+      <LangProvider lang="en">
+        <ChatView session={s} events={[]} pending={[]} loading={false} onSend={async () => {}} onBack={() => {}} onCommand={onCommand} />
+      </LangProvider>
+    );
+    const { rerender } = render(view(session({ bgId: '5e1b5e9b', state: 'busy' })));
+    const user = userEvent.setup();
+    expect(screen.getByRole('combobox', { name: 'Switch model' })).not.toBeDisabled();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Switch model' }), 'opus');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Switch effort' }), 'high');
+    expect(onCommand).not.toHaveBeenCalled();
+    expect(screen.getByText('will be applied when the session finishes')).toBeTruthy();
+    rerender(view(session({ bgId: '5e1b5e9b', state: 'idle' })));
+    await vi.waitFor(() => expect(onCommand).toHaveBeenCalledTimes(2));
+    expect(onCommand.mock.calls.map((c) => c[0])).toEqual(['/model opus', '/effort high']);
+    expect(screen.queryByText('will be applied when the session finishes')).toBeNull();
+  });
+
+  it('a busy answer is shown', async () => {
     chat(session({ bgId: '5e1b5e9b' }), async () => Promise.reject(Object.assign(new Error('409'), { status: 409 })));
     await userEvent.setup().selectOptions(screen.getByRole('combobox', { name: 'Switch model' }), 'opus');
     expect((await screen.findByRole('alert')).textContent).toContain('busy');

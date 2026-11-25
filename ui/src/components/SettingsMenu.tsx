@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Language } from '../api';
 import { useLang, useT } from '../i18n';
 import { GearIcon } from './icons';
+import { saveShowDiffs, useShowDiffs } from '../prefs';
 import { readTheme, saveTheme, type Theme } from '../theme';
 
 export type NotificationsControl = { supported: boolean; enabled: boolean; onToggle: (on: boolean) => void };
@@ -23,6 +24,7 @@ export function SettingsMenu({
   const lang = useLang();
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(readTheme);
+  const showDiffs = useShowDiffs();
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -81,6 +83,10 @@ export function SettingsMenu({
             <option value="light">{t('ui.theme.light')}</option>
             <option value="dark">{t('ui.theme.dark')}</option>
           </select>
+          <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+            <input type="checkbox" checked={showDiffs} onChange={(e) => saveShowDiffs(e.target.checked)} className="h-4 w-4 accent-accent" />
+            {t('ui.showDiffs')}
+          </label>
           {notifications?.supported && (
             <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-2 text-sm">
               <input

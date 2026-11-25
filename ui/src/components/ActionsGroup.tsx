@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { DiffLine, ToolAction, ToolDiff } from '@shared/types';
 import { useT } from '../i18n';
+import { useShowDiffs } from '../prefs';
 import { CheckIcon, ChevronDownIcon, WrenchIcon } from './icons';
 
 function Status({ item }: { item: ToolAction }) {
@@ -63,6 +64,7 @@ export function DiffView({ diff }: { diff: ToolDiff }) {
 
 export function ActionsGroup({ items }: { items: ToolAction[] }) {
   const t = useT();
+  const showDiffs = useShowDiffs();
   const [open, setOpen] = useState(false);
   const names = [...new Set(items.map((i) => i.name))].join(' · ');
   const count = t(items.length === 1 ? 'ui.chat.actionsOne' : 'ui.chat.actionsMany', { n: items.length });
@@ -91,7 +93,7 @@ export function ActionsGroup({ items }: { items: ToolAction[] }) {
                 </span>
                 <Status item={i} />
               </div>
-              {i.diff ? <DiffView diff={i.diff} /> : null}
+              {showDiffs && i.diff ? <DiffView diff={i.diff} /> : null}
               {/* `!` shell mode: the output is the point, so show it (other tools keep only their status). */}
               {i.name === 'Shell' && i.result ? (
                 <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-field p-2 font-mono text-xs">

@@ -1,6 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { saveShowDiffs } from '../prefs';
 import type { ToolDiff } from '@shared/types';
 import { LangProvider } from '../i18n';
 import { ActionsGroup } from './ActionsGroup';
@@ -9,6 +10,11 @@ import { RecapCard } from './MessageBubble';
 const wrap = (n: React.ReactNode) => <LangProvider lang="en">{n}</LangProvider>;
 
 describe('DiffView', () => {
+  beforeEach(() => saveShowDiffs(true));
+  afterEach(() => {
+    saveShowDiffs(false);
+    localStorage.clear();
+  });
   const diff: ToolDiff = {
     lines: [
       { op: ' ', text: 'a' },
@@ -25,6 +31,12 @@ describe('DiffView', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Show changes (+1 -1)' }));
     expect(container.querySelector('[data-diff-line="-"]')?.textContent).toContain('b');
     expect(container.querySelector('[data-diff-line="+"]')?.textContent).toContain('B');
+  });
+  it('off by default: no diff button at all', async () => {
+    saveShowDiffs(false);
+    render(wrap(<ActionsGroup items={[{ toolUseId: 't', name: 'Edit', summary: '/f.ts', result: 'ok', diff }]} />));
+    await userEvent.click(screen.getByRole('button', { name: /Edit/ }));
+    expect(screen.queryByRole('button', { name: /Show changes/ })).toBeNull();
   });
   it('shows 200 lines, then more on request', async () => {
     const big: ToolDiff = { lines: Array.from({ length: 450 }, (_, i) => ({ op: '+' as const, text: `l${i}` })), added: 450, removed: 0 };

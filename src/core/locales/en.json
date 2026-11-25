@@ -88,9 +88,10 @@
         "exit": "Ends the session"
       }
     },
-    "newSession": {"open": "New session", "title": "New session", "body": "Starts Claude Code in the background in a folder of your computer. It connects to the app at once, with no terminal.", "folder": "Folder", "noFolders": "No recent folder yet: browse to one below.", "foldersFailed": "Couldn't list the folders.", "name": "Name (optional)", "namePlaceholder": "e.g. billing fixes", "nameInvalid": "Letters, numbers, spaces and . _ - only.", "model": "Model", "effort": "Effort", "default": "Default", "start": "Start", "starting": "Starting…", "cancel": "Cancel", "failed": "Couldn't start the session.", "failedWith": "Couldn't start the session: {error}", "waiting": "Starting the new session…", "recent": "Recent folders", "browse": "Browse folders…", "browseHide": "Hide the folder browser", "browser": "Folder browser", "current": "Current folder", "up": "Up one folder", "showHidden": "Show hidden folders", "use": "Use this folder", "pathField": "Or type or paste a full path", "pathPlaceholder": "/home/you/project", "go": "Go", "empty": "No subfolders here.", "truncated": "Only the first {count} folders are shown.", "loading": "Loading…", "browseFailed": "Couldn't open this folder.", "folderInvalid": "Type a full path (starting with / or a drive letter).", "folderOutside": "Only folders inside your home folder can be used.", "folderNotFound": "This folder doesn't exist.", "folderDenied": "No permission to open this folder.", "untrusted": "Claude Code doesn't trust this folder yet. Open a terminal in {folder}, run claude once and accept \"Yes, I trust this folder\", then try again."},
+    "newSession": {"open": "New session", "title": "New session", "body": "Starts Claude Code in the background in a folder of your computer. It connects to the app at once, with no terminal.", "folder": "Folder", "noFolders": "No recent folder yet: browse to one below.", "foldersFailed": "Couldn't list the folders.", "name": "Name (optional)", "namePlaceholder": "e.g. billing fixes", "nameInvalid": "Letters, numbers, spaces and . _ - only.", "model": "Model", "effort": "Effort", "chosenApply": "Model and effort chosen here apply from the first message.", "default": "Default", "start": "Start", "starting": "Starting…", "cancel": "Cancel", "failed": "Couldn't start the session.", "failedWith": "Couldn't start the session: {error}", "waiting": "Starting the new session…", "recent": "Recent folders", "browse": "Browse folders…", "browseHide": "Hide the folder browser", "browser": "Folder browser", "current": "Current folder", "up": "Up one folder", "showHidden": "Show hidden folders", "use": "Use this folder", "pathField": "Or type or paste a full path", "pathPlaceholder": "/home/you/project", "go": "Go", "empty": "No subfolders here.", "truncated": "Only the first {count} folders are shown.", "loading": "Loading…", "browseFailed": "Couldn't open this folder.", "folderInvalid": "Type a full path (starting with / or a drive letter).", "folderOutside": "Only folders inside your home folder can be used.", "folderNotFound": "This folder doesn't exist.", "folderDenied": "No permission to open this folder.", "untrusted": "Claude Code doesn't trust this folder yet. Open a terminal in {folder}, run claude once and accept \"Yes, I trust this folder\", then try again."},
     "theme": {"label": "Theme", "system": "System", "light": "Light", "dark": "Dark"},
     "language": "Language",
+    "showDiffs": "Show file changes",
     "back": "Back",
     "unread": "{n} unread",
     "loadError": "Could not reach the hub. Retrying…",
@@ -172,6 +173,7 @@
       "switchModel": "Switch model",
       "switchEffort": "Switch effort",
       "switchSavesDefault": "also becomes the default for new sessions",
+      "switchWhenIdle": "will be applied when the session finishes",
       "mode": "Permission mode",
       "modes": {
         "default": "default",
