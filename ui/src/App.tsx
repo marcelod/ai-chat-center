@@ -58,6 +58,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
       {newOpen && (
         <NewSessionDialog
           loadFolders={api.listFolders}
+          browse={api.browseFolders}
           onStart={async (input) => {
             const r = await api.newSession(input);
             if (r.bgId) setStartedBg(r.bgId);

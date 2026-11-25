@@ -1,9 +1,11 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { Folder, NewSessionInput } from '../api';
 import { useT } from '../i18n';
+import { FolderBrowser, folderErrorKey, type Browse } from './FolderBrowser';
 
-// A new background session from the app (spec 2026-11-25-app-batch): a folder the user already worked in,
-// an optional name, model and effort. The hub runs `claude --bg … "/ai-chat-center:cc"`.
+// A new background session from the app (spec 2026-11-25-app-batch): a recent folder or any folder inside the
+// home folder picked in the browser (spec 2026-11-25-any-folder), an optional name, model and effort. The hub
+// runs `claude --bg … "/ai-chat-center:cc"`.
 
 /** Model aliases offered; '' keeps the default of Claude Code. */
 export const MODELS = ['', 'opus', 'sonnet', 'haiku', 'fable'] as const;
@@ -13,15 +15,17 @@ export const validName = (v: string) => v === '' || (v.length <= 60 && /^[\p{L}\
 
 type Props = {
   loadFolders: () => Promise<Folder[]>;
+  browse: Browse;
   onStart: (input: NewSessionInput) => Promise<void>;
   onClose: () => void;
 };
 
 const field = 'min-h-11 w-full rounded-lg border border-field-border bg-surface px-3 text-sm text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/30';
 
-export function NewSessionDialog({ loadFolders, onStart, onClose }: Props) {
+export function NewSessionDialog({ loadFolders, browse, onStart, onClose }: Props) {
   const t = useT();
   const titleId = useId();
+  const [browsing, setBrowsing] = useState(false);
   const [folders, setFolders] = useState<Folder[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [cwd, setCwd] = useState('');
@@ -38,7 +42,8 @@ export function NewSessionDialog({ loadFolders, onStart, onClose }: Props) {
       .then((f) => {
         if (!live) return;
         setFolders(f);
-        setCwd(f[0]?.cwd ?? '');
+        setCwd((c) => c || (f[0]?.cwd ?? ''));
+        if (f.length === 0) setBrowsing(true);
       })
       .catch(() => live && setLoadError(true));
     return () => {
@@ -49,6 +54,9 @@ export function NewSessionDialog({ loadFolders, onStart, onClose }: Props) {
     if (folders) first.current?.focus();
   }, [folders]);
 
+  /** A folder picked in the browser that is not a recent one: shown first in the list. */
+  const picked = cwd && !(folders ?? []).some((f) => f.cwd === cwd) ? cwd : null;
+  const options = [...(picked ? [picked] : []), ...(folders ?? []).map((f) => f.cwd)];
   const nameOk = validName(name.trim());
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -60,8 +68,10 @@ export function NewSessionDialog({ loadFolders, onStart, onClose }: Props) {
       await onStart({ cwd, ...(n ? { name: n } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
       onClose();
     } catch (err) {
-      const detail = (err as { detail?: unknown } | null)?.detail;
-      setError(typeof detail === 'string' && detail ? t('ui.newSession.failedWith', { error: detail }) : t('ui.newSession.failed'));
+      const { detail, code } = (err ?? {}) as { detail?: unknown; code?: unknown };
+      if (code === 'untrusted') setError(t('ui.newSession.untrusted', { folder: cwd }));
+      else if (typeof code === 'string' && code.startsWith('folder-')) setError(t(folderErrorKey(err)));
+      else setError(typeof detail === 'string' && detail ? t('ui.newSession.failedWith', { error: detail }) : t('ui.newSession.failed'));
       setBusy(false);
     }
   };
@@ -83,7 +93,7 @@ export function NewSessionDialog({ loadFolders, onStart, onClose }: Props) {
         aria-busy={busy || undefined}
         onKeyDown={onKeyDown}
         onSubmit={(e) => void submit(e)}
-        className="w-full max-w-md rounded-xl border border-line bg-surface p-4 text-ink shadow-lg"
+        className="max-h-full w-full max-w-md overflow-y-auto rounded-xl border border-line bg-surface p-4 text-ink shadow-lg"
       >
         <h3 id={titleId} className="mb-1 text-base font-semibold">
           {t('ui.newSession.title')}
@@ -97,14 +107,39 @@ export function NewSessionDialog({ loadFolders, onStart, onClose }: Props) {
         {folders && folders.length === 0 && <p className="mb-2 text-sm text-muted">{t('ui.newSession.noFolders')}</p>}
         <label className="mb-3 block text-xs font-semibold text-muted">
           {t('ui.newSession.folder')}
-          <select ref={first} value={cwd} onChange={(e) => setCwd(e.target.value)} disabled={!folders?.length || busy} className={`${field} mt-1 font-mono`}>
-            {(folders ?? []).map((f) => (
-              <option key={f.cwd} value={f.cwd}>
-                {f.cwd}
-              </option>
-            ))}
+          <select ref={first} value={cwd} onChange={(e) => setCwd(e.target.value)} disabled={!options.length || busy} className={`${field} mt-1 font-mono`}>
+            {picked && <option value={picked}>{picked}</option>}
+            {(folders ?? []).length > 0 && (
+              <optgroup label={t('ui.newSession.recent')}>
+                {(folders ?? []).map((f) => (
+                  <option key={f.cwd} value={f.cwd}>
+                    {f.cwd}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </label>
+        <button
+          type="button"
+          onClick={() => setBrowsing((b) => !b)}
+          disabled={busy}
+          aria-expanded={browsing}
+          className="mb-2 min-h-11 rounded-lg px-3 text-sm text-accent hover:bg-field disabled:opacity-40"
+        >
+          {browsing ? t('ui.newSession.browseHide') : t('ui.newSession.browse')}
+        </button>
+        {browsing && (
+          <FolderBrowser
+            browse={browse}
+            disabled={busy}
+            onUse={(p) => {
+              setCwd(p);
+              setBrowsing(false);
+              first.current?.focus();
+            }}
+          />
+        )}
         <label className="mb-3 block text-xs font-semibold text-muted">
           {t('ui.newSession.name')}
           <input
