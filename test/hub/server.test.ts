@@ -1089,6 +1089,48 @@ describe('command endpoint (background sessions)', () => {
   });
 });
 
+describe('open-terminal endpoint (background sessions)', () => {
+  const post = (u: URL, sid = 's1', headers: Record<string, string> = auth) => req(u, `/api/sessions/${sid}/open-terminal`, { method: 'POST', headers });
+  const bgLive = (over: Partial<LiveSession> = {}): LiveSession => ({ pid: 7, cwd: '/x', kind: 'background', bgId: '5e1b5e9b', sessionId: 's1', name: 'n', status: 'waiting', ...over });
+  beforeEach(async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/proj/x', pid: 42, configDir: '/home/u/.claude-work' });
+  });
+  it('200 opens a terminal on the background session, in its folder, even while it waits', async () => {
+    const openTerminal = vi.fn(async () => ({ ok: true as const }));
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [bgLive()], openTerminal } });
+    const r = await post(u);
+    expect(r.status).toBe(200);
+    expect(openTerminal).toHaveBeenCalledWith({ bgId: '5e1b5e9b', cwd: '/proj/x', configDir: '/home/u/.claude-work' });
+  });
+  it('409 for an interactive session and for a disconnected one; 404 unknown; 401 without token; 503 failed lookup', async () => {
+    const openTerminal = vi.fn(async () => ({ ok: true as const }));
+    let list: LiveSession[] | null = [bgLive({ kind: 'interactive', bgId: undefined })];
+    const u = await start(fakeProvider(), { bg: { listLive: async () => list, openTerminal } });
+    let r = await post(u);
+    expect(r.status).toBe(409);
+    expect(JSON.parse(r.body).code).toBe('not-background');
+    list = null;
+    expect((await post(u)).status).toBe(503);
+    list = [bgLive()];
+    expect((await post(u, 'nope')).status).toBe(404);
+    expect((await post(u, 's1', {})).status).toBe(401);
+    await markDisconnected('s1', 'exited');
+    r = await post(u);
+    expect(r.status).toBe(409);
+    expect(JSON.parse(r.body).code).toBe('session-disconnected');
+    expect(openTerminal).not.toHaveBeenCalled();
+  });
+  it('502 with a code when no terminal opens; the message carries no token', async () => {
+    const u = await start(fakeProvider(), {
+      bg: { listLive: async () => [bgLive()], openTerminal: async () => ({ ok: false as const, code: 'no-terminal' as const, error: 'no terminal program found' }) },
+    });
+    const r = await post(u);
+    expect(r.status).toBe(502);
+    expect(JSON.parse(r.body)).toEqual({ error: 'no terminal program found', code: 'no-terminal' });
+    expect(r.body).not.toContain(TOKEN);
+  });
+});
+
 describe('new session endpoint (spec 2026-11-25-app-batch)', () => {
   const live = (over: Partial<LiveSession> = {}): LiveSession => ({ pid: 7, cwd: '/live/dir', kind: 'interactive', sessionId: 'l1', name: 'n', status: 'idle', ...over });
   const post = (u: URL, body: unknown) => req(u, '/api/sessions', { method: 'POST', headers: json, body: JSON.stringify(body) });

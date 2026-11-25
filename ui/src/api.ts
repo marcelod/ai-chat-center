@@ -328,6 +328,13 @@ export async function resumeSession(sid: string): Promise<void> {
   await request<unknown>(`/api/sessions/${encodeURIComponent(sid)}/resume`, { method: 'POST' });
 }
 /**
+ * Opens the system terminal running `claude attach` on a background session. Rejects with ApiError: 409
+ * (code `not-background` or `session-disconnected`), 502 (code `no-terminal` or `spawn-failed`).
+ */
+export async function openTerminal(sid: string): Promise<void> {
+  await request<unknown>(`/api/sessions/${encodeURIComponent(sid)}/open-terminal`, { method: 'POST' });
+}
+/**
  * Types a slash command into a background session. Rejects with ApiError: 409 busy, 501 Windows, 404 not a
  * background session. Like sendMessage, never POSTs to a server that cannot prove it is the hub.
  */

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionView } from '@shared/types';
@@ -77,6 +77,105 @@ describe('background session header', () => {
   it('nothing of it for an interactive session', () => {
     chat(session());
     expect(screen.queryByTestId('attach-command')).toBeNull();
+  });
+});
+
+describe('open in a terminal (backlog 2026-11-25)', () => {
+  const errCode = (status: number, code: string) => Object.assign(new Error(String(status)), { status, code });
+  function chatT(s: SessionView, onOpenTerminal: () => Promise<void>, answersFromApp = false) {
+    render(
+      <LangProvider lang="en">
+        <ChatView session={s} events={[]} pending={[]} loading={false} onSend={async () => {}} onBack={() => {}} onOpenTerminal={onOpenTerminal} answersFromApp={answersFromApp} />
+      </LangProvider>,
+    );
+  }
+  const openMenu = () => userEvent.setup().click(screen.getByRole('button', { name: 'Conversation actions' }));
+
+  it('the ⋮ menu offers it for a connected background session, and says when it opened', async () => {
+    const onOpenTerminal = vi.fn(async () => {});
+    chatT(session({ bgId: '5e1b5e9b' }), onOpenTerminal);
+    await openMenu();
+    await userEvent.setup().click(screen.getByRole('menuitem', { name: 'Open in a terminal' }));
+    expect(onOpenTerminal).toHaveBeenCalledTimes(1);
+    expect((await screen.findByTestId('terminal-outcome')).textContent).toContain('Terminal opened');
+  });
+
+  it('not for an interactive session nor a disconnected one', async () => {
+    const { unmount } = render(
+      <LangProvider lang="en">
+        <ChatView session={session()} events={[]} pending={[]} loading={false} onSend={async () => {}} onBack={() => {}} onOpenTerminal={async () => {}} onRename={async () => {}} />
+      </LangProvider>,
+    );
+    await openMenu();
+    expect(screen.queryByRole('menuitem', { name: 'Open in a terminal' })).toBeNull();
+    unmount();
+    render(
+      <LangProvider lang="en">
+        <ChatView session={session({ bgId: '5e1b5e9b', state: 'disconnected' })} events={[]} pending={[]} loading={false} onSend={async () => {}} onBack={() => {}} onOpenTerminal={async () => {}} onRename={async () => {}} />
+      </LangProvider>,
+    );
+    await openMenu();
+    expect(screen.queryByRole('menuitem', { name: 'Open in a terminal' })).toBeNull();
+  });
+
+  it('shows the hub refusal: no terminal (with the command to run), not background, other failure', async () => {
+    const cases: [Error, RegExp][] = [
+      [errCode(502, 'no-terminal'), /No terminal program found\. Run in a terminal: claude attach 5e1b5e9b/],
+      [errCode(409, 'not-background'), /no longer runs in the background/],
+      [errCode(502, 'spawn-failed'), /Could not open a terminal\. Run in a terminal: claude attach 5e1b5e9b/],
+    ];
+    for (const [e, text] of cases) {
+      const { unmount } = render(
+        <LangProvider lang="en">
+          <ChatView session={session({ bgId: '5e1b5e9b' })} events={[]} pending={[]} loading={false} onSend={async () => {}} onBack={() => {}} onOpenTerminal={() => Promise.reject(e)} />
+        </LangProvider>,
+      );
+      await openMenu();
+      await userEvent.setup().click(screen.getByRole('menuitem', { name: 'Open in a terminal' }));
+      expect((await screen.findByRole('alert')).textContent).toMatch(text);
+      unmount();
+    }
+  });
+
+  it('a question waiting in the terminal dialog, answers off: says so, with the button and claude attach', async () => {
+    const onOpenTerminal = vi.fn(async () => {});
+    chatT(session({ bgId: '5e1b5e9b', state: 'waiting', waitingKind: 'question' }), onOpenTerminal);
+    const banner = screen.getByTestId('waiting-banner');
+    expect(banner.textContent).toContain('Question waiting for an answer');
+    expect(banner.textContent).toContain('/ai-chat-center:cc answers on');
+    expect(within(banner).getByTestId('attach-command').textContent).toContain('claude attach 5e1b5e9b');
+    await userEvent.setup().click(within(banner).getByRole('button', { name: 'Open in a terminal' }));
+    expect(onOpenTerminal).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers on but the question went to the terminal: no hint to turn them on', () => {
+    chatT(session({ bgId: '5e1b5e9b', state: 'waiting', waitingKind: 'question' }), async () => {}, true);
+    const banner = screen.getByTestId('waiting-banner');
+    expect(banner.textContent).toContain('Question waiting for an answer');
+    expect(banner.textContent).not.toContain('answers on');
+  });
+
+  it('a question routed to the app keeps its own banner, without the terminal button', () => {
+    chatT(
+      session({ bgId: '5e1b5e9b', state: 'waiting', waitingKind: 'question', pendingQuestion: { toolUseId: 'tu1', createdAt: '2026-11-25T00:00:00.000Z', questions: [{ question: 'Q?', options: [{ label: 'A' }] }] } }),
+      async () => {},
+      true,
+    );
+    const banner = screen.getByTestId('waiting-banner');
+    expect(banner.textContent).toContain('answer below');
+    expect(within(banner).queryByRole('button', { name: 'Open in a terminal' })).toBeNull();
+  });
+
+  it('an interactive session with a terminal question: answer in the terminal, no button', () => {
+    chatT(session({ state: 'waiting', waitingKind: 'question' }), async () => {});
+    const banner = screen.getByTestId('waiting-banner');
+    expect(banner.textContent).toContain("Answer it in the session's terminal.");
+    expect(within(banner).queryByRole('button', { name: 'Open in a terminal' })).toBeNull();
+  });
+
+  it('a permission wait of a background session also offers the button', () => {
+    chatT(session({ bgId: '5e1b5e9b', state: 'waiting', waitingKind: 'permission' }), async () => {});
+    expect(within(screen.getByTestId('waiting-banner')).getByRole('button', { name: 'Open in a terminal' })).toBeTruthy();
   });
 });
 

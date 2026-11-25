@@ -23,7 +23,7 @@
       "failed": "Não foi possível renomear"
     },
     "pinned": "Fixada",
-    "chatMenu": {"label": "Ações da conversa", "rename": "Renomear", "remove": "Remover do app", "confirmRemove": "Remover? Confirmar", "removeFailed": "Não foi possível remover", "pin": "Fixar no topo", "unpin": "Desafixar", "disconnect": "Desconectar", "confirmDisconnect": "Desconectar? Confirmar", "pinFailed": "Não foi possível alterar a fixação", "disconnectFailed": "Não foi possível desconectar", "resume": "Retomar em segundo plano"},
+    "chatMenu": {"label": "Ações da conversa", "rename": "Renomear", "remove": "Remover do app", "confirmRemove": "Remover? Confirmar", "removeFailed": "Não foi possível remover", "pin": "Fixar no topo", "unpin": "Desafixar", "disconnect": "Desconectar", "confirmDisconnect": "Desconectar? Confirmar", "pinFailed": "Não foi possível alterar a fixação", "disconnectFailed": "Não foi possível desconectar", "resume": "Retomar em segundo plano", "openTerminal": "Abrir no terminal"},
     "background": {
       "menu": "Fundo",
       "title": "Fundo da conversa",
@@ -114,7 +114,11 @@
       "banner": "O Claude está fazendo uma pergunta — responda abaixo",
       "statusAria": "Status: aguardando sua resposta",
       "waiting": "aguardando sua resposta",
-      "enableHint": "Para responder por aqui, digite /ai-chat-center:cc answers on no terminal"
+      "enableHint": "Para responder por aqui, digite /ai-chat-center:cc answers on no terminal",
+      "terminalTitle": "Pergunta esperando resposta",
+      "terminalBody": "Responda no terminal da sessão.",
+      "bgBody": "Abra no terminal (botão abaixo) ou ligue as respostas pelo app com /ai-chat-center:cc answers on.",
+      "bgBodyOn": "Abra no terminal (botão abaixo) para responder."
     },
     "status": {
       "busy": "trabalhando…",
@@ -198,7 +202,13 @@
       "attach": "Abrir no terminal",
       "attachCopy": "Copiar {cmd}",
       "attachCopied": "Copiado",
-      "waitingBgHint": "Esta sessão roda em segundo plano: responda no terminal com {cmd}."
+      "waitingBgHint": "Esta sessão roda em segundo plano: responda no terminal com {cmd}.",
+      "terminal": {
+        "opened": "Terminal aberto. Fechá-lo não encerra a sessão.",
+        "noTerminal": "Nenhum programa de terminal encontrado. Rode num terminal: {cmd}",
+        "failed": "Não foi possível abrir o terminal. Rode num terminal: {cmd}",
+        "notBackground": "Esta sessão não roda mais em segundo plano."
+      }
     },
     "composer": {
       "placeholder": "Mensagem para {name}…",
