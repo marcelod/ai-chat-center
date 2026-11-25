@@ -46,6 +46,8 @@ type Props = {
   onResume?: () => Promise<void>;
   /** Types a slash command into a background session; rejects with ApiError (409 busy, 501 Windows). */
   onCommand?: (text: string) => Promise<void>;
+  /** Opens the system terminal on a background session (`claude attach`); rejects with ApiError. */
+  onOpenTerminal?: () => Promise<void>;
   onBack: () => void;
 };
 
@@ -104,7 +106,7 @@ const statusOf = (e: unknown): number | undefined => {
 };
 
 /** `claude attach <id>` for a background session, with a copy button (spec 2026-11-24-background-sessions). */
-function AttachCommand({ id }: { id: string }) {
+function AttachCommand({ id, bullet = true }: { id: string; bullet?: boolean }) {
   const t = useT();
   const cmd = `claude attach ${id}`;
   const [copied, setCopied] = useState(false);
@@ -118,10 +120,12 @@ function AttachCommand({ id }: { id: string }) {
     }
   };
   return (
-    <span className="flex min-w-0 items-baseline gap-1" data-testid="attach-command">
-      <span aria-hidden="true" className="hidden md:inline">
-        {'· '}
-      </span>
+    <span className="flex min-w-0 items-baseline gap-1 font-mono" data-testid="attach-command">
+      {bullet && (
+        <span aria-hidden="true" className="hidden md:inline">
+          {'· '}
+        </span>
+      )}
       <span title={t('ui.chat.attach')} className="truncate">
         {cmd}
       </span>
@@ -134,6 +138,28 @@ function AttachCommand({ id }: { id: string }) {
         {copied ? t('ui.chat.attachCopied') : '⧉'}
       </button>
     </span>
+  );
+}
+
+type TerminalOutcome = 'opened' | 'noTerminal' | 'failed' | 'notBackground';
+
+/** What the hub's refusal of "Open in a terminal" means for the user. */
+function terminalOutcome(e: unknown): TerminalOutcome {
+  const code = (e as { code?: unknown } | null)?.code;
+  if (statusOf(e) === 409) return 'notBackground';
+  return code === 'no-terminal' ? 'noTerminal' : 'failed';
+}
+
+function OpenTerminalButton({ onOpen }: { onOpen: () => void }) {
+  const t = useT();
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="min-h-11 shrink-0 rounded-xl border border-line bg-surface px-3 text-sm font-semibold text-ink hover:bg-field"
+    >
+      {t('ui.chatMenu.openTerminal')}
+    </button>
   );
 }
 
@@ -210,6 +236,7 @@ function SessionTitle({
   onSetBackground,
   onUploadBackground,
   onResume,
+  onOpenTerminal,
 }: {
   session: SessionView;
   name: string;
@@ -221,6 +248,7 @@ function SessionTitle({
   onSetBackground?: (bg: BackgroundPreset | null) => Promise<void>;
   onUploadBackground?: (file: File) => Promise<void>;
   onResume?: () => Promise<void>;
+  onOpenTerminal?: () => void;
 }) {
   const t = useT();
   const [picking, setPicking] = useState(false);
@@ -322,6 +350,7 @@ function SessionTitle({
         onDisconnect={session.state === 'disconnected' ? undefined : onDisconnect}
         onBackground={onSetBackground && onUploadBackground ? () => setPicking(true) : undefined}
         onResume={session.state === 'disconnected' && !session.resuming ? onResume : undefined}
+        onOpenTerminal={onOpenTerminal}
       />
       {picking && onSetBackground && onUploadBackground && (
         <BackgroundPicker
@@ -338,7 +367,7 @@ function SessionTitle({
   );
 }
 
-export function ChatView({ initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, ...bg }: Props) {
+export function ChatView({ initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, onOpenTerminal, ...bg }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -364,13 +393,33 @@ export function ChatView({ initialSearch, session, events, pending, loading, onS
       }
     : undefined;
 
+  // "Open in a terminal": only for a background session that is still connected.
+  const [terminal, setTerminal] = useState<TerminalOutcome | null>(null);
+  useEffect(() => {
+    if (terminal !== 'opened') return;
+    const timer = setTimeout(() => setTerminal((o) => (o === 'opened' ? null : o)), 6000);
+    return () => clearTimeout(timer);
+  }, [terminal]);
+  const openTerminal =
+    onOpenTerminal && session.bgId && state !== 'disconnected'
+      ? () => {
+          setTerminal(null);
+          onOpenTerminal().then(
+            () => setTerminal('opened'),
+            (e: unknown) => setTerminal(terminalOutcome(e)),
+          );
+        }
+      : undefined;
+  // A question Claude Code shows in its own dialog (answers from the app off, or a turn from the terminal).
+  const terminalQuestion = state === 'waiting' && session.waitingKind === 'question' && !session.pendingQuestion;
+
   const reconciled = new Set(events.flatMap((e) => (e.kind === 'user' && e.appMessageId ? [e.appMessageId] : [])));
   const queued = pending.filter((m) => !reconciled.has(m.id));
 
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [events, queued.length, state, loading, progress.run]);
+  }, [events, queued.length, state, loading, progress.run, terminal]);
 
   const onScroll = () => {
     const el = scroller.current;
@@ -437,6 +486,7 @@ export function ChatView({ initialSearch, session, events, pending, loading, onS
             onSetBackground={bg.onSetBackground}
             onUploadBackground={bg.onUploadBackground}
             onResume={onResume}
+            onOpenTerminal={openTerminal}
           />
           <div data-testid="session-info" className="flex min-w-0 flex-col overflow-hidden font-mono text-xs text-muted md:flex-row md:items-baseline md:gap-1.5">
             <span className="min-w-0 truncate md:min-w-[6ch]">{session.cwd}</span>
@@ -563,24 +613,53 @@ export function ChatView({ initialSearch, session, events, pending, loading, onS
         )}
         {state === 'disconnected' && onResume && <ResumePanel session={session} onResume={onResume} />}
         {state === 'waiting' && (
-          <div className="flex items-start gap-3 self-stretch rounded-xl border border-banner-border bg-banner-bg p-3.5 text-waiting-text">
+          <div
+            data-testid="waiting-banner"
+            className="flex items-start gap-3 self-stretch rounded-xl border border-banner-border bg-banner-bg p-3.5 text-waiting-text"
+          >
             <WarningIcon className="mt-0.5 shrink-0" />
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-semibold">
                 {t(
-                  session.waitingKind === 'question'
-                    ? 'ui.question.banner'
-                    : session.waitingKind === 'input'
-                      ? 'ui.chat.waitingInputBanner'
-                      : 'ui.chat.waitingBanner',
+                  terminalQuestion
+                    ? 'ui.question.terminalTitle'
+                    : session.waitingKind === 'question'
+                      ? 'ui.question.banner'
+                      : session.waitingKind === 'input'
+                        ? 'ui.chat.waitingInputBanner'
+                        : 'ui.chat.waitingBanner',
                 )}
               </p>
               {session.waitingKind !== 'input' && session.waitingKind !== 'question' && <p className="mt-0.5 text-[13px]">{t('ui.chat.waitingBannerHint')}</p>}
+              {terminalQuestion && session.bgId && (
+                <p className="mt-0.5 text-[13px]">{t(answersFromApp ? 'ui.question.bgBodyOn' : 'ui.question.bgBody')}</p>
+              )}
+              {terminalQuestion && !session.bgId && (
+                <>
+                  <p className="mt-0.5 text-[13px]">{t('ui.question.terminalBody')}</p>
+                  {!answersFromApp && <p className="mt-0.5 text-[13px]">{t('ui.question.enableHint')}</p>}
+                </>
+              )}
               {session.bgId && session.waitingKind !== 'question' && (
                 <p className="mt-0.5 text-[13px]">{t('ui.chat.waitingBgHint', { cmd: `claude attach ${session.bgId}` })}</p>
               )}
+              {session.bgId && (terminalQuestion || session.waitingKind !== 'question') && (
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-[13px]">
+                  {openTerminal && <OpenTerminalButton onOpen={openTerminal} />}
+                  {terminalQuestion && <AttachCommand id={session.bgId} bullet={false} />}
+                </div>
+              )}
             </div>
           </div>
+        )}
+        {terminal && session.bgId && (
+          <p
+            data-testid="terminal-outcome"
+            role={terminal === 'opened' ? 'status' : 'alert'}
+            className={`self-center rounded-full bg-field px-3 py-1 text-xs ${terminal === 'opened' ? 'text-muted' : 'text-danger'}`}
+          >
+            {t(`ui.chat.terminal.${terminal}`, { cmd: `claude attach ${session.bgId}` })}
+          </p>
         )}
       </div>
       </div>

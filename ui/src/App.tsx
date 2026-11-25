@@ -130,6 +130,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
               await live.refresh();
             }}
             onCommand={(text) => api.sendCommand(selected.sessionId, text)}
+            onOpenTerminal={() => api.openTerminal(selected.sessionId)}
             onBack={() => select(null)}
           />
         ) : (

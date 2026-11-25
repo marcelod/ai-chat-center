@@ -23,7 +23,7 @@
       "failed": "Couldn't rename"
     },
     "pinned": "Pinned",
-    "chatMenu": {"label": "Conversation actions", "rename": "Rename", "remove": "Remove from app", "confirmRemove": "Remove? Confirm", "removeFailed": "Couldn't remove", "pin": "Pin to top", "unpin": "Unpin", "disconnect": "Disconnect", "confirmDisconnect": "Disconnect? Confirm", "pinFailed": "Couldn't change the pin", "disconnectFailed": "Couldn't disconnect", "resume": "Resume in the background"},
+    "chatMenu": {"label": "Conversation actions", "rename": "Rename", "remove": "Remove from app", "confirmRemove": "Remove? Confirm", "removeFailed": "Couldn't remove", "pin": "Pin to top", "unpin": "Unpin", "disconnect": "Disconnect", "confirmDisconnect": "Disconnect? Confirm", "pinFailed": "Couldn't change the pin", "disconnectFailed": "Couldn't disconnect", "resume": "Resume in the background", "openTerminal": "Open in a terminal"},
     "background": {
       "menu": "Background",
       "title": "Conversation background",
@@ -113,7 +113,11 @@
       "banner": "Claude is asking you a question — answer below",
       "statusAria": "Status: waiting for your answer",
       "waiting": "waiting for your answer",
-      "enableHint": "To answer here, type /ai-chat-center:cc answers on in the terminal"
+      "enableHint": "To answer here, type /ai-chat-center:cc answers on in the terminal",
+      "terminalTitle": "Question waiting for an answer",
+      "terminalBody": "Answer it in the session's terminal.",
+      "bgBody": "Open it in a terminal (button below) or turn on answers from the app with /ai-chat-center:cc answers on.",
+      "bgBodyOn": "Open it in a terminal (button below) to answer."
     },
     "status": {
       "busy": "working…",
@@ -185,7 +189,13 @@
       "attach": "Open in a terminal",
       "attachCopy": "Copy {cmd}",
       "attachCopied": "Copied",
-      "waitingBgHint": "This session runs in the background: answer in a terminal with {cmd}."
+      "waitingBgHint": "This session runs in the background: answer in a terminal with {cmd}.",
+      "terminal": {
+        "opened": "Terminal opened. Closing it does not end the session.",
+        "noTerminal": "No terminal program found. Run in a terminal: {cmd}",
+        "failed": "Could not open a terminal. Run in a terminal: {cmd}",
+        "notBackground": "This session no longer runs in the background."
+      }
     },
     "composer": {
       "placeholder": "Message {name}…",

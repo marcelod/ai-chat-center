@@ -16,6 +16,8 @@ type Props = {
   onBackground?: () => void;
   /** Resumes the ended session in the background (absent: no Resume item). Rejects when the hub refused. */
   onResume?: () => Promise<void>;
+  /** Opens the system terminal on the background session (absent: no item). Errors are shown by the caller. */
+  onOpenTerminal?: () => void;
 };
 
 /**
@@ -23,7 +25,7 @@ type Props = {
  * the button, a click outside closes it, arrow keys move between items. "Remove from app" asks to confirm
  * in place (a second click), never with window.confirm.
  */
-export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({ onRename, onRemove, onPin, pinned = false, onDisconnect, onBackground, onResume }, button) {
+export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({ onRename, onRemove, onPin, pinned = false, onDisconnect, onBackground, onResume, onOpenTerminal }, button) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState<'disconnect' | 'remove' | null>(null);
@@ -71,7 +73,7 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
     };
   }, [open]);
 
-  if (!onRename && !onRemove && !onPin && !onDisconnect && !onBackground && !onResume) return null;
+  if (!onRename && !onRemove && !onPin && !onDisconnect && !onBackground && !onResume && !onOpenTerminal) return null;
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Tab') {
@@ -160,6 +162,20 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
           {onResume && (
             <button type="button" role="menuitem" tabIndex={-1} aria-disabled={busy || undefined} className={itemCls} onClick={() => void resume()}>
               {t('ui.chatMenu.resume')}
+            </button>
+          )}
+          {onOpenTerminal && (
+            <button
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              className={itemCls}
+              onClick={() => {
+                close(false);
+                onOpenTerminal();
+              }}
+            >
+              {t('ui.chatMenu.openTerminal')}
             </button>
           )}
           {onRename && (
