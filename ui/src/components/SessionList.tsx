@@ -15,6 +15,8 @@ type Props = {
   others: LiveSession[];
   /** The account's rate-limit usage, when `/cc usage on` records it. */
   usage?: Usage;
+  /** Version of the hub, shown in the settings menu. */
+  hubVersion?: string;
   unread: Record<string, number>;
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -40,7 +42,7 @@ const dotColor: Record<SessionView['state'], string> = {
   disconnected: 'bg-disconnected',
 };
 
-export function SessionList({ connected, others, usage, unread, selectedId, onSelect, onLanguage, error, notifications, collapsed = false, onToggleCollapsed, onNewSession, onSearch, onOpenHit }: Props) {
+export function SessionList({ connected, others, usage, hubVersion, unread, selectedId, onSelect, onLanguage, error, notifications, collapsed = false, onToggleCollapsed, onNewSession, onSearch, onOpenHit }: Props) {
   const t = useT();
   const lang = useLang();
   const [query, setQuery] = useState('');
@@ -77,7 +79,7 @@ export function SessionList({ connected, others, usage, unread, selectedId, onSe
         {!collapsed && (
           <>
             <Logo size={34} />
-            <h1 className="flex-1 font-display text-xl font-semibold">{t('ui.title')}</h1>
+            <h1 className="min-w-0 flex-1 truncate whitespace-nowrap font-display text-xl font-semibold">{t('ui.title')}</h1>
             {onNewSession && (
               <button
                 type="button"
@@ -89,7 +91,7 @@ export function SessionList({ connected, others, usage, unread, selectedId, onSe
                 <span aria-hidden="true">+</span>
               </button>
             )}
-            <SettingsMenu onLanguage={onLanguage} notifications={notifications} usageHint={!usage?.fiveHour} />
+            <SettingsMenu onLanguage={onLanguage} notifications={notifications} usageHint={!usage?.fiveHour} version={hubVersion} />
           </>
         )}
         {onToggleCollapsed && (

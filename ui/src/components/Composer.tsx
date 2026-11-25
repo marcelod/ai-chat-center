@@ -21,6 +21,8 @@ type Props = {
   onCommand?: (text: string) => Promise<void>;
   /** Short id of the background session, for "use claude attach <id>" when a command needs the terminal. */
   attachId?: string;
+  /** Interactive (terminal) session: a typed command name gets a line saying why the app cannot run it. */
+  terminalHint?: boolean;
 };
 /** A one-line message that names a slash command (`/compact`, `/rename x`): the hub's rule (bgSessions.isValidCommand). A path such as `/home/x` is text. */
 export const isSlashCommand = (text: string) => text.length <= 200 && /^\/[A-Za-z0-9][\w:.-]*( [^\n]*)?$/.test(text);
@@ -58,7 +60,7 @@ export const PAD_PX = 12;
 export const MAX_LINES = 8;
 export const MAX_HEIGHT = MAX_LINES * LINE_PX + 2 * PAD_PX;
 
-export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuestion = false, onSend, onUpload, onCommand, attachId }: Props) {
+export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuestion = false, onSend, onUpload, onCommand, attachId, terminalHint = false }: Props) {
   const t = useT();
   const disabled = sessionOff || blockedByQuestion;
   const [text, setText] = useState(() => loadDraft(sessionId));
@@ -76,6 +78,7 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
   const [pick, setPick] = useState(0);
   const [menuOff, setMenuOff] = useState<string | null>(null);
   const menu = onCommand && !disabled && menuOff !== text ? suggestions(text) : [];
+  const showTerminalHint = terminalHint && !onCommand && !disabled && asText === null && suggestions(text).length > 0;
   const menuId = `${sessionId}-commands`;
   const picker = useRef<HTMLInputElement>(null);
   const filesRef = useRef(files);
@@ -353,6 +356,11 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
               : command.kind === 'windows'
                 ? t('ui.composer.commandWindows')
                 : t('ui.composer.commandFailed')}
+        </p>
+      )}
+      {showTerminalHint && (
+        <p data-testid="terminal-commands-hint" role="note" className="mb-2 text-sm text-muted">
+          {t('ui.chat.controlsTerminal')}
         </p>
       )}
       {asText !== null && asText === text.trim() && (

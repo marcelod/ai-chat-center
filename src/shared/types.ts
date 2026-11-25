@@ -94,6 +94,10 @@ export type SessionView = {
    * kept aside, not delivered. The app says so.
    */
   undeliveredUnsigned?: number;
+  /** Plugin version that last registered this session (absent for sessions from before 0.2.4 and for ended ones). */
+  pluginVersion?: string;
+  /** Claude Code version written in the session's transcript; absent when the transcript has none. */
+  claudeVersion?: string;
   /** Runs as a Claude Code background session: its short id, for `claude attach <id>` and app commands. */
   bgId?: string;
   /** The app asked to resume this ended session and it has not reconnected yet. */
@@ -117,4 +121,5 @@ export type UsageWindow = { usedPercentage: number; resetsAt: string };
 /** The account's usage of its rate-limit windows, recorded by the status line wrapper. */
 export type Usage = { fiveHour?: UsageWindow; sevenDay?: UsageWindow; updatedAt: string };
 
-export type SessionsResponse = { connected: SessionView[]; others: LiveSession[]; usage?: Usage };
+/** `hubVersion`: the AI Chat Center version the hub (and so the app) runs. */
+export type SessionsResponse = { connected: SessionView[]; others: LiveSession[]; usage?: Usage; hubVersion?: string };

@@ -35,8 +35,42 @@ describe('model and effort controls', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('busy');
   });
 
-  it('not for an interactive session', () => {
-    chat(session(), vi.fn(async () => {}));
+  it('a terminal session: shown disabled with the hint, nothing is sent', () => {
+    const onCommand = vi.fn(async () => {});
+    chat(session(), onCommand);
+    const model = screen.getByRole('combobox', { name: /Switch model/ });
+    expect(model).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: /Switch effort/ })).toBeDisabled();
+    expect(model.getAttribute('aria-label')).toContain('Available in background sessions: resume the session from the app');
+    expect(screen.getByTestId('session-controls').getAttribute('title')).toContain('Available in background sessions');
+    expect(screen.getByText('background sessions only')).toBeTruthy();
+    expect(onCommand).not.toHaveBeenCalled();
+  });
+
+  it('an ended session has no controls', () => {
+    chat(session({ state: 'disconnected' }), vi.fn(async () => {}));
     expect(screen.queryByTestId('session-controls')).toBeNull();
+  });
+
+  it('typing / in a terminal session shows the line, not the list; Enter still asks before sending as text', async () => {
+    const onSend = vi.fn(async () => {});
+    render(
+      <LangProvider lang="en">
+        <ChatView session={session()} events={[]} pending={[]} loading={false} onSend={onSend} onBack={() => {}} onCommand={vi.fn(async () => {})} />
+      </LangProvider>,
+    );
+    const user = userEvent.setup();
+    await user.type(screen.getByRole('textbox'), '/');
+    expect(screen.getByTestId('terminal-commands-hint').textContent).toContain('Available in background sessions');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    await user.type(screen.getByRole('textbox'), 'compact{Enter}');
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('terminal-commands-hint')).toBeNull();
+  });
+
+  it('no hint for a background session (it gets the list)', async () => {
+    chat(session({ bgId: '5e1b5e9b' }), vi.fn(async () => {}));
+    await userEvent.setup().type(screen.getByRole('textbox'), '/');
+    expect(screen.queryByTestId('terminal-commands-hint')).toBeNull();
   });
 });

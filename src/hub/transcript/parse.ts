@@ -172,6 +172,8 @@ export class TranscriptParser {
   private lastShell: string | null = null;
   /** `message.model` of the latest main-thread assistant entry (synthetic ones ignored). */
   model: string | undefined;
+  /** `version` (Claude Code) of the latest main-thread entry that carries one. */
+  claudeVersion: string | undefined;
 
   /** @param keys trusted marker keys of the session; when given, other app-message blocks are ignored. */
   constructor(private readonly keys?: string[]) {}
@@ -183,6 +185,7 @@ export class TranscriptParser {
     const ts = entry.timestamp;
     if (typeof uuid !== 'string' || typeof ts !== 'string') return [];
     if (entry.isSidechain === true) return [];
+    if (typeof entry.version === 'string' && entry.version) this.claudeVersion = entry.version;
     if (entry.type === 'attachment') return this.attachment(uuid, ts, entry.attachment);
     const message = isRecord(entry.message) ? entry.message : undefined;
     if (!message) return [];
