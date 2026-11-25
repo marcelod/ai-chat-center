@@ -272,7 +272,7 @@ var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
 var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
 
 // src/core/version.ts
-var VERSION = "0.6.1";
+var VERSION = "0.6.2";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -664,7 +664,7 @@ var en_default = {
       failed: "Couldn't rename"
     },
     pinned: "Pinned",
-    chatMenu: { label: "Conversation actions", rename: "Rename", remove: "Remove from app", confirmRemove: "Remove? Confirm", removeFailed: "Couldn't remove", pin: "Pin to top", unpin: "Unpin", disconnect: "Disconnect", confirmDisconnect: "Disconnect? Confirm", pinFailed: "Couldn't change the pin", disconnectFailed: "Couldn't disconnect", resume: "Resume in the background" },
+    chatMenu: { label: "Conversation actions", rename: "Rename", remove: "Remove from app", confirmRemove: "Remove? Confirm", removeFailed: "Couldn't remove", pin: "Pin to top", unpin: "Unpin", disconnect: "Disconnect", confirmDisconnect: "Disconnect? Confirm", pinFailed: "Couldn't change the pin", disconnectFailed: "Couldn't disconnect", resume: "Resume in the background", openTerminal: "Open in a terminal" },
     background: {
       menu: "Background",
       title: "Conversation background",
@@ -680,6 +680,7 @@ var en_default = {
       gradient: { sunrise: "Sunrise", ocean: "Ocean", meadow: "Meadow", dusk: "Dusk", aurora: "Aurora", ember: "Ember" }
     },
     title: "AI Chat Center",
+    version: "AI Chat Center {v}",
     collapseList: "Collapse list",
     expandList: "Expand list",
     search: "Search conversations and messages",
@@ -728,7 +729,7 @@ var en_default = {
         exit: "Ends the session"
       }
     },
-    newSession: { open: "New session", title: "New session", body: "Starts Claude Code in the background in one of your folders. It connects to the app at once, with no terminal.", folder: "Folder", noFolders: "No folder yet: connect a session with /cc once.", foldersFailed: "Couldn't list the folders.", name: "Name (optional)", namePlaceholder: "e.g. billing fixes", nameInvalid: "Letters, numbers, spaces and . _ - only.", model: "Model", effort: "Effort", default: "Default", start: "Start", starting: "Starting\u2026", cancel: "Cancel", failed: "Couldn't start the session.", failedWith: "Couldn't start the session: {error}", waiting: "Starting the new session\u2026" },
+    newSession: { open: "New session", title: "New session", body: "Starts Claude Code in the background in a folder of your computer. It connects to the app at once, with no terminal.", folder: "Folder", noFolders: "No recent folder yet: browse to one below.", foldersFailed: "Couldn't list the folders.", name: "Name (optional)", namePlaceholder: "e.g. billing fixes", nameInvalid: "Letters, numbers, spaces and . _ - only.", model: "Model", effort: "Effort", default: "Default", start: "Start", starting: "Starting\u2026", cancel: "Cancel", failed: "Couldn't start the session.", failedWith: "Couldn't start the session: {error}", waiting: "Starting the new session\u2026", recent: "Recent folders", browse: "Browse folders\u2026", browseHide: "Hide the folder browser", browser: "Folder browser", current: "Current folder", up: "Up one folder", showHidden: "Show hidden folders", use: "Use this folder", pathField: "Or type or paste a full path", pathPlaceholder: "/home/you/project", go: "Go", empty: "No subfolders here.", truncated: "Only the first {count} folders are shown.", loading: "Loading\u2026", browseFailed: "Couldn't open this folder.", folderInvalid: "Type a full path (starting with / or a drive letter).", folderOutside: "Only folders inside your home folder can be used.", folderNotFound: "This folder doesn't exist.", folderDenied: "No permission to open this folder.", untrusted: `Claude Code doesn't trust this folder yet. Open a terminal in {folder}, run claude once and accept "Yes, I trust this folder", then try again.` },
     theme: { label: "Theme", system: "System", light: "Light", dark: "Dark" },
     language: "Language",
     back: "Back",
@@ -754,7 +755,11 @@ var en_default = {
       banner: "Claude is asking you a question \u2014 answer below",
       statusAria: "Status: waiting for your answer",
       waiting: "waiting for your answer",
-      enableHint: "To answer here, type /ai-chat-center:cc answers on in the terminal"
+      enableHint: "To answer here, type /ai-chat-center:cc answers on in the terminal",
+      terminalTitle: "Question waiting for an answer",
+      terminalBody: "Answer it in the session's terminal.",
+      bgBody: "Open it in a terminal (button below) or turn on answers from the app with /ai-chat-center:cc answers on.",
+      bgBodyOn: "Open it in a terminal (button below) to answer."
     },
     status: {
       busy: "working\u2026",
@@ -785,6 +790,11 @@ var en_default = {
       agentFrom: "Agent {name}",
       toAgent: "Claude \u2192",
       showAll: "Show all",
+      recap: "Recap",
+      diffShow: "Show changes (+{added} -{removed})",
+      diffHide: "Hide changes",
+      diffMore: "Show more ({n} lines)",
+      diffCut: "Diff cut for size",
       showLess: "Show less",
       branch: "Branch",
       model: "Model",
@@ -793,6 +803,13 @@ var en_default = {
       searchPlaceholder: "Search messages\u2026",
       searchCount: "{n} found",
       searchNone: "No message found",
+      controlsTerminal: "Available in background sessions: resume the session from the app",
+      controlsTerminalShort: "background sessions only",
+      pluginVersion: "Plugin version in this session",
+      pluginVersionValue: "plugin {v}",
+      versionOld: "old version: run /reload-plugins and /ai-chat-center:cc",
+      claudeVersion: "Claude Code version",
+      claudeVersionValue: "Claude Code {v}",
       switchModel: "Switch model",
       switchEffort: "Switch effort",
       switchSavesDefault: "also becomes the default for new sessions",
@@ -826,7 +843,14 @@ var en_default = {
       attach: "Open in a terminal",
       attachCopy: "Copy {cmd}",
       attachCopied: "Copied",
-      waitingBgHint: "This session runs in the background: answer in a terminal with {cmd}."
+      waitingBgHint: "This session runs in the background: answer in a terminal with {cmd}.",
+      terminal: {
+        opened: "Terminal opened. Closing it does not end the session.",
+        noTerminal: "No terminal program found. Run in a terminal: {cmd}",
+        failed: "Could not open a terminal. Run in a terminal: {cmd}",
+        notBackground: "This session no longer runs in the background.",
+        folderMissing: "The folder of this session no longer exists, so no terminal was opened."
+      }
     },
     composer: {
       placeholder: "Message {name}\u2026",
@@ -912,7 +936,7 @@ var pt_BR_default = {
       failed: "N\xE3o foi poss\xEDvel renomear"
     },
     pinned: "Fixada",
-    chatMenu: { label: "A\xE7\xF5es da conversa", rename: "Renomear", remove: "Remover do app", confirmRemove: "Remover? Confirmar", removeFailed: "N\xE3o foi poss\xEDvel remover", pin: "Fixar no topo", unpin: "Desafixar", disconnect: "Desconectar", confirmDisconnect: "Desconectar? Confirmar", pinFailed: "N\xE3o foi poss\xEDvel alterar a fixa\xE7\xE3o", disconnectFailed: "N\xE3o foi poss\xEDvel desconectar", resume: "Retomar em segundo plano" },
+    chatMenu: { label: "A\xE7\xF5es da conversa", rename: "Renomear", remove: "Remover do app", confirmRemove: "Remover? Confirmar", removeFailed: "N\xE3o foi poss\xEDvel remover", pin: "Fixar no topo", unpin: "Desafixar", disconnect: "Desconectar", confirmDisconnect: "Desconectar? Confirmar", pinFailed: "N\xE3o foi poss\xEDvel alterar a fixa\xE7\xE3o", disconnectFailed: "N\xE3o foi poss\xEDvel desconectar", resume: "Retomar em segundo plano", openTerminal: "Abrir no terminal" },
     background: {
       menu: "Fundo",
       title: "Fundo da conversa",
@@ -928,6 +952,7 @@ var pt_BR_default = {
       gradient: { sunrise: "Nascer do sol", ocean: "Oceano", meadow: "Campo", dusk: "Crep\xFAsculo", aurora: "Aurora", ember: "Brasa" }
     },
     title: "AI Chat Center",
+    version: "AI Chat Center {v}",
     collapseList: "Recolher lista",
     expandList: "Expandir lista",
     search: "Buscar conversas e mensagens",
@@ -976,7 +1001,7 @@ var pt_BR_default = {
         exit: "Encerra a sess\xE3o"
       }
     },
-    newSession: { open: "Nova sess\xE3o", title: "Nova sess\xE3o", body: "Inicia o Claude Code em segundo plano numa das suas pastas. Ela j\xE1 entra conectada ao app, sem terminal.", folder: "Pasta", noFolders: "Nenhuma pasta ainda: conecte uma sess\xE3o com /cc uma vez.", foldersFailed: "N\xE3o foi poss\xEDvel listar as pastas.", name: "Nome (opcional)", namePlaceholder: "ex.: corre\xE7\xF5es do faturamento", nameInvalid: "S\xF3 letras, n\xFAmeros, espa\xE7os e . _ -", model: "Modelo", effort: "Esfor\xE7o", default: "Padr\xE3o", start: "Iniciar", starting: "Iniciando\u2026", cancel: "Cancelar", failed: "N\xE3o foi poss\xEDvel iniciar a sess\xE3o.", failedWith: "N\xE3o foi poss\xEDvel iniciar a sess\xE3o: {error}", waiting: "Iniciando a nova sess\xE3o\u2026" },
+    newSession: { open: "Nova sess\xE3o", title: "Nova sess\xE3o", body: "Inicia o Claude Code em segundo plano numa pasta do seu computador. Ela j\xE1 entra conectada ao app, sem terminal.", folder: "Pasta", noFolders: "Nenhuma pasta recente ainda: navegue at\xE9 uma abaixo.", foldersFailed: "N\xE3o foi poss\xEDvel listar as pastas.", name: "Nome (opcional)", namePlaceholder: "ex.: corre\xE7\xF5es do faturamento", nameInvalid: "S\xF3 letras, n\xFAmeros, espa\xE7os e . _ -", model: "Modelo", effort: "Esfor\xE7o", default: "Padr\xE3o", start: "Iniciar", starting: "Iniciando\u2026", cancel: "Cancelar", failed: "N\xE3o foi poss\xEDvel iniciar a sess\xE3o.", failedWith: "N\xE3o foi poss\xEDvel iniciar a sess\xE3o: {error}", waiting: "Iniciando a nova sess\xE3o\u2026", recent: "Pastas recentes", browse: "Procurar pastas\u2026", browseHide: "Fechar o navegador de pastas", browser: "Navegador de pastas", current: "Pasta atual", up: "Subir uma pasta", showHidden: "Mostrar pastas ocultas", use: "Usar esta pasta", pathField: "Ou digite ou cole um caminho completo", pathPlaceholder: "/home/voce/projeto", go: "Ir", empty: "Nenhuma subpasta aqui.", truncated: "S\xF3 as primeiras {count} pastas aparecem.", loading: "Carregando\u2026", browseFailed: "N\xE3o foi poss\xEDvel abrir esta pasta.", folderInvalid: "Digite um caminho completo (come\xE7ando com / ou com a letra do disco).", folderOutside: "S\xF3 d\xE1 para usar pastas dentro da sua pasta pessoal.", folderNotFound: "Esta pasta n\xE3o existe.", folderDenied: "Sem permiss\xE3o para abrir esta pasta.", untrusted: 'O Claude Code ainda n\xE3o confia nesta pasta. Abra um terminal em {folder}, rode claude uma vez e aceite "Yes, I trust this folder"; depois tente de novo.' },
     theme: { label: "Tema", system: "Sistema", light: "Claro", dark: "Escuro" },
     language: "Idioma",
     back: "Voltar",
@@ -1002,7 +1027,11 @@ var pt_BR_default = {
       banner: "O Claude est\xE1 fazendo uma pergunta \u2014 responda abaixo",
       statusAria: "Status: aguardando sua resposta",
       waiting: "aguardando sua resposta",
-      enableHint: "Para responder por aqui, digite /ai-chat-center:cc answers on no terminal"
+      enableHint: "Para responder por aqui, digite /ai-chat-center:cc answers on no terminal",
+      terminalTitle: "Pergunta esperando resposta",
+      terminalBody: "Responda no terminal da sess\xE3o.",
+      bgBody: "Abra no terminal (bot\xE3o abaixo) ou ligue as respostas pelo app com /ai-chat-center:cc answers on.",
+      bgBodyOn: "Abra no terminal (bot\xE3o abaixo) para responder."
     },
     status: {
       busy: "trabalhando\u2026",
@@ -1033,6 +1062,11 @@ var pt_BR_default = {
       agentFrom: "Agente {name}",
       toAgent: "Claude \u2192",
       showAll: "Ver tudo",
+      recap: "Resumo",
+      diffShow: "Ver altera\xE7\xF5es (+{added} -{removed})",
+      diffHide: "Ocultar altera\xE7\xF5es",
+      diffMore: "Ver mais ({n} linhas)",
+      diffCut: "Diff cortado por tamanho",
       showLess: "Ver menos",
       branch: "Branch",
       model: "Modelo",
@@ -1041,6 +1075,13 @@ var pt_BR_default = {
       searchPlaceholder: "Buscar mensagens\u2026",
       searchCount: "{n} encontradas",
       searchNone: "Nenhuma mensagem encontrada",
+      controlsTerminal: "Dispon\xEDvel em sess\xF5es em segundo plano: retome a sess\xE3o pelo app",
+      controlsTerminalShort: "s\xF3 em sess\xF5es em segundo plano",
+      pluginVersion: "Vers\xE3o do plugin nesta sess\xE3o",
+      pluginVersionValue: "plugin {v}",
+      versionOld: "vers\xE3o antiga: rode /reload-plugins e /ai-chat-center:cc",
+      claudeVersion: "Vers\xE3o do Claude Code",
+      claudeVersionValue: "Claude Code {v}",
       switchModel: "Trocar modelo",
       switchEffort: "Trocar esfor\xE7o",
       switchSavesDefault: "tamb\xE9m vira o padr\xE3o das novas sess\xF5es",
@@ -1074,7 +1115,14 @@ var pt_BR_default = {
       attach: "Abrir no terminal",
       attachCopy: "Copiar {cmd}",
       attachCopied: "Copiado",
-      waitingBgHint: "Esta sess\xE3o roda em segundo plano: responda no terminal com {cmd}."
+      waitingBgHint: "Esta sess\xE3o roda em segundo plano: responda no terminal com {cmd}.",
+      terminal: {
+        opened: "Terminal aberto. Fech\xE1-lo n\xE3o encerra a sess\xE3o.",
+        noTerminal: "Nenhum programa de terminal encontrado. Rode num terminal: {cmd}",
+        failed: "N\xE3o foi poss\xEDvel abrir o terminal. Rode num terminal: {cmd}",
+        notBackground: "Esta sess\xE3o n\xE3o roda mais em segundo plano.",
+        folderMissing: "A pasta desta sess\xE3o n\xE3o existe mais, ent\xE3o nenhum terminal foi aberto."
+      }
     },
     composer: {
       placeholder: "Mensagem para {name}\u2026",

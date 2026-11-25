@@ -254,11 +254,15 @@ async function ask(input, opts) {
   if (input.tool_name !== "AskUserQuestion" || !valid(assertSessionId, sid)) return null;
   const reg = await getRegistration(sid);
   if (!reg || !isActive(reg)) return null;
-  if ((await loadConfig()).answersFromApp !== true) return null;
-  if (await getTurnOrigin(sid) !== "app") return null;
   const questions = parseQuestions(input.tool_input);
   if (!questions || !valid(assertToolUseId, id)) return null;
-  if (!await present()) return null;
+  const toTerminal = async () => {
+    await setWaiting(sid, "question");
+    return null;
+  };
+  if ((await loadConfig()).answersFromApp !== true) return toTerminal();
+  if (await getTurnOrigin(sid) !== "app") return toTerminal();
+  if (!await present()) return toTerminal();
   const start = Date.now();
   let released = false;
   const mine = { sid, id, waiting: false };
