@@ -4,6 +4,7 @@ import { useT } from '../i18n';
 import { loadDraft, saveDraft } from '../drafts';
 import { PaperclipIcon, SendIcon } from './icons';
 import { PendingAttachments, type PendingFile } from './Attachments';
+import { classify, suggestions } from '../commands';
 
 type Props = {
   sessionId: string;
@@ -18,10 +19,12 @@ type Props = {
    * a background session: there, a one-line message starting with `/` goes here instead of onSend.
    */
   onCommand?: (text: string) => Promise<void>;
+  /** Short id of the background session, for "use claude attach <id>" when a command needs the terminal. */
+  attachId?: string;
 };
 /** A one-line message that names a slash command (`/compact`, `/rename x`): the hub's rule (bgSessions.isValidCommand). A path such as `/home/x` is text. */
 export const isSlashCommand = (text: string) => text.length <= 200 && /^\/[A-Za-z0-9][\w:.-]*( [^\n]*)?$/.test(text);
-type CommandNote = { kind: 'sent' | 'busy' | 'windows' | 'failed'; cmd: string };
+type CommandNote = { kind: 'sent' | 'busy' | 'windows' | 'failed' | 'screen' | 'terminal'; cmd: string };
 type Failure = { kind: 'disconnected' } | { kind: 'version'; direction: 'older' | 'newer' } | { kind: 'failed'; text: string };
 type AttachError = { kind: 'tooLarge'; name: string } | { kind: 'tooMany' } | { kind: 'upload' };
 
@@ -55,7 +58,7 @@ export const PAD_PX = 12;
 export const MAX_LINES = 8;
 export const MAX_HEIGHT = MAX_LINES * LINE_PX + 2 * PAD_PX;
 
-export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuestion = false, onSend, onUpload, onCommand }: Props) {
+export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuestion = false, onSend, onUpload, onCommand, attachId }: Props) {
   const t = useT();
   const disabled = sessionOff || blockedByQuestion;
   const [text, setText] = useState(() => loadDraft(sessionId));
@@ -69,6 +72,11 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
   /** A slash command typed in an interactive session: held until the user says to send it as text. */
   const [asText, setAsText] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
+  // The list of commands shown while a command name is typed in a background session (spec 2026-11-25-app-batch).
+  const [pick, setPick] = useState(0);
+  const [menuOff, setMenuOff] = useState<string | null>(null);
+  const menu = onCommand && !disabled && menuOff !== text ? suggestions(text) : [];
+  const menuId = `${sessionId}-commands`;
   const picker = useRef<HTMLInputElement>(null);
   const filesRef = useRef(files);
   filesRef.current = files;
@@ -189,6 +197,11 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
     setCommand(null);
     if (batch.length === 0 && isSlashCommand(typed)) {
       if (onCommand) {
+        const kind = classify(typed);
+        if (kind !== 'app') {
+          setCommand({ kind, cmd: typed.split(' ')[0] }); // the text stays in the box
+          return;
+        }
         setText('');
         void runCommand(typed);
         return;
@@ -266,7 +279,36 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
     addFiles(Array.from(e.dataTransfer.files ?? []));
   };
 
+  const choose = (i: number) => {
+    const c = menu[i];
+    if (!c) return;
+    const next = c.arg ? `${c.cmd} ` : c.cmd;
+    setText(next);
+    setMenuOff(next); // a full name: the list closes until the text changes
+    setPick(0);
+    ref.current?.focus();
+  };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (menu.length > 0 && !e.nativeEvent.isComposing) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const n = menu.length;
+        setPick((p) => (Math.min(p, n - 1) + (e.key === 'ArrowDown' ? 1 : n - 1)) % n);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMenuOff(text);
+        return;
+      }
+      const c = menu[Math.min(pick, menu.length - 1)];
+      // Tab, or Enter on a name not typed in full, completes it; Enter on the full name sends it.
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && c.cmd !== text.trim())) {
+        e.preventDefault();
+        choose(Math.min(pick, menu.length - 1));
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void submit();
@@ -302,7 +344,11 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
         <p role={command.kind === 'sent' ? 'status' : 'alert'} className={`mb-2 text-sm ${command.kind === 'sent' ? 'text-muted' : 'text-danger'}`}>
           {command.kind === 'sent'
             ? t('ui.composer.commandSent', { cmd: command.cmd })
-            : command.kind === 'busy'
+            : command.kind === 'screen'
+              ? t('ui.composer.commandScreen', { cmd: command.cmd, attach: `claude attach ${attachId ?? ''}`.trim() })
+              : command.kind === 'terminal'
+                ? t('ui.composer.commandTerminal', { cmd: command.cmd, attach: `claude attach ${attachId ?? ''}`.trim() })
+                : command.kind === 'busy'
               ? t('ui.composer.commandBusy')
               : command.kind === 'windows'
                 ? t('ui.composer.commandWindows')
@@ -368,6 +414,33 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
             </button>
           </>
         )}
+        <div className="relative flex-1">
+        {menu.length > 0 && (
+          <ul
+            id={menuId}
+            role="listbox"
+            aria-label={t('ui.commands.label')}
+            className="absolute bottom-full left-0 right-0 z-20 mb-2 max-h-72 overflow-y-auto rounded-xl border border-line bg-surface py-1 shadow-lg"
+          >
+            {menu.map((c, i) => (
+              <li
+                key={c.cmd}
+                id={`${menuId}-${i}`}
+                role="option"
+                aria-selected={i === Math.min(pick, menu.length - 1)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  choose(i);
+                }}
+                className="cursor-pointer px-3 py-2 text-sm aria-selected:bg-selected hover:bg-field"
+              >
+                <span className="font-mono font-semibold text-ink">{c.cmd}</span>
+                {c.arg && <span className="ml-1.5 font-mono text-xs text-muted">{t(c.arg)}</span>}
+                <span className="block text-xs text-muted">{t(c.desc)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         <textarea
           ref={ref}
           rows={1}
@@ -379,9 +452,13 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
           onPaste={onPaste}
           readOnly={uploading}
           aria-label={t('ui.composer.placeholder', { name })}
+          aria-controls={menu.length > 0 ? menuId : undefined}
+          aria-activedescendant={menu.length > 0 ? `${menuId}-${Math.min(pick, menu.length - 1)}` : undefined}
+          aria-autocomplete={onCommand ? 'list' : undefined}
           placeholder={blockedByQuestion ? t('ui.composer.answerPlaceholder') : disabled ? t('ui.composer.disconnectedPlaceholder') : t('ui.composer.placeholder', { name })}
-          className="min-h-[46px] flex-1 resize-none rounded-xl border border-field-border bg-surface px-3.5 py-3 text-[15px] text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 disabled:bg-field"
+          className="block min-h-[46px] w-full resize-none rounded-xl border border-field-border bg-surface px-3.5 py-3 text-[15px] text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/30 disabled:bg-field"
         />
+        </div>
         <button
           type="button"
           aria-label={t('ui.composer.send')}

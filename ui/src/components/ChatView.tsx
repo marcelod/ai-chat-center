@@ -529,7 +529,7 @@ export function ChatView({ session, events, pending, loading, onSend, onUpload, 
 
       <Composer key={session.sessionId} sessionId={session.sessionId} name={session.name} disabled={state === 'disconnected'}
         blockedByQuestion={Boolean(session.pendingQuestion)} onSend={onSend} onUpload={onUpload}
-        onCommand={session.bgId && state !== 'disconnected' ? onCommand : undefined} />
+        onCommand={session.bgId && state !== 'disconnected' ? onCommand : undefined} attachId={session.bgId} />
     </section>
   );
 }
