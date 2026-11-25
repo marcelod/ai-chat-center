@@ -22,6 +22,10 @@ No primeiro teste no Windows (2026-11-24), o atalho funcionou, mas a pessoa teve
 
 Pedido em 2026-11-25. Investigado na rodada 0.6.2 (Claude Code 2.1.332), **adiado**: a sugestão não fica na transcrição (só `promptSource: "suggestion_accepted"` quando aceita), não fica em `~/.claude` e nenhum hook a entrega. `--prompt-suggestions` só entrega a sugestão no modo `-p`/SDK (`stream-json`), o que exigiria outro modo de sessão (sem `--bg`, `/cc` e attach). Caminho possível depois da ideia 2 (ver a tela da sessão): ler a linha cinza do `claude logs <id>`, com o filtro de token; frágil a cada versão. Bônus barato, se o autor quiser: marcar no app as mensagens com `suggestion_accepted`. Cuidado registrado: `claude --bg --help` cria uma sessão de verdade; para ver a ajuda, use `claude --help`.
 
+### Blocos de código: quebrar linha e botão Copiar
+
+Visto em 2026-11-25 (print do autor): um bloco de código longo (um prompt para colar em outra conversa) fica com rolagem lateral e corta o texto à direita. Ideia: botão "Copiar" no canto do bloco (copia o texto puro); para blocos de texto ou sem linguagem, quebrar as linhas; para código, manter a rolagem, mas talvez com um botão para alternar a quebra.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
@@ -84,7 +88,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
   - Nova sessão em qualquer pasta: navegador de pastas e caminho colado; numa pasta nunca aberta no Claude Code, ver o texto real do erro de confiança do `claude --bg` e se o app mostra a mensagem clara (ou se o `--bg` trava e cai no limite de 60 s). Decisão pendente do autor: avisar antes lendo `~/.claude.json` (`hasTrustDialogAccepted`) ou deixar como está.
   - Botões de segundo plano desativados numa sessão de terminal, e a linha de aviso ao digitar `/`.
   - Versões: versão do app nas configurações; "plugin X" e "Claude Code X" no cabeçalho; destaque de versão antiga numa sessão aberta antes de atualizar o plugin.
-  - Título numa linha só, com reticências numa lista estreita.
+  - Título numa linha só, com reticências numa lista estreita. No print de 2026-11-25 aparece "AI Chat C…" mesmo com a lista larga: o nome inteiro deveria caber (fonte um pouco menor ou menos espaço entre os botões +, ⚙ e ▢).
   - Recap: cartão "Resumo" numa conversa com `away_summary`, nos dois temas.
   - Diff: "Ver alterações" em Edit/MultiEdit/Write, rolagem, cores nos dois temas, e o peso de abrir uma conversa grande com muitas edições (cada ação leva até 400 linhas).
 
