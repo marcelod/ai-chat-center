@@ -26,6 +26,14 @@ Pedido em 2026-11-25. Mostrar no app a versão do AI Chat Center que está rodan
 - Versão de cada sessão: o registro de cada sessão já guarda a versão do plugin que a conectou (`codeStamp`). Serve para ver qual sessão ainda roda uma versão antiga e precisa de `/reload-plugins`.
 - Versão do Claude Code de cada sessão: as linhas da transcrição trazem o campo `version`; daria para mostrar no cabeçalho da conversa (confirmar).
 
+### Recap da conversa
+
+Pedido em 2026-11-25. O Claude Code mostra às vezes um resumo de onde a conversa parou ("recap"), ao voltar depois de um tempo fora. Dá para fazer: ele fica gravado na transcrição como linha `type: "system"`, `subtype: "away_summary"`, com o texto em `content` (conferido: 418 linhas nas transcrições locais). O app pode mostrar essa linha na conversa como um cartão de resumo, diferente das mensagens. Detalhe: o texto termina com "(disable recaps in /config)", que pode ser tirado ou trocado por uma dica do app.
+
+### Sugestão da próxima mensagem
+
+Pedido em 2026-11-25 (era a ideia 12). O Claude Code sugere às vezes a próxima mensagem, em cinza no campo de texto. Mais difícil que o recap: a sugestão **não** fica na transcrição (só fica `promptSource: "suggestion_accepted"` quando a pessoa aceita). Caminhos a avaliar: ler a sugestão da tela da sessão em segundo plano (`claude logs`, ver a ideia 2) ou pedir sugestões pelo `--prompt-suggestions` nas sessões criadas pelo app (confirmar se essa opção vale fora do modo `-p`). No app, a sugestão apareceria no campo de texto e o Tab aceitaria.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
@@ -60,7 +68,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 9. ★ ✅ 0.6.0 **Busca:** dentro da conversa e entre todas as conversas, incluindo as encerradas.
 10. **Exportar uma conversa** em Markdown ou PDF.
 11. **Respostas rápidas:** botões com mensagens frequentes ("pode seguir", "faz o commit", "resume o que falta").
-12. **Sugestão da próxima mensagem:** `--prompt-suggestions` nas sessões criadas pelo app.
+12. **Sugestão da próxima mensagem** (ver "A fazer").
 13. **Diff dos arquivos editados**, com cores, em vez de só "Edit arquivo X".
 14. **Fila de mensagens visível:** ver o que foi mandado com a sessão ocupada, com opção de editar ou cancelar antes de ela ler.
 15. **Agendar uma mensagem:** por exemplo, "às 23:30 manda 'pode começar'".
