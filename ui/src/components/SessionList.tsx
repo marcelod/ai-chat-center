@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { SearchHit } from '@shared/search';
+import { MIN_QUERY } from '@shared/search';
 import type { LiveSession, SessionView, Usage } from '@shared/types';
 import { formatTime, initials, previewText } from '../format';
 import { useLang, useT } from '../i18n';
@@ -23,7 +25,13 @@ type Props = {
   onToggleCollapsed?: () => void;
   /** Opens the new session dialog (spec 2026-11-25-app-batch). */
   onNewSession?: () => void;
+  /** Searches the messages of every conversation (same spec); without it the box filters names only. */
+  onSearch?: (q: string) => Promise<SearchHit[]>;
+  onOpenHit?: (hit: SearchHit, q: string) => void;
 };
+
+/** Pause after the last key before searching the messages. */
+export const SEARCH_DEBOUNCE_MS = 300;
 
 const dotColor: Record<SessionView['state'], string> = {
   busy: 'bg-busy',
@@ -32,7 +40,7 @@ const dotColor: Record<SessionView['state'], string> = {
   disconnected: 'bg-disconnected',
 };
 
-export function SessionList({ connected, others, usage, unread, selectedId, onSelect, onLanguage, error, notifications, collapsed = false, onToggleCollapsed, onNewSession }: Props) {
+export function SessionList({ connected, others, usage, unread, selectedId, onSelect, onLanguage, error, notifications, collapsed = false, onToggleCollapsed, onNewSession, onSearch, onOpenHit }: Props) {
   const t = useT();
   const lang = useLang();
   const [query, setQuery] = useState('');
@@ -41,6 +49,25 @@ export function SessionList({ connected, others, usage, unread, selectedId, onSe
   const found = q && !collapsed
     ? connected.filter((s) => s.name.toLowerCase().includes(q) || s.cwd.toLowerCase().includes(q))
     : connected;
+  const [hits, setHits] = useState<{ q: string; list: SearchHit[] } | null>(null);
+  const deep = q.length >= MIN_QUERY && !collapsed && onSearch ? query.trim() : '';
+  useEffect(() => {
+    if (!deep || !onSearch) {
+      setHits(null);
+      return;
+    }
+    let live = true;
+    const timer = setTimeout(() => {
+      onSearch(deep)
+        .then((list) => live && setHits({ q: deep, list }))
+        .catch(() => live && setHits({ q: deep, list: [] }));
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [deep, onSearch]);
+  const shownHits = hits && hits.q === deep ? hits.list : [];
   // Pinned first; the hub's order holds inside each group.
   const rows = [...found.filter((s) => s.pinned), ...found.filter((s) => !s.pinned)];
 
@@ -163,8 +190,34 @@ export function SessionList({ connected, others, usage, unread, selectedId, onSe
             </li>
           );
         })}
-        {rows.length === 0 && !collapsed && (
+        {rows.length === 0 && shownHits.length === 0 && !collapsed && (
           <li className="px-4 py-6 text-sm text-muted">{q ? t('ui.noResults') : t('ui.empty')}</li>
+        )}
+        {shownHits.length > 0 && (
+          <li>
+            <p className="px-4 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-muted">{t('ui.searchMessages')}</p>
+            <ul aria-label={t('ui.searchMessages')}>
+              {shownHits.map((h) => (
+                <li key={`${h.sessionId}:${h.eventId}`}>
+                  <button
+                    type="button"
+                    data-hit={h.eventId}
+                    onClick={() => onOpenHit?.(h, deep)}
+                    className="flex w-full flex-col gap-0.5 px-4 py-2 text-left hover:bg-field"
+                  >
+                    <span className="flex items-baseline gap-2">
+                      <span className="flex-1 truncate text-sm font-semibold">{h.name}</span>
+                      <time dateTime={h.ts} className="shrink-0 text-xs text-muted">{formatTime(h.ts, lang, t)}</time>
+                    </span>
+                    <span className="line-clamp-2 text-[13px] text-muted">
+                      {h.kind === 'user' ? `${t('ui.searchYou')}: ` : ''}
+                      {h.snippet}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </li>
         )}
       </ul>
 

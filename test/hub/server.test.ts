@@ -1131,3 +1131,38 @@ describe('new session endpoint (spec 2026-11-25-app-batch)', () => {
     expect(JSON.parse(r.body).error).toBe('Workspace not trusted.');
   });
 });
+
+describe('search endpoint (spec 2026-11-25-app-batch)', () => {
+  const ev = (id: string, ts: string, text: string, kind: 'user' | 'assistant' = 'assistant') =>
+    kind === 'user' ? { kind, id, ts, text, origin: 'app' as const } : { kind, id, ts, text };
+  const provider = () =>
+    fakeProvider({
+      listSessions: async () => ({
+        connected: [
+          { sessionId: 's1', name: 'billing', cwd: '/b', state: 'idle' as const, pendingAppMessageIds: [] },
+          { sessionId: 's2', name: 'site', cwd: '/s', state: 'disconnected' as const, pendingAppMessageIds: [] },
+        ],
+        others: [],
+      }),
+      events: async (sid: string) =>
+        sid === 's1'
+          ? [ev('a', '2026-11-25T01:00:00.000Z', 'Corrigi a função de cobrança'), ev('b', '2026-11-25T02:00:00.000Z', 'nada aqui')]
+          : [ev('c', '2026-11-25T03:00:00.000Z', 'A COBRANÇA do site', 'user'), { kind: 'actions' as const, id: 'd', ts: '2026-11-25T04:00:00.000Z', items: [] }],
+    });
+
+  it('finds the text in every conversation, ignoring case and accents, newest first', async () => {
+    const u = await start(provider());
+    const r = await req(u, `/api/search?q=${encodeURIComponent('cobranca')}`, { headers: auth });
+    expect(r.status).toBe(200);
+    const hits = JSON.parse(r.body).hits;
+    expect(hits.map((h: { eventId: string }) => h.eventId)).toEqual(['c', 'a']);
+    expect(hits[0]).toMatchObject({ sessionId: 's2', name: 'site', kind: 'user', snippet: 'A COBRANÇA do site' });
+  });
+
+  it('400 for a query too short or too long; 401 without the token', async () => {
+    const u = await start(provider());
+    expect((await req(u, '/api/search?q=a', { headers: auth })).status).toBe(400);
+    expect((await req(u, `/api/search?q=${'x'.repeat(101)}`, { headers: auth })).status).toBe(400);
+    expect((await req(u, '/api/search?q=abc')).status).toBe(401);
+  });
+});

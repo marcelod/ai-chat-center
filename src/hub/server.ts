@@ -36,6 +36,8 @@ import {
   type StartResult,
 } from './bgSessions.js';
 import { configDirOf, knownFolders } from './folders.js';
+import { searchAll } from './search.js';
+import { MAX_QUERY, MIN_QUERY } from '../shared/search.js';
 import { failResume, isResuming, startResume } from './resumeState.js';
 
 export interface HubOptions {
@@ -383,6 +385,11 @@ export async function createHub(
     }
     if (p === '/api/sessions' && method === 'GET') return sendJson(res, 200, await provider.listSessions());
     if (p === '/api/folders' && method === 'GET') return sendJson(res, 200, { folders: await folders() });
+    if (p === '/api/search' && method === 'GET') {
+      const q = (url.searchParams.get('q') ?? '').trim();
+      if (q.length < MIN_QUERY || q.length > MAX_QUERY) throw new HttpError(400, 'invalid query');
+      return sendJson(res, 200, { hits: await searchAll(provider, q) });
+    }
     if (p === '/api/sessions' && method === 'POST') {
       // A new background session that connects at once (spec 2026-11-25-app-batch). Only in a known folder.
       const body = (await readJsonBody(req)) as Record<string, unknown> | null;

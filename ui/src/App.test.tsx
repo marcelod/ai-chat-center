@@ -17,6 +17,9 @@ vi.mock('./api', () => ({
   verifyHub: vi.fn(async () => 'ok'),
   forgetToken: vi.fn(),
   pingWindow: vi.fn(async () => null),
+  searchAll: vi.fn(async () => []),
+  listFolders: vi.fn(async () => []),
+  newSession: vi.fn(async () => ({})),
   WINDOW_FOCUS_EVENT: 'acc:window-focus',
 }));
 
@@ -104,11 +107,11 @@ describe('App', () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText('billing-api');
-    expect(screen.getByPlaceholderText('Search by name or folder')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search conversations and messages')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     await user.selectOptions(screen.getByLabelText('Language'), 'pt-BR');
     expect(api.setConfig).toHaveBeenCalledWith({ language: 'pt-BR' });
-    expect(await screen.findByPlaceholderText('Buscar por nome ou pasta')).toBeInTheDocument();
+    expect(await screen.findByPlaceholderText('Buscar conversas e mensagens')).toBeInTheDocument();
     expect(screen.getByText('Esperando por você no terminal')).toBeInTheDocument();
   });
 

@@ -31,6 +31,8 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
   const selected = data.connected.find((s) => s.sessionId === selectedId);
   useAppWindow(select);
   const [newOpen, setNewOpen] = useState(false);
+  /** A message picked in the list search: its conversation opens with the search bar on that text. */
+  const [hitSearch, setHitSearch] = useState<{ sid: string; q: string; n: number } | null>(null);
   /** The short id of a session started from the app: selected as soon as it connects. */
   const [startedBg, setStartedBg] = useState<string | null>(null);
   useEffect(() => {
@@ -83,6 +85,11 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
           collapsed={collapsed}
           onToggleCollapsed={toggleCollapsed}
           onNewSession={() => setNewOpen(true)}
+          onSearch={api.searchAll}
+          onOpenHit={(hit, q) => {
+            setHitSearch((h) => ({ sid: hit.sessionId, q, n: (h?.n ?? 0) + 1 }));
+            select(hit.sessionId);
+          }}
           notifications={{
             supported: notificationsSupported(),
             enabled: live.notify,
@@ -93,7 +100,8 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
       <main className={`min-w-0 flex-1 flex-col ${selectedId ? 'flex' : 'hidden md:flex'}`}>
         {selected ? (
           <ChatView
-            key={selected.sessionId}
+            key={hitSearch?.sid === selected.sessionId ? `${selected.sessionId}:${hitSearch.n}` : selected.sessionId}
+            initialSearch={hitSearch?.sid === selected.sessionId ? hitSearch.q : undefined}
             session={selected}
             events={eventsById[selected.sessionId] ?? []}
             pending={pending[selected.sessionId] ?? []}

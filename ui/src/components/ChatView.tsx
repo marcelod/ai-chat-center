@@ -6,7 +6,8 @@ import type { PendingMessage } from '../useLiveSessions';
 import { ActionsGroup } from './ActionsGroup';
 import { QuestionCard } from './QuestionCard';
 import { Composer } from './Composer';
-import { BackIcon, WarningIcon } from './icons';
+import { BackIcon, SearchIcon, WarningIcon } from './icons';
+import { matches, MIN_QUERY } from '@shared/search';
 import { ChatMenu } from './ChatMenu';
 import type { BackgroundPreset } from '@shared/background';
 import { BackgroundPicker } from './BackgroundPicker';
@@ -16,6 +17,8 @@ import { SessionControls } from './SessionControls';
 import { AgentBubble, AssistantBubble, ToAgentBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
 
 type Props = {
+  /** Opens the conversation search with this text (a hit picked in the list search). */
+  initialSearch?: string;
   session: SessionView;
   events: ChatEvent[];
   pending: PendingMessage[];
@@ -335,7 +338,7 @@ function SessionTitle({
   );
 }
 
-export function ChatView({ session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, ...bg }: Props) {
+export function ChatView({ initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, ...bg }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -349,6 +352,11 @@ export function ChatView({ session, events, pending, loading, onSend, onUpload, 
   }, [session.name]);
 
   const progress = useCommandProgress(session, events);
+  // Search in this conversation (spec 2026-11-25-app-batch): null while the search bar is closed.
+  const [search, setSearch] = useState<string | null>(initialSearch ?? null);
+  const sq = (search ?? '').trim();
+  const searching = sq.length >= MIN_QUERY;
+  const shown = searching ? events.filter((e) => matches(e, sq)) : events;
   const runCommand = onCommand
     ? async (text: string) => {
         await onCommand(text);
@@ -448,8 +456,39 @@ export function ChatView({ session, events, pending, loading, onSend, onUpload, 
           </div>
           {runCommand && session.bgId && state !== 'disconnected' && <SessionControls onCommand={runCommand} disabled={state !== 'idle'} />}
         </div>
+        <button
+          type="button"
+          aria-label={t('ui.chat.search')}
+          title={t('ui.chat.search')}
+          aria-pressed={search !== null}
+          onClick={() => setSearch((s) => (s === null ? '' : null))}
+          className="ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted hover:bg-field aria-pressed:bg-field"
+        >
+          <SearchIcon width={18} height={18} />
+        </button>
         <StatusPill state={state} asking={session.waitingKind === 'question'} />
       </header>
+      {search !== null && (
+        <div className="flex items-center gap-2 border-b border-line bg-surface px-3 py-2 md:px-5">
+          <input
+            type="search"
+            autoFocus
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setSearch(null);
+            }}
+            placeholder={t('ui.chat.searchPlaceholder')}
+            aria-label={t('ui.chat.search')}
+            className="h-10 min-w-0 flex-1 rounded-[10px] bg-field px-3 text-sm text-ink outline-none focus:ring-2 focus:ring-accent"
+          />
+          {searching && (
+            <span role="status" className="shrink-0 text-xs text-muted">
+              {t('ui.chat.searchCount', { n: shown.length })}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="relative flex min-h-0 flex-1 flex-col bg-page">
       {session.background && <ChatBackground background={session.background} loadImage={bg.onLoadBackgroundImage} />}
@@ -461,7 +500,8 @@ export function ChatView({ session, events, pending, loading, onSend, onUpload, 
         className="relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 md:px-12"
       >
         {loading && events.length === 0 && <p className="self-center text-sm text-muted">{t('ui.chat.loading')}</p>}
-        {events.map(render)}
+        {shown.map(render)}
+        {searching && shown.length === 0 && <p className="self-center text-sm text-muted">{t('ui.chat.searchNone')}</p>}
         {/* Claude Code writes the AskUserQuestion entry to the transcript only after the tool returns: while the
             hook waits for the app, the card comes from the hub's pending question. */}
         {session.pendingQuestion &&

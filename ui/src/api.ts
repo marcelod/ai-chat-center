@@ -1,5 +1,6 @@
 import type { ChatEvent, ProviderChange, SessionsResponse } from '@shared/types';
 import type { BackgroundPreset } from '@shared/background';
+import type { SearchHit } from '@shared/search';
 
 export type Language = 'en' | 'pt-BR';
 export type UiConfig = { language: Language; answersFromApp: boolean };
@@ -181,6 +182,11 @@ async function errorBody(res: Response): Promise<{ code?: string; detail?: strin
   } catch {
     return {};
   }
+}
+
+/** Messages that contain `q` in every conversation of the app (newest first). */
+export async function searchAll(q: string): Promise<SearchHit[]> {
+  return (await request<{ hits: SearchHit[] }>(`/api/search?q=${encodeURIComponent(q)}`)).hits;
 }
 
 export type Folder = { cwd: string; lastUsed: string };
