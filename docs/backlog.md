@@ -1,8 +1,16 @@
 # Pendências
 
-Itens combinados e deixados para depois. Estado em 2026-11-25, versão 0.6.2. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
+Itens combinados e deixados para depois. Estado em 2026-11-25, versão 0.6.3. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
 
 ## A fazer
+
+### Barra superior da conversa mais enxuta
+
+Pedido em 2026-11-25: a barra ficou grande (até 4 linhas). Propostas em imagem enviadas ao autor (A: chips de modelo/esforço que viram seletores e painel "ⓘ" com pasta, attach e versões; B: uma linha só; C: como A, com a versão só quando desatualizada). Aguarda a escolha.
+
+### Atualização do plugin valer para todas as sessões
+
+Pedido em 2026-11-25. O hub e o app já são globais (o hub mais novo substitui o antigo). Os hooks e o waiter de cada sessão rodam da pasta da versão carregada quando a sessão abriu, até um `/reload-plugins` (comportamento do Claude Code). Caminho possível: hooks finos que executam o código de um lugar fixo (como a status line em `~/.ai-chat-center/bin`), atualizado pelo `/cc` mais novo; delicado (código não carregado pela sessão, compatibilidade de protocolo). Alternativa simples: aviso "plugin antigo ↻" no cabeçalho (proposta C da barra).
 
 ### Instalação mais fácil no Windows
 
@@ -68,6 +76,8 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## A testar no uso
 
+- 0.6.3: diff escondido por padrão ("Mostrar alterações dos arquivos" nas configurações liga); numa sessão criada pelo "+", escolher modelo e esforço logo de cara e conferir que são aplicados quando o primeiro `/cc` termina (sem erro 409 entre `/model` e `/effort`); CI do Windows deve passar depois do push.
+
 - 0.6.2 (rodada em paralelo, specs e roteiros em `docs/testing/background-sessions.md`):
   - Pergunta esperando numa sessão em segundo plano: conferir que o `claude agents` mostra `waiting` durante o diálogo e que o aviso aparece (com e sem `answers on`).
   - Abrir no terminal (menu ⋮ e aviso): Linux (qual terminal abre; o `-e` do `x-terminal-emulator`), macOS (o `.command` no Terminal com o PATH do shell de login), Windows (`wt -d .` e, sem `wt`, o `cmd start`). Conferir também dois `claude attach` ao mesmo tempo: o do terminal aberto e o que o hub usa por ~2 s ao mandar um comando `/…`.
@@ -104,6 +114,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## Feito
 
+- 0.6.3: CI do Windows corrigido (testes de Linux/macOS e marca de pergunta que ficava presa quando o hook era encerrado à força no Windows); diff dos arquivos desligado por padrão, com opção nas configurações; modelo e esforço escolhidos enquanto a sessão trabalha são aplicados quando ela fica parada.
 - 0.6.2: aviso de pergunta esperando numa sessão em segundo plano; "Abrir no terminal" (`claude attach`) pelo menu ⋮ e pelos avisos; nova sessão em qualquer pasta da pasta pessoal; botões de segundo plano visíveis (desativados) nas sessões de terminal; versão do app, do plugin e do Claude Code; título numa linha; recap da conversa; diff dos arquivos editados. Sugestão da próxima mensagem investigada e adiada.
 - 0.6.1: sem Chrome, Chromium ou Edge, o `/cc` abre o app numa aba do navegador padrão (Safari no macOS), com o código de uso único, e no macOS dá a dica "Arquivo > Adicionar ao Dock"; o Chrome também é procurado em `~/Applications`.
 - Confirmados no uso em 2026-11-25: "trabalhando" travado não voltou (se voltar, entra de novo na lista); anexos numa sessão sem modo auto funcionam; modo da sessão aparece no cabeçalho ("auto mode"); uso de 5 horas ok; atalho no Windows aprovado.

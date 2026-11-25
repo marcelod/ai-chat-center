@@ -745,7 +745,7 @@ async function cleanupAttachments(alive, now = Date.now(), maxAgeMs = ATTACHMENT
 }
 
 // src/core/version.ts
-var VERSION = "0.6.2";
+var VERSION = "0.6.3";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -888,16 +888,19 @@ async function getPending(sid) {
     return null;
   }
   let best = null;
+  let removedStale = false;
   for (const n of names) {
     if (!n.endsWith(".json") || n.endsWith(".answer.json")) continue;
     const p = await readJson(path9.join(paths().questionsDir(sid), n));
     if (p && typeof p.pid === "number" && !isAlive(p.pid)) {
       if (typeof p.toolUseId === "string" && `${p.toolUseId}.json` === n) await removePending(sid, p.toolUseId);
       else await removeFile(path9.join(paths().questionsDir(sid), n));
+      removedStale = true;
       continue;
     }
     if (p && typeof p.createdAt === "string" && (!best || p.createdAt > best.createdAt)) best = p;
   }
+  if (removedStale && !best && (await getWaiting(sid))?.kind === "question") await clearWaiting(sid);
   return best;
 }
 async function removePending(sid, toolUseId) {

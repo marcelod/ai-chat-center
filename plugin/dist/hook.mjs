@@ -272,7 +272,7 @@ var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
 var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
 
 // src/core/version.ts
-var VERSION = "0.6.2";
+var VERSION = "0.6.3";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -729,9 +729,10 @@ var en_default = {
         exit: "Ends the session"
       }
     },
-    newSession: { open: "New session", title: "New session", body: "Starts Claude Code in the background in a folder of your computer. It connects to the app at once, with no terminal.", folder: "Folder", noFolders: "No recent folder yet: browse to one below.", foldersFailed: "Couldn't list the folders.", name: "Name (optional)", namePlaceholder: "e.g. billing fixes", nameInvalid: "Letters, numbers, spaces and . _ - only.", model: "Model", effort: "Effort", default: "Default", start: "Start", starting: "Starting\u2026", cancel: "Cancel", failed: "Couldn't start the session.", failedWith: "Couldn't start the session: {error}", waiting: "Starting the new session\u2026", recent: "Recent folders", browse: "Browse folders\u2026", browseHide: "Hide the folder browser", browser: "Folder browser", current: "Current folder", up: "Up one folder", showHidden: "Show hidden folders", use: "Use this folder", pathField: "Or type or paste a full path", pathPlaceholder: "/home/you/project", go: "Go", empty: "No subfolders here.", truncated: "Only the first {count} folders are shown.", loading: "Loading\u2026", browseFailed: "Couldn't open this folder.", folderInvalid: "Type a full path (starting with / or a drive letter).", folderOutside: "Only folders inside your home folder can be used.", folderNotFound: "This folder doesn't exist.", folderDenied: "No permission to open this folder.", untrusted: `Claude Code doesn't trust this folder yet. Open a terminal in {folder}, run claude once and accept "Yes, I trust this folder", then try again.` },
+    newSession: { open: "New session", title: "New session", body: "Starts Claude Code in the background in a folder of your computer. It connects to the app at once, with no terminal.", folder: "Folder", noFolders: "No recent folder yet: browse to one below.", foldersFailed: "Couldn't list the folders.", name: "Name (optional)", namePlaceholder: "e.g. billing fixes", nameInvalid: "Letters, numbers, spaces and . _ - only.", model: "Model", effort: "Effort", chosenApply: "Model and effort chosen here apply from the first message.", default: "Default", start: "Start", starting: "Starting\u2026", cancel: "Cancel", failed: "Couldn't start the session.", failedWith: "Couldn't start the session: {error}", waiting: "Starting the new session\u2026", recent: "Recent folders", browse: "Browse folders\u2026", browseHide: "Hide the folder browser", browser: "Folder browser", current: "Current folder", up: "Up one folder", showHidden: "Show hidden folders", use: "Use this folder", pathField: "Or type or paste a full path", pathPlaceholder: "/home/you/project", go: "Go", empty: "No subfolders here.", truncated: "Only the first {count} folders are shown.", loading: "Loading\u2026", browseFailed: "Couldn't open this folder.", folderInvalid: "Type a full path (starting with / or a drive letter).", folderOutside: "Only folders inside your home folder can be used.", folderNotFound: "This folder doesn't exist.", folderDenied: "No permission to open this folder.", untrusted: `Claude Code doesn't trust this folder yet. Open a terminal in {folder}, run claude once and accept "Yes, I trust this folder", then try again.` },
     theme: { label: "Theme", system: "System", light: "Light", dark: "Dark" },
     language: "Language",
+    showDiffs: "Show file changes",
     back: "Back",
     unread: "{n} unread",
     loadError: "Could not reach the hub. Retrying\u2026",
@@ -813,6 +814,7 @@ var en_default = {
       switchModel: "Switch model",
       switchEffort: "Switch effort",
       switchSavesDefault: "also becomes the default for new sessions",
+      switchWhenIdle: "will be applied when the session finishes",
       mode: "Permission mode",
       modes: {
         default: "default",
@@ -1001,9 +1003,10 @@ var pt_BR_default = {
         exit: "Encerra a sess\xE3o"
       }
     },
-    newSession: { open: "Nova sess\xE3o", title: "Nova sess\xE3o", body: "Inicia o Claude Code em segundo plano numa pasta do seu computador. Ela j\xE1 entra conectada ao app, sem terminal.", folder: "Pasta", noFolders: "Nenhuma pasta recente ainda: navegue at\xE9 uma abaixo.", foldersFailed: "N\xE3o foi poss\xEDvel listar as pastas.", name: "Nome (opcional)", namePlaceholder: "ex.: corre\xE7\xF5es do faturamento", nameInvalid: "S\xF3 letras, n\xFAmeros, espa\xE7os e . _ -", model: "Modelo", effort: "Esfor\xE7o", default: "Padr\xE3o", start: "Iniciar", starting: "Iniciando\u2026", cancel: "Cancelar", failed: "N\xE3o foi poss\xEDvel iniciar a sess\xE3o.", failedWith: "N\xE3o foi poss\xEDvel iniciar a sess\xE3o: {error}", waiting: "Iniciando a nova sess\xE3o\u2026", recent: "Pastas recentes", browse: "Procurar pastas\u2026", browseHide: "Fechar o navegador de pastas", browser: "Navegador de pastas", current: "Pasta atual", up: "Subir uma pasta", showHidden: "Mostrar pastas ocultas", use: "Usar esta pasta", pathField: "Ou digite ou cole um caminho completo", pathPlaceholder: "/home/voce/projeto", go: "Ir", empty: "Nenhuma subpasta aqui.", truncated: "S\xF3 as primeiras {count} pastas aparecem.", loading: "Carregando\u2026", browseFailed: "N\xE3o foi poss\xEDvel abrir esta pasta.", folderInvalid: "Digite um caminho completo (come\xE7ando com / ou com a letra do disco).", folderOutside: "S\xF3 d\xE1 para usar pastas dentro da sua pasta pessoal.", folderNotFound: "Esta pasta n\xE3o existe.", folderDenied: "Sem permiss\xE3o para abrir esta pasta.", untrusted: 'O Claude Code ainda n\xE3o confia nesta pasta. Abra um terminal em {folder}, rode claude uma vez e aceite "Yes, I trust this folder"; depois tente de novo.' },
+    newSession: { open: "Nova sess\xE3o", title: "Nova sess\xE3o", body: "Inicia o Claude Code em segundo plano numa pasta do seu computador. Ela j\xE1 entra conectada ao app, sem terminal.", folder: "Pasta", noFolders: "Nenhuma pasta recente ainda: navegue at\xE9 uma abaixo.", foldersFailed: "N\xE3o foi poss\xEDvel listar as pastas.", name: "Nome (opcional)", namePlaceholder: "ex.: corre\xE7\xF5es do faturamento", nameInvalid: "S\xF3 letras, n\xFAmeros, espa\xE7os e . _ -", model: "Modelo", effort: "Esfor\xE7o", chosenApply: "O modelo e o esfor\xE7o escolhidos aqui j\xE1 valem desde a primeira mensagem.", default: "Padr\xE3o", start: "Iniciar", starting: "Iniciando\u2026", cancel: "Cancelar", failed: "N\xE3o foi poss\xEDvel iniciar a sess\xE3o.", failedWith: "N\xE3o foi poss\xEDvel iniciar a sess\xE3o: {error}", waiting: "Iniciando a nova sess\xE3o\u2026", recent: "Pastas recentes", browse: "Procurar pastas\u2026", browseHide: "Fechar o navegador de pastas", browser: "Navegador de pastas", current: "Pasta atual", up: "Subir uma pasta", showHidden: "Mostrar pastas ocultas", use: "Usar esta pasta", pathField: "Ou digite ou cole um caminho completo", pathPlaceholder: "/home/voce/projeto", go: "Ir", empty: "Nenhuma subpasta aqui.", truncated: "S\xF3 as primeiras {count} pastas aparecem.", loading: "Carregando\u2026", browseFailed: "N\xE3o foi poss\xEDvel abrir esta pasta.", folderInvalid: "Digite um caminho completo (come\xE7ando com / ou com a letra do disco).", folderOutside: "S\xF3 d\xE1 para usar pastas dentro da sua pasta pessoal.", folderNotFound: "Esta pasta n\xE3o existe.", folderDenied: "Sem permiss\xE3o para abrir esta pasta.", untrusted: 'O Claude Code ainda n\xE3o confia nesta pasta. Abra um terminal em {folder}, rode claude uma vez e aceite "Yes, I trust this folder"; depois tente de novo.' },
     theme: { label: "Tema", system: "Sistema", light: "Claro", dark: "Escuro" },
     language: "Idioma",
+    showDiffs: "Mostrar altera\xE7\xF5es dos arquivos",
     back: "Voltar",
     unread: "{n} n\xE3o lidas",
     loadError: "N\xE3o foi poss\xEDvel falar com o hub. Tentando de novo\u2026",
@@ -1085,6 +1088,7 @@ var pt_BR_default = {
       switchModel: "Trocar modelo",
       switchEffort: "Trocar esfor\xE7o",
       switchSavesDefault: "tamb\xE9m vira o padr\xE3o das novas sess\xF5es",
+      switchWhenIdle: "ser\xE1 aplicado quando a sess\xE3o terminar",
       mode: "Modo de permiss\xE3o",
       modes: {
         default: "padr\xE3o",
