@@ -101,18 +101,20 @@ describe('ChatView', () => {
     expect(within(b).queryByRole('button')).toBeNull();
   });
 
-  it('header shows cwd, branch, model and effort, each with a label', () => {
-    setup({ session: session({ branch: 'feat/x', model: 'Opus 5.5', effort: 'high' }) });
-    expect(screen.getByText('/home/me/billing-api')).toBeInTheDocument();
+  it('header shows cwd and branch; model, effort and mode go to the bar under the message field', () => {
+    setup({ session: session({ branch: 'feat/x', model: 'Opus 5.5', effort: 'high', mode: 'auto' }) });
+    const header = screen.getByTestId('session-info');
+    expect(header).toHaveTextContent('/home/me/billing-api');
     expect(screen.getByTitle('Branch')).toHaveTextContent('⎇ feat/x');
-    expect(screen.getByTitle('Model')).toHaveTextContent('Opus 5.5');
-    expect(screen.getByTitle('Reasoning level')).toHaveTextContent('🧠 high');
+    expect(header).not.toHaveTextContent('Opus 5.5');
+    expect(header).not.toHaveTextContent('auto mode');
+    const bar = screen.getByTestId('session-bar');
+    expect(bar).toHaveTextContent('Opus 5.5 · high');
+    expect(bar).toHaveTextContent('auto mode');
   });
   it('header info parts have aria-labels, are truncatable and wrap under the cwd on narrow screens', () => {
-    setup({ session: session({ branch: 'feat/x', model: 'Opus 5.5', effort: 'high' }) });
+    setup({ session: session({ branch: 'feat/x' }) });
     expect(screen.getByLabelText('Branch: feat/x')).toHaveClass('truncate', 'min-w-0');
-    expect(screen.getByLabelText('Model: Opus 5.5')).toHaveClass('truncate');
-    expect(screen.getByLabelText('Reasoning level: high')).toHaveClass('truncate');
     const box = screen.getByTestId('session-info');
     expect(box).toHaveClass('flex-col', 'md:flex-row', 'overflow-hidden');
   });
@@ -141,11 +143,10 @@ describe('ChatView', () => {
     setup({ session: session({ model: 'Opus 5.5' }) });
     expect(screen.queryByTitle('Permission mode')).toBeNull();
   });
-  it('header without a branch skips only the branch', () => {
+  it('header without a branch has no branch part; the bar still shows the model', () => {
     setup({ session: session({ model: 'Opus 5.5', effort: 'low' }) });
     expect(screen.queryByTitle('Branch')).toBeNull();
-    expect(screen.getByTitle('Model')).toBeInTheDocument();
-    expect(screen.getByTitle('Reasoning level')).toBeInTheDocument();
+    expect(screen.getByTestId('session-bar')).toHaveTextContent('Opus 5.5 · low');
   });
 
   it('renders bubbles with origin icons', () => {

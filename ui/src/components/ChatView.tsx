@@ -81,25 +81,50 @@ function InfoPart({ label, value, glyph, cls }: { label: string; value: string; 
   );
 }
 
-/** Plugin and Claude Code versions of the session, discreet; the plugin's is flagged when it differs from the hub's. */
+/** The session's plugin version, discreet (Claude Code's is in its title); flagged when it differs from the hub's. */
 function VersionInfo({ session, hubVersion }: { session: SessionView; hubVersion?: string }) {
   const t = useT();
   const { pluginVersion, claudeVersion } = session;
-  if (!pluginVersion && !claudeVersion) return null;
-  const stale = Boolean(pluginVersion && hubVersion && pluginVersion !== hubVersion);
+  if (!pluginVersion) return null;
+  const stale = Boolean(hubVersion && pluginVersion !== hubVersion);
+  const claude = claudeVersion ? ` · ${t('ui.chat.claudeVersionValue', { v: claudeVersion })}` : '';
   return (
-    <div data-testid="version-info" className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
-      {pluginVersion && (
+    <span
+      data-testid="version-info"
+      data-stale={stale ? 'true' : undefined}
+      title={(stale ? t('ui.chat.versionOld') : t('ui.chat.pluginVersion')) + claude}
+      className={`shrink-0 whitespace-nowrap text-[11px] ${stale ? 'font-semibold text-waiting-text' : 'text-muted'}`}
+    >
+      {t('ui.chat.pluginVersionValue', { v: pluginVersion })}
+      {stale && <span aria-hidden="true"> ↻</span>}
+      <span className="sr-only">{stale ? ` · ${t('ui.chat.versionOld')}` : ''}{claude}</span>
+    </span>
+  );
+}
+
+/** Under the message field, right of the keyboard hint: model and effort chip, permission mode, plugin version. */
+function SessionBar({ session, hubVersion, runCommand }: { session: SessionView; hubVersion?: string; runCommand?: (line: string) => Promise<void> }) {
+  const t = useT();
+  const live = session.state !== 'disconnected';
+  return (
+    <div data-testid="session-bar" className="flex min-w-0 items-center justify-end gap-1.5">
+      {live && session.bgId && runCommand && (
+        <SessionControls key={session.sessionId} onCommand={runCommand} working={session.state !== 'idle'} model={session.model} effort={session.effort} />
+      )}
+      {live && !session.bgId && <SessionControls onCommand={async () => {}} working={false} unavailable model={session.model} effort={session.effort} />}
+      {session.mode && (
         <span
-          data-stale={stale ? 'true' : undefined}
-          title={stale ? t('ui.chat.versionOld') : t('ui.chat.pluginVersion')}
-          className={stale ? 'font-semibold text-waiting-text' : undefined}
+          title={t('ui.chat.mode')}
+          aria-label={`${t('ui.chat.mode')}: ${modeLabel(session.mode, t)}`}
+          className="inline-flex h-7 min-w-0 max-w-[10rem] items-center rounded-full border border-line px-2.5 text-xs text-muted"
         >
-          {t('ui.chat.pluginVersionValue', { v: pluginVersion })}
-          {stale && ` · ${t('ui.chat.versionOld')}`}
+          <span className="truncate">
+            {MODE_GLYPH[session.mode] && <span aria-hidden="true">{MODE_GLYPH[session.mode]}</span>}
+            {modeLabel(session.mode, t)}
+          </span>
         </span>
       )}
-      {claudeVersion && <span title={t('ui.chat.claudeVersion')}>{t('ui.chat.claudeVersionValue', { v: claudeVersion })}</span>}
+      <VersionInfo session={session} hubVersion={hubVersion} />
     </div>
   );
 }
@@ -519,22 +544,12 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
           <div data-testid="session-info" className="flex min-w-0 flex-col overflow-hidden font-mono text-xs text-muted md:flex-row md:items-baseline md:gap-1.5">
             <span className="min-w-0 truncate md:min-w-[6ch]">{session.cwd}</span>
             {session.bgId && state !== 'disconnected' && <AttachCommand id={session.bgId} />}
-            {(session.branch || session.model || session.effort || session.mode) && (
-              <span className="flex min-w-0 gap-x-2 md:shrink-0 md:gap-x-1.5">
-                {session.branch && (
-                  <InfoPart label={t('ui.chat.branch')} value={session.branch} glyph="⎇ " cls="max-w-[14rem]" />
-                )}
-                {session.model && <InfoPart label={t('ui.chat.model')} value={session.model} cls="max-w-[9rem]" />}
-                {session.effort && <InfoPart label={t('ui.chat.effort')} value={session.effort} glyph="🧠 " cls="max-w-[7rem]" />}
-                {session.mode && (
-                  <InfoPart label={t('ui.chat.mode')} value={modeLabel(session.mode, t)} glyph={MODE_GLYPH[session.mode] ?? ''} cls="max-w-[10rem]" />
-                )}
+            {session.branch && (
+              <span className="flex min-w-0 md:shrink-0">
+                <InfoPart label={t('ui.chat.branch')} value={session.branch} glyph="⎇ " cls="max-w-[14rem]" />
               </span>
             )}
           </div>
-          {runCommand && session.bgId && state !== 'disconnected' && <SessionControls key={session.sessionId} onCommand={runCommand} working={state !== 'idle'} />}
-          {!session.bgId && state !== 'disconnected' && <SessionControls onCommand={async () => {}} working={false} unavailable />}
-          <VersionInfo session={session} hubVersion={hubVersion} />
         </div>
         <button
           type="button"
@@ -696,7 +711,8 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
 
       <Composer key={session.sessionId} sessionId={session.sessionId} name={session.name} disabled={state === 'disconnected'}
         blockedByQuestion={Boolean(session.pendingQuestion)} onSend={onSend} onUpload={onUpload}
-        onCommand={session.bgId && state !== 'disconnected' ? runCommand : undefined} attachId={session.bgId} terminalHint={!session.bgId && state !== 'disconnected'} />
+        onCommand={session.bgId && state !== 'disconnected' ? runCommand : undefined} attachId={session.bgId} terminalHint={!session.bgId && state !== 'disconnected'}
+        controls={<SessionBar session={session} hubVersion={hubVersion} runCommand={runCommand} />} />
     </section>
   );
 }

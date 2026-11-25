@@ -745,7 +745,7 @@ async function cleanupAttachments(alive, now = Date.now(), maxAgeMs = ATTACHMENT
 }
 
 // src/core/version.ts
-var VERSION = "0.6.4";
+var VERSION = "0.6.5";
 var PROTOCOL = 2;
 
 // src/core/registry.ts

@@ -15,14 +15,42 @@ const chat = (s: SessionView, onCommand?: (t: string) => Promise<void>) =>
     </LangProvider>,
   );
 
+const pick = async (user: ReturnType<typeof userEvent.setup>, model?: string, effort?: string) => {
+  if (model) {
+    await user.click(screen.getByRole('button', { name: /^Switch model/ }));
+    await user.click(screen.getByRole('menuitemradio', { name: model }));
+  }
+  if (effort) {
+    await user.click(screen.getByRole('button', { name: /^Switch model/ }));
+    await user.click(screen.getByRole('menuitem', { name: /Switch effort/ }));
+    await user.click(screen.getByRole('menuitemradio', { name: effort }));
+  }
+};
+
 describe('model and effort controls', () => {
+  it('the chip shows the model and effort in use and marks them in the lists', async () => {
+    chat(session({ bgId: '5e1b5e9b', model: 'Opus 5.5', effort: 'high' }), vi.fn(async () => {}));
+    const user = userEvent.setup();
+    const chip = screen.getByRole('button', { name: 'Switch model: Opus 5.5 · high' });
+    expect(chip.closest('footer')).not.toBeNull();
+    await user.click(chip);
+    expect(screen.getByRole('menuitemradio', { name: 'opus' })).toHaveAttribute('aria-checked', 'true');
+    await user.click(screen.getByRole('menuitem', { name: /Switch effort: high/ }));
+    expect(screen.getByRole('menuitemradio', { name: 'high' })).toHaveAttribute('aria-checked', 'true');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu', { name: 'Switch effort' })).toBeNull();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
   it('a background session: choosing types /model and /effort', async () => {
     const onCommand = vi.fn(async () => {});
     chat(session({ bgId: '5e1b5e9b' }), onCommand);
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Switch model' }), 'sonnet');
+    await pick(user, 'sonnet');
     expect(onCommand).toHaveBeenCalledWith('/model sonnet');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Switch effort' }), 'high');
+    expect(screen.queryByRole('menu')).toBeNull();
+    await pick(user, undefined, 'high');
     expect(onCommand).toHaveBeenCalledWith('/effort high');
   });
 
@@ -35,11 +63,10 @@ describe('model and effort controls', () => {
     );
     const { rerender } = render(view(session({ bgId: '5e1b5e9b', state: 'busy' })));
     const user = userEvent.setup();
-    expect(screen.getByRole('combobox', { name: 'Switch model' })).not.toBeDisabled();
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Switch model' }), 'opus');
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Switch effort' }), 'high');
+    await pick(user, 'opus', 'high');
     expect(onCommand).not.toHaveBeenCalled();
     expect(screen.getByText('will be applied when the session finishes')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Switch model/ })).toHaveTextContent('opus · high');
     rerender(view(session({ bgId: '5e1b5e9b', state: 'idle' })));
     await vi.waitFor(() => expect(onCommand).toHaveBeenCalledTimes(2));
     expect(onCommand.mock.calls.map((c) => c[0])).toEqual(['/model opus', '/effort high']);
@@ -48,19 +75,17 @@ describe('model and effort controls', () => {
 
   it('a busy answer is shown', async () => {
     chat(session({ bgId: '5e1b5e9b' }), async () => Promise.reject(Object.assign(new Error('409'), { status: 409 })));
-    await userEvent.setup().selectOptions(screen.getByRole('combobox', { name: 'Switch model' }), 'opus');
+    await pick(userEvent.setup(), 'opus');
     expect((await screen.findByRole('alert')).textContent).toContain('busy');
   });
 
-  it('a terminal session: shown disabled with the hint, nothing is sent', () => {
+  it('a terminal session: the chip only shows the model, with the hint; nothing opens', () => {
     const onCommand = vi.fn(async () => {});
-    chat(session(), onCommand);
-    const model = screen.getByRole('combobox', { name: /Switch model/ });
-    expect(model).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: /Switch effort/ })).toBeDisabled();
-    expect(model.getAttribute('aria-label')).toContain('Available in background sessions: resume the session from the app');
-    expect(screen.getByTestId('session-controls').getAttribute('title')).toContain('Available in background sessions');
-    expect(screen.getByText('background sessions only')).toBeTruthy();
+    chat(session({ model: 'Opus 5.5' }), onCommand);
+    expect(screen.queryByRole('button', { name: /^Switch model/ })).toBeNull();
+    const chip = screen.getByTitle('Available in background sessions: resume the session from the app');
+    expect(chip).toHaveTextContent('Opus 5.5');
+    expect(screen.queryByText('background sessions only')).toBeNull();
     expect(onCommand).not.toHaveBeenCalled();
   });
 

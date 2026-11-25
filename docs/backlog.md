@@ -4,13 +4,9 @@ Itens combinados e deixados para depois. Estado em 2026-11-25, versão 0.6.4. S�
 
 ## A fazer
 
-### Barra superior da conversa mais enxuta
-
-Pedido em 2026-11-25: a barra ficou grande (até 4 linhas). Propostas em imagem enviadas ao autor (A: chips de modelo/esforço que viram seletores e painel "ⓘ" com pasta, attach e versões; B: uma linha só; C: como A, com a versão só quando desatualizada). Aguarda a escolha.
-
 ### Atualização do plugin valer para todas as sessões
 
-Pedido em 2026-11-25. O hub e o app já são globais (o hub mais novo substitui o antigo). Os hooks e o waiter de cada sessão rodam da pasta da versão carregada quando a sessão abriu, até um `/reload-plugins` (comportamento do Claude Code). Caminho possível: hooks finos que executam o código de um lugar fixo (como a status line em `~/.ai-chat-center/bin`), atualizado pelo `/cc` mais novo; delicado (código não carregado pela sessão, compatibilidade de protocolo). Alternativa simples: aviso "plugin antigo ↻" no cabeçalho (proposta C da barra).
+Pedido em 2026-11-25. O hub e o app já são globais (o hub mais novo substitui o antigo). Os hooks e o waiter de cada sessão rodam da pasta da versão carregada quando a sessão abriu, até um `/reload-plugins` (comportamento do Claude Code). Caminho possível: hooks finos que executam o código de um lugar fixo (como a status line em `~/.ai-chat-center/bin`), atualizado pelo `/cc` mais novo; delicado (código não carregado pela sessão, compatibilidade de protocolo). Já existe o aviso simples: a versão do plugin fica amarela com ↻ na barra sob o campo de mensagem quando difere da do hub (0.6.5).
 
 ### Instalação mais fácil no Windows
 
@@ -92,6 +88,8 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## A testar no uso
 
+- 0.6.5: barra sob o campo de mensagem (chip de modelo · esforço com lista e submenu de esforço, modo, versão do plugin) em tela larga e no celular; o menu abre para cima sem sair da tela; sessão de terminal mostra o chip apagado com a dica ao passar o mouse.
+
 - 0.6.3: diff escondido por padrão ("Mostrar alterações dos arquivos" nas configurações liga); numa sessão criada pelo "+", escolher modelo e esforço logo de cara e conferir que são aplicados quando o primeiro `/cc` termina (sem erro 409 entre `/model` e `/effort`); CI do Windows deve passar depois do push.
 
 - 0.6.2 (rodada em paralelo, specs e roteiros em `docs/testing/background-sessions.md`):
@@ -130,6 +128,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## Feito
 
+- 0.6.5: cabeçalho da conversa enxuto (nome, pasta, attach e branch); modelo, esforço, modo e versão do plugin foram para a direita da dica do teclado, sob o campo de mensagem; o chip do modelo abre a lista de modelos e, no último item, os níveis de esforço; a versão do Claude Code fica no texto ao passar o mouse sobre a do plugin. Desenho aprovado em 2026-11-25.
 - 0.6.4: mensagens dos agentes (e do Claude para eles) vêm recolhidas na primeira linha, com "Ver tudo" para abrir.
 - 0.6.3: CI do Windows corrigido (testes de Linux/macOS e marca de pergunta que ficava presa quando o hook era encerrado à força no Windows); diff dos arquivos desligado por padrão, com opção nas configurações; modelo e esforço escolhidos enquanto a sessão trabalha são aplicados quando ela fica parada.
 - 0.6.2: aviso de pergunta esperando numa sessão em segundo plano; "Abrir no terminal" (`claude attach`) pelo menu ⋮ e pelos avisos; nova sessão em qualquer pasta da pasta pessoal; botões de segundo plano visíveis (desativados) nas sessões de terminal; versão do app, do plugin e do Claude Code; título numa linha; recap da conversa; diff dos arquivos editados. Sugestão da próxima mensagem investigada e adiada.

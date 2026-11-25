@@ -272,7 +272,7 @@ var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
 var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
 
 // src/core/version.ts
-var VERSION = "0.6.4";
+var VERSION = "0.6.5";
 var PROTOCOL = 2;
 
 // src/core/registry.ts

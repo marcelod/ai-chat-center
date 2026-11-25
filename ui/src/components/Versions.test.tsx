@@ -17,19 +17,22 @@ const chat = (s: SessionView, hubVersion?: string, lang: 'en' | 'pt-BR' = 'en') 
     </LangProvider>,
   );
 
-describe('versions in the conversation header', () => {
-  it('shows the plugin and Claude Code versions quietly when the plugin matches the hub', () => {
+describe('versions in the bar under the message field', () => {
+  it('shows only the plugin version; Claude Code is in its title', () => {
     chat(session({ pluginVersion: '0.6.1', claudeVersion: '2.1.332' }), '0.6.1');
     const box = screen.getByTestId('version-info');
+    expect(box.closest('[data-testid="session-bar"]')).not.toBeNull();
+    expect(box.getAttribute('title')).toContain('Claude Code 2.1.332');
+    expect(box).not.toHaveAttribute('data-stale');
     expect(box.textContent).toContain('plugin 0.6.1');
-    expect(box.textContent).toContain('Claude Code 2.1.332');
-    expect(box.querySelector('[data-stale]')).toBeNull();
   });
 
   it('flags a plugin different from the hub with the fix', () => {
     chat(session({ pluginVersion: '0.5.0' }), '0.6.1', 'pt-BR');
-    const stale = screen.getByTestId('version-info').querySelector('[data-stale="true"]');
-    expect(stale?.textContent).toContain('versão antiga: rode /reload-plugins e /ai-chat-center:cc');
+    const stale = screen.getByTestId('version-info');
+    expect(stale).toHaveAttribute('data-stale', 'true');
+    expect(stale.textContent).toContain('↻');
+    expect(stale.getAttribute('title')).toContain('versão antiga: rode /reload-plugins e /ai-chat-center:cc');
   });
 
   it('nothing when the session has no version', () => {

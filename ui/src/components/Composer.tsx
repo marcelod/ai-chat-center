@@ -23,6 +23,8 @@ type Props = {
   attachId?: string;
   /** Interactive (terminal) session: a typed command name gets a line saying why the app cannot run it. */
   terminalHint?: boolean;
+  /** Shown right of the keyboard hint (ChatView: model and effort, mode, plugin version). */
+  controls?: React.ReactNode;
 };
 /** A one-line message that names a slash command (`/compact`, `/rename x`): the hub's rule (bgSessions.isValidCommand). A path such as `/home/x` is text. */
 export const isSlashCommand = (text: string) => text.length <= 200 && /^\/[A-Za-z0-9][\w:.-]*( [^\n]*)?$/.test(text);
@@ -60,7 +62,7 @@ export const PAD_PX = 12;
 export const MAX_LINES = 8;
 export const MAX_HEIGHT = MAX_LINES * LINE_PX + 2 * PAD_PX;
 
-export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuestion = false, onSend, onUpload, onCommand, attachId, terminalHint = false }: Props) {
+export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuestion = false, onSend, onUpload, onCommand, attachId, terminalHint = false, controls }: Props) {
   const t = useT();
   const disabled = sessionOff || blockedByQuestion;
   const [text, setText] = useState(() => loadDraft(sessionId));
@@ -480,7 +482,12 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
       {sessionOff ? (
         <p className="mt-2 rounded-lg bg-field px-3 py-2 text-[12.5px] text-muted">{t('ui.composer.disconnectedHint')}</p>
       ) : (
-        <p className="mt-2 text-[11.5px] text-muted">{t('ui.composer.hint')}</p>
+        <div className="mt-2 flex min-w-0 items-center gap-2">
+          <p className="min-w-0 flex-1 truncate text-[11.5px] text-muted" title={t('ui.composer.hint')}>
+            {t('ui.composer.hint')}
+          </p>
+          {controls}
+        </div>
       )}
     </footer>
   );
