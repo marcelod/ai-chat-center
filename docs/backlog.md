@@ -18,6 +18,14 @@ Visto ao vivo (2026-11-24). Com `answers off`, o diálogo de opções (AskUserQu
 
 Pedido em 2026-11-25. A troca de modelo e esforço e a lista de comandos ao digitar `/` só aparecem em sessões em segundo plano (`bgId`), porque o app digita nelas pelo `claude attach`; numa sessão de terminal comum o texto do app chega como hook e o Claude Code não executa `/…`. Quem usa uma sessão de terminal acha que a atualização não carregou. Ideia: mostrar os botões desativados nessas sessões, com a dica "Disponível em sessões em segundo plano: retome a sessão pelo app".
 
+### Mostrar a versão em uso
+
+Pedido em 2026-11-25. Mostrar no app a versão do AI Chat Center que está rodando, por exemplo no menu de configurações ou no rodapé da lista. Dá para fazer:
+
+- Versão do hub (o app): o hub já sabe a dele (`VERSION` em `src/core/version.ts`).
+- Versão de cada sessão: o registro de cada sessão já guarda a versão do plugin que a conectou (`codeStamp`). Serve para ver qual sessão ainda roda uma versão antiga e precisa de `/reload-plugins`.
+- Versão do Claude Code de cada sessão: as linhas da transcrição trazem o campo `version`; daria para mostrar no cabeçalho da conversa (confirmar).
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
