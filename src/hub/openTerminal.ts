@@ -22,18 +22,21 @@ export interface TerminalCommand {
 }
 
 /**
- * Linux terminals in the order tried, each with the arguments that run `claude attach <id>` in `cwd`.
+ * Linux terminals in the order tried (those with a known syntax first), each with the arguments that run `claude attach <id>` in `cwd`.
  * Where a terminal has a working-directory option it is used (gnome-terminal opens its window from a
  * server process, whose own cwd is not ours); the process cwd is set as well for the others.
  */
 const LINUX_TERMINALS: [string, (cwd: string, run: string[]) => string[]][] = [
-  ['x-terminal-emulator', (_cwd, run) => ['-e', ...run]],
   ['gnome-terminal', (cwd, run) => [`--working-directory=${cwd}`, '--', ...run]],
   ['konsole', (cwd, run) => ['--workdir', cwd, '-e', ...run]],
   ['xfce4-terminal', (cwd, run) => [`--working-directory=${cwd}`, '-x', ...run]],
   ['kitty', (cwd, run) => ['--directory', cwd, ...run]],
   ['alacritty', (cwd, run) => ['--working-directory', cwd, '-e', ...run]],
   ['xterm', (_cwd, run) => ['-e', ...run]],
+  // Last: it is a Debian alternative that may be any terminal, so only the one syntax every one of them
+  // takes is used: `-e` with the whole command as ONE string (the id is 8 validated hex characters, so
+  // nothing in it needs quoting). The folder is the process cwd.
+  ['x-terminal-emulator', (_cwd, run) => ['-e', run.join(' ')]],
 ];
 
 /** The first Linux terminal found in an absolute PATH entry, with its arguments; null when there is none. */
@@ -81,12 +84,14 @@ export interface OpenTerminalDeps {
   home?: string;
   /** Whether a terminal program exists (Linux, Windows). */
   exists?: (p: string) => boolean;
+  /** Whether the session folder exists and is a folder (default: fs.statSync). */
+  isDir?: (p: string) => boolean;
   /** macOS: makes the private folder of the `.command` file (default: mkdtemp under os.tmpdir(), 0700). */
   mkdtemp?: () => string;
   writeFile?: (p: string, data: string, mode: number) => void;
 }
 
-export type OpenTerminalResult = { ok: true } | { ok: false; code: 'no-terminal' | 'spawn-failed'; error: string };
+export type OpenTerminalResult = { ok: true } | { ok: false; code: 'no-terminal' | 'spawn-failed' | 'folder-missing'; error: string };
 
 export interface TerminalTarget {
   bgId: string;
@@ -107,8 +112,17 @@ export async function openTerminal(t: TerminalTarget, deps: OpenTerminalDeps = {
   const isAbs = platform === 'win32' ? path.win32.isAbsolute : path.posix.isAbsolute;
   if (!isAbs(t.cwd)) return { ok: false, code: 'spawn-failed', error: 'the session folder is not an absolute path' };
 
+  let isDir = false;
+  try {
+    isDir = (deps.isDir ?? ((p) => fs.statSync(p).isDirectory()))(t.cwd);
+  } catch {
+    isDir = false;
+  }
+  if (!isDir) return { ok: false, code: 'folder-missing', error: 'the session folder does not exist' };
+
   let cmd: string;
   let args: string[];
+  let procEnv = cleanEnv(env as NodeJS.ProcessEnv, configDir);
   if (platform === 'darwin') {
     // A `.command` file opened by Terminal (`open -a Terminal`): no Automation permission prompt (osascript
     // driving Terminal needs one), and the script text holds only quoted words and the validated id.
@@ -130,6 +144,9 @@ export async function openTerminal(t: TerminalTarget, deps: OpenTerminalDeps = {
     if (!root || !path.win32.isAbsolute(root)) return { ok: false, code: 'no-terminal', error: 'SystemRoot is not set' };
     const cmdExe = path.win32.join(root, 'System32', 'cmd.exe');
     const run = [cmdExe, '/k', 'claude', 'attach', t.bgId];
+    // cmd.exe looks for a bare `claude` in its cwd (the session folder) before the PATH, which would run a
+    // `claude.cmd`/`claude.exe` planted in a project; this makes it search the PATH only.
+    procEnv = { ...procEnv, NoDefaultCurrentDirectoryInExePath: '1' };
     const local = env.LOCALAPPDATA;
     const wt = local && path.win32.isAbsolute(local) ? path.win32.join(local, 'Microsoft', 'WindowsApps', 'wt.exe') : null;
     // wt.exe is an app execution alias (a reparse point): checked for presence, not as a regular file.
@@ -157,7 +174,7 @@ export async function openTerminal(t: TerminalTarget, deps: OpenTerminalDeps = {
     try {
       child = spawn(cmd, args, {
         cwd: t.cwd,
-        env: cleanEnv(env as NodeJS.ProcessEnv, configDir),
+        env: procEnv,
         detached: true,
         stdio: 'ignore',
         shell: false,

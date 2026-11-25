@@ -207,7 +207,8 @@
         "opened": "Terminal opened. Closing it does not end the session.",
         "noTerminal": "No terminal program found. Run in a terminal: {cmd}",
         "failed": "Could not open a terminal. Run in a terminal: {cmd}",
-        "notBackground": "This session no longer runs in the background."
+        "notBackground": "This session no longer runs in the background.",
+        "folderMissing": "The folder of this session no longer exists, so no terminal was opened."
       }
     },
     "composer": {

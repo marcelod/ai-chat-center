@@ -329,7 +329,7 @@ export async function resumeSession(sid: string): Promise<void> {
 }
 /**
  * Opens the system terminal running `claude attach` on a background session. Rejects with ApiError: 409
- * (code `not-background` or `session-disconnected`), 502 (code `no-terminal` or `spawn-failed`).
+ * (code `not-background`, `session-disconnected` or `folder-missing`), 502 (code `no-terminal` or `spawn-failed`).
  */
 export async function openTerminal(sid: string): Promise<void> {
   await request<unknown>(`/api/sessions/${encodeURIComponent(sid)}/open-terminal`, { method: 'POST' });

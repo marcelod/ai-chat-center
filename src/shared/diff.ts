@@ -5,7 +5,11 @@ export const DIFF_MAX_LINES = 400;
 /** Longest text (characters) taken from each side; beyond it the text is cut. */
 const SIDE_MAX_CHARS = 200_000;
 /** Largest LCS table (cells); beyond it the middle is shown as all removed then all added. */
-const LCS_MAX_CELLS = 4_000_000;
+const LCS_MAX_CELLS = 1_000_000;
+/** Longest line (characters) kept in a diff; beyond it the line is cut. */
+export const DIFF_LINE_MAX_CHARS = 500;
+/** Most text (characters) kept in one diff, besides the line cap. */
+export const DIFF_MAX_CHARS = 32 * 1024;
 const CONTEXT = 2;
 
 const lines = (s: string): string[] => (s === '' ? [] : s.replace(/\r\n/g, '\n').split('\n'));
@@ -64,6 +68,21 @@ export function toolDiff(edits: { oldText: string; newText: string }[]): ToolDif
   const added = all.filter((l) => l.op === '+').length;
   const removed = all.filter((l) => l.op === '-').length;
   if (added === 0 && removed === 0) return null;
-  const truncated = tooBig || all.length > DIFF_MAX_LINES;
-  return { lines: all.slice(0, DIFF_MAX_LINES), added, removed, ...(truncated ? { truncated: true as const } : {}) };
+  let truncated = tooBig || all.length > DIFF_MAX_LINES;
+  const kept: DiffLine[] = [];
+  let chars = 0;
+  for (const l of all.slice(0, DIFF_MAX_LINES)) {
+    let text = l.text;
+    if (text.length > DIFF_LINE_MAX_CHARS) {
+      text = text.slice(0, DIFF_LINE_MAX_CHARS);
+      truncated = true;
+    }
+    if (chars + text.length > DIFF_MAX_CHARS) {
+      truncated = true;
+      break;
+    }
+    chars += text.length;
+    kept.push(text === l.text ? l : { op: l.op, text });
+  }
+  return { lines: kept, added, removed, ...(truncated ? { truncated: true as const } : {}) };
 }

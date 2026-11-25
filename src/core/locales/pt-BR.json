@@ -207,7 +207,8 @@
         "opened": "Terminal aberto. Fechá-lo não encerra a sessão.",
         "noTerminal": "Nenhum programa de terminal encontrado. Rode num terminal: {cmd}",
         "failed": "Não foi possível abrir o terminal. Rode num terminal: {cmd}",
-        "notBackground": "Esta sessão não roda mais em segundo plano."
+        "notBackground": "Esta sessão não roda mais em segundo plano.",
+        "folderMissing": "A pasta desta sessão não existe mais, então nenhum terminal foi aberto."
       }
     },
     "composer": {

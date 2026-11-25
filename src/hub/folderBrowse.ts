@@ -43,6 +43,22 @@ async function realHome(home: string): Promise<Home> {
   }
 }
 
+async function assertAncestorInside(given: string, home: Home): Promise<void> {
+  let dir = path.dirname(given);
+  for (;;) {
+    try {
+      const real = await fs.realpath(dir);
+      if (!isInside(home.real, real)) throw new FolderError('outside');
+      return;
+    } catch (e) {
+      if (e instanceof FolderError) throw e;
+      const parent = path.dirname(dir);
+      if (parent === dir) return;
+      dir = parent;
+    }
+  }
+}
+
 /** The real path of `p`, a folder inside the real home folder. */
 async function resolveIn(p: unknown, home: Home): Promise<string> {
   if (typeof p !== 'string' || !p || p.length > MAX_PATH || p.includes('\0') || !path.isAbsolute(p)) throw new FolderError('invalid');
@@ -55,6 +71,9 @@ async function resolveIn(p: unknown, home: Home): Promise<string> {
     real = await fs.realpath(given);
   } catch (e) {
     if (errCode(e) === 'EACCES' || errCode(e) === 'EPERM') throw new FolderError('denied');
+    // Missing: the answer must not tell whether something exists beyond a link that leaves the home
+    // folder (`~/x -> /`), so the deepest ancestor that does exist is resolved and judged first.
+    if (errCode(e) === 'ENOENT' || errCode(e) === 'ENOTDIR') await assertAncestorInside(given, home);
     throw new FolderError('not-found');
   }
   if (!isInside(home.real, real)) throw new FolderError('outside');

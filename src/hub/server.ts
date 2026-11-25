@@ -616,6 +616,7 @@ export async function createHub(
         }
         if (!r.ok) {
           log(`open terminal for ${sid} failed: ${r.error}`);
+          if (r.code === 'folder-missing') throw new HttpError(409, 'the session folder no longer exists', 'folder-missing');
           throw new HttpError(502, r.code === 'no-terminal' ? 'no terminal program found' : 'could not open a terminal', r.code);
         }
         return sendJson(res, 200, { ok: true });

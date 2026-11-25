@@ -19,8 +19,9 @@ export class TranscriptReader {
   constructor(
     readonly path: string,
     readonly keys?: string[],
+    private readonly opts: { diffs?: boolean } = {},
   ) {
-    this.parser = new TranscriptParser(keys);
+    this.parser = new TranscriptParser(keys, opts);
   }
 
   /** Events produced since the last call (updated events keep their id). */
@@ -49,7 +50,7 @@ export class TranscriptReader {
     this.offset = 0;
     this.partial = [];
     this.decoder = new StringDecoder('utf8');
-    this.parser = new TranscriptParser(this.keys);
+    this.parser = new TranscriptParser(this.keys, this.opts);
     this.events.clear();
   }
 
