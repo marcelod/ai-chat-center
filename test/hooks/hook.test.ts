@@ -24,6 +24,7 @@ const ctx = (parentPid = 42) => ({
   resolvePid: async (): Promise<number | null> => parentPid,
   // The window is on by default: never look for or start a real browser in tests.
   findBrowser: () => null,
+  findDefaultOpener: () => null,
 });
 const inp = (o: Partial<HookInput> = {}): HookInput => ({
   session_id: 's1',
@@ -849,13 +850,24 @@ describe('answers command and turn origin', () => {
     expect(out(await handleHook('prompt-submit', inp({ prompt: '/cc window on' }), none)).systemMessage).toMatch(/Nenhum Chrome, Chromium ou Edge encontrado/);
   });
 
+  it('/cc window on without Chrome but with a default browser says the app opens in a tab, and keeps the launcher', async () => {
+    const calls: string[] = [];
+    const c = { ...ctx(), findDefaultOpener: () => ({ cmd: '/usr/bin/open', args: [] }), launcher: { install: () => { calls.push('install'); return true; }, remove: () => {} } };
+    const r = await handleHook('prompt-submit', inp({ prompt: '/cc window on' }), c);
+    expect(out(r).systemMessage).toMatch(/open in a tab of your default browser/);
+    expect(out(r).systemMessage).not.toMatch(/the link is still shown/);
+    expect(calls).toEqual(['install']);
+  });
+
   describe('/cc with the openWindow flag', () => {
     const HUB = 'http://127.0.0.1:7777/#token=tok-secret';
     const CODE = 'ab12'.repeat(16);
     const spawned: { cmd: string; args: string[] }[] = [];
     const fetched: string[] = [];
-    const winCtx = (o: { browser?: string | null; status?: number; live?: boolean } = {}) => ({
+    const winCtx = (o: { browser?: string | null; status?: number; live?: boolean; opener?: boolean; platform?: NodeJS.Platform } = {}) => ({
       ensureHub: async () => HUB,
+      findDefaultOpener: () => (o.opener ? { cmd: '/usr/bin/open', args: [] } : null),
+      platform: o.platform ?? ('linux' as NodeJS.Platform),
       resolvePid: async (): Promise<number | null> => 42,
       findBrowser: () => (o.browser === undefined ? '/usr/bin/chromium' : o.browser),
       fetch: (async (url: string) => {
@@ -918,6 +930,26 @@ describe('answers command and turn origin', () => {
       expect(out(r).hookSpecificOutput.additionalContext).toContain('AI Chat Center: connected');
       expect(fetched).toHaveLength(0);
       expect(spawned).toHaveLength(0);
+    });
+
+    it('no Chrome: opens a tab of the default browser with #pair=<code>; on macOS the reply gives the Add to Dock tip', async () => {
+      await saveConfig({ openWindow: true });
+      const r = await handleHook('prompt-submit', inp({ prompt: '/cc' }), winCtx({ browser: null, opener: true, platform: 'darwin' }));
+      expect(spawned).toEqual([{ cmd: '/usr/bin/open', args: [`http://127.0.0.1:7777/#pair=${CODE}`] }]);
+      expect(out(r).systemMessage).toBe(`AI Chat Center is ready: ${HUB}\nOpened in a browser tab. In Safari (macOS Sonoma or newer), File > Add to Dock gives the app its own window.`);
+      expect(JSON.stringify(spawned)).not.toContain('tok-secret');
+      expect(hookLog()).not.toContain(CODE);
+    });
+
+    it('no Chrome on Linux: a tab, no Safari tip; an app tab already open: nothing opens and no tip', async () => {
+      await saveConfig({ openWindow: true });
+      const r = await handleHook('prompt-submit', inp({ prompt: '/cc' }), winCtx({ browser: null, opener: true }));
+      expect(spawned).toHaveLength(1);
+      expect(out(r).systemMessage).toBe(`AI Chat Center is ready: ${HUB}`);
+      spawned.length = 0;
+      const r2 = await handleHook('prompt-submit', inp({ prompt: '/cc' }), winCtx({ browser: null, opener: true, live: true, platform: 'darwin' }));
+      expect(spawned).toHaveLength(0);
+      expect(out(r2).systemMessage).toBe(`AI Chat Center is ready: ${HUB}`);
     });
 
     it('flag on, hub refuses the pair code: /cc still connects, the failure goes to hook.log only', async () => {

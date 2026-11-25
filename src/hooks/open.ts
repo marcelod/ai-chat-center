@@ -13,13 +13,13 @@ export interface OpenDeps {
   log?: (msg: string) => void;
 }
 
-export async function openApp(deps: OpenDeps = {}): Promise<'opened' | 'reused' | 'no-browser' | 'failed'> {
+export async function openApp(deps: OpenDeps = {}): Promise<'opened' | 'tab' | 'reused' | 'no-browser' | 'failed'> {
   const log = deps.log ?? logLine;
   try {
     const url = await (deps.ensureHub ?? ((notice) => ensureHub({ notice })))(log);
     const r = await (deps.launch ?? launchAppWindow)(url, { onError: log });
     if (r === false) {
-      log('launcher: no Chrome, Chromium or Edge found');
+      log('launcher: no browser found');
       return 'no-browser';
     }
     return r;

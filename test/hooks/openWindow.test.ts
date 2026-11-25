@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
-import { findBrowser, openAppWindow, launchAppWindow, isExecutableFile } from '../../src/hooks/openWindow.js';
+import { findBrowser, findDefaultOpener, openAppWindow, openDefaultBrowser, launchAppWindow, isExecutableFile } from '../../src/hooks/openWindow.js';
 
 const CODE = 'c0de'.repeat(16);
 const onlyExists = (...files: string[]) => (p: string) => files.includes(p);
@@ -33,6 +33,16 @@ describe('findBrowser', () => {
     expect(findBrowser({}, 'darwin', onlyExists(edge))).toBe(edge);
   });
 
+  it('macOS: also ~/Applications, after /Applications', () => {
+    const home = '/Users/u';
+    const userChrome = '/Users/u/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    const sysChrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    expect(findBrowser({ HOME: home }, 'darwin', onlyExists(userChrome))).toBe(userChrome);
+    expect(findBrowser({ HOME: home }, 'darwin', onlyExists(userChrome, sysChrome))).toBe(sysChrome);
+    // A relative HOME is ignored.
+    expect(findBrowser({ HOME: 'u' }, 'darwin', onlyExists('u/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'))).toBeNull();
+  });
+
   it('windows: chrome.exe, then msedge.exe, under ProgramFiles, ProgramFiles(x86) and LOCALAPPDATA', () => {
     const env = { ProgramFiles: 'C:\\Program Files', 'ProgramFiles(x86)': 'C:\\Program Files (x86)', LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' };
     const chromeLocal = path.win32.join(env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe');
@@ -48,6 +58,27 @@ describe('findBrowser', () => {
 
   it('a throwing exists counts as not found', () => {
     expect(findBrowser({ PATH: '/usr/bin' }, 'linux', () => { throw new Error('EACCES'); })).toBeNull();
+  });
+});
+
+describe('findDefaultOpener', () => {
+  it('macOS: /usr/bin/open', () => {
+    expect(findDefaultOpener({}, 'darwin', onlyExists('/usr/bin/open'))).toEqual({ cmd: '/usr/bin/open', args: [] });
+    expect(findDefaultOpener({}, 'darwin', onlyExists())).toBeNull();
+  });
+  it('linux: xdg-open from an absolute PATH entry only', () => {
+    expect(findDefaultOpener({ PATH: 'rel:/usr/bin' }, 'linux', onlyExists('/usr/bin/xdg-open'))).toEqual({ cmd: '/usr/bin/xdg-open', args: [] });
+    expect(findDefaultOpener({ PATH: 'rel' }, 'linux', () => true)).toBeNull();
+    expect(findDefaultOpener({ PATH: '/usr/bin' }, 'linux', onlyExists())).toBeNull();
+  });
+  it('windows: rundll32 url.dll,FileProtocolHandler under SystemRoot, no shell builtin', () => {
+    const exe = path.win32.join('C:\\Windows', 'System32', 'rundll32.exe');
+    expect(findDefaultOpener({ SystemRoot: 'C:\\Windows' }, 'win32', onlyExists(exe))).toEqual({ cmd: exe, args: ['url.dll,FileProtocolHandler'] });
+    expect(findDefaultOpener({}, 'win32', () => true)).toBeNull();
+    expect(findDefaultOpener({ SystemRoot: 'Windows' }, 'win32', () => true)).toBeNull();
+  });
+  it('a throwing exists counts as not found', () => {
+    expect(findDefaultOpener({}, 'darwin', () => { throw new Error('EACCES'); })).toBeNull();
   });
 });
 
@@ -78,6 +109,27 @@ const fakeSpawn = (calls: Call[], fail = false) =>
     calls.push({ cmd, args, opts, child } as Call);
     return child;
   }) as never;
+
+describe('openDefaultBrowser', () => {
+  it('runs the opener detached, without a shell, with the url as the last argument', () => {
+    const calls: Call[] = [];
+    const url = `http://127.0.0.1:7777/#pair=${CODE}`;
+    expect(openDefaultBrowser({ cmd: 'C:\\Windows\\System32\\rundll32.exe', args: ['url.dll,FileProtocolHandler'] }, url, { spawn: fakeSpawn(calls) })).toBe(true);
+    expect(calls[0].args).toEqual(['url.dll,FileProtocolHandler', url]);
+    expect(calls[0].opts).toMatchObject({ detached: true, stdio: 'ignore', shell: false });
+  });
+  it('a failing spawn returns false; a later error is logged without the url', () => {
+    expect(openDefaultBrowser({ cmd: '/usr/bin/open', args: [] }, 'http://x/#pair=1', { spawn: fakeSpawn([], true) })).toBe(false);
+    let handler: ((e: Error) => void) | undefined;
+    const logged: string[] = [];
+    const spawn = (() => ({ unref() {}, on(ev: string, h: (e: Error) => void) { if (ev === 'error') handler = h; return this; } })) as never;
+    const url = `http://127.0.0.1:7777/#pair=${CODE}`;
+    openDefaultBrowser({ cmd: '/usr/bin/xdg-open', args: [] }, url, { spawn, onError: (m) => logged.push(m) });
+    handler!(new Error(`spawn failed for ${url}`));
+    expect(logged[0]).toMatch(/app tab: could not start \/usr\/bin\/xdg-open/);
+    expect(logged[0]).not.toContain(CODE);
+  });
+});
 
 describe('openAppWindow', () => {
   it('spawns the browser detached, without a shell, with --app and --new-window, and unrefs it', () => {
@@ -148,10 +200,33 @@ describe('launchAppWindow', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('no browser: does not call the hub nor spawn', async () => {
+  it('no Chrome: opens #pair=<code> in a tab of the default browser, never the token', async () => {
+    const calls: Call[] = [];
+    const seen: { url?: string; init?: RequestInit }[] = [];
+    const r = await launchAppWindow(HUB, {
+      findBrowser: () => null,
+      findDefaultOpener: () => ({ cmd: '/usr/bin/open', args: [] }),
+      fetch: okFetch(seen),
+      spawn: fakeSpawn(calls),
+    }, 's1');
+    expect(r).toBe('tab');
+    expect(seen[0].url).toBe('http://127.0.0.1:7777/api/pair-code');
+    expect(calls).toEqual([expect.objectContaining({ cmd: '/usr/bin/open', args: [`http://127.0.0.1:7777/#pair=${CODE}`] })]);
+    expect(JSON.stringify(calls)).not.toContain('secret-token');
+  });
+
+  it('no Chrome and an app tab already open: opens nothing', async () => {
+    const calls: Call[] = [];
+    const live = (async () => new Response(JSON.stringify({ live: true }), { status: 200 })) as never;
+    const r = await launchAppWindow(HUB, { findBrowser: () => null, findDefaultOpener: () => ({ cmd: '/usr/bin/open', args: [] }), fetch: live, spawn: fakeSpawn(calls) }, 's1');
+    expect(r).toBe('reused');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('no browser at all: does not call the hub nor spawn', async () => {
     const calls: Call[] = [];
     const seen: { url?: string }[] = [];
-    expect(await launchAppWindow(HUB, { findBrowser: () => null, fetch: okFetch(seen), spawn: fakeSpawn(calls) })).toBe(false);
+    expect(await launchAppWindow(HUB, { findBrowser: () => null, findDefaultOpener: () => null, fetch: okFetch(seen), spawn: fakeSpawn(calls) })).toBe(false);
     expect(seen).toHaveLength(0);
     expect(calls).toHaveLength(0);
   });

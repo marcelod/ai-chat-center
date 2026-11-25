@@ -16,7 +16,7 @@ describe('openApp (the launcher icon)', () => {
     expect(await openApp({ ensureHub: async () => HUB, launch: async () => false, log })).toBe('no-browser');
     expect(await openApp({ ensureHub: async () => { throw new Error('hub did not start'); }, log })).toBe('failed');
     expect(await openApp({ ensureHub: async () => HUB, launch: async () => { throw new Error('app window: pair-code answered 401'); }, log })).toBe('failed');
-    expect(seen.join('\n')).toMatch(/no Chrome[\s\S]*hub did not start[\s\S]*401/);
+    expect(seen.join('\n')).toMatch(/no browser found[\s\S]*hub did not start[\s\S]*401/);
     expect(seen.join('\n')).not.toContain('secret');
   });
 });

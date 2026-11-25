@@ -38,7 +38,7 @@ import { isCcCommand } from '../core/ccCommand.js';
 export { isCcCommand };
 import { resolveClaudePid } from './claudePid.js';
 import { parentClaudePid } from './parentClaude.js';
-import { findBrowser, launchAppWindow } from './openWindow.js';
+import { findBrowser, findDefaultOpener, launchAppWindow, type DefaultOpener } from './openWindow.js';
 import { installLauncher, removeLauncher } from './launcher.js';
 
 export type HookEvent = 'prompt-submit' | 'notification';
@@ -62,6 +62,10 @@ export interface HookContext {
   parentClaudePid?: () => number | null;
   /** Path of a Chrome, Chromium or Edge binary, or null. Default: findBrowser (src/hooks/openWindow.ts). */
   findBrowser?: () => string | null;
+  /** The default-browser command used without Chrome, Chromium or Edge. Default: findDefaultOpener. */
+  findDefaultOpener?: () => DefaultOpener | null;
+  /** For tests: the platform the /cc tips are for. Default: process.platform. */
+  platform?: NodeJS.Platform;
   /** For tests: the pair-code request and the browser launch. Default: global fetch, child_process.spawn. */
   fetch?: typeof fetch;
   spawn?: typeof import('node:child_process').spawn;
@@ -153,8 +157,9 @@ async function connect(input: HookInput, resolve: (sid: string) => Promise<numbe
     if (openWindow) {
       // The plugin folder and the Node path change with updates: keep the launcher pointing at this copy.
       refreshLauncher(ctx, language);
-      await openWindowQuietly(url, ctx, sid);
-
+      const opened = await openWindowQuietly(url, ctx, sid);
+      // Safari (or another default browser) got an ordinary tab: say how to get the app in its own window.
+      if (opened === 'tab' && (ctx.platform ?? process.platform) === 'darwin') shown += `\n${t(language, 'hook.tabMacTip')}`;
     }
   } catch (e) {
     // Keep the registration: the hub will show the session once it is up.
@@ -206,10 +211,11 @@ function refreshLauncher(ctx: HookContext, language: Lang): boolean {
 }
 
 /** Opens the app window (spec 2026-11-23-app-window); never fails or delays the /cc reply beyond a short timeout. */
-async function openWindowQuietly(url: string, ctx: HookContext, sid: string): Promise<void> {
+async function openWindowQuietly(url: string, ctx: HookContext, sid: string): Promise<'opened' | 'tab' | 'reused' | false> {
   try {
-    await launchAppWindow(url, {
+    return await launchAppWindow(url, {
       findBrowser: ctx.findBrowser ?? (() => findBrowser()),
+      findDefaultOpener: ctx.findDefaultOpener ?? (() => findDefaultOpener()),
       ...(ctx.fetch ? { fetch: ctx.fetch } : {}),
       ...(ctx.spawn ? { spawn: ctx.spawn } : {}),
       onError: (msg) => logError(msg),
@@ -217,6 +223,7 @@ async function openWindowQuietly(url: string, ctx: HookContext, sid: string): Pr
   } catch (e) {
     // Messages from launchAppWindow never carry the token; log the message only (no stack, no url).
     logError(e instanceof Error ? e.message : String(e));
+    return false;
   }
 }
 
@@ -239,8 +246,10 @@ export async function handleHook(event: HookEvent, input: HookInput, ctx: HookCo
       const { language } = await saveConfig({ openWindow: on });
       const find = ctx.findBrowser ?? (() => findBrowser());
       const browser = on ? find() : null;
-      let note = on && browser === null ? `\n${t(language, 'hook.windowNoBrowser')}` : '';
-      if (on && browser !== null && refreshLauncher(ctx, language)) note += `\n${t(language, 'hook.windowLauncher')}`;
+      const opener = on && browser === null ? (ctx.findDefaultOpener ?? (() => findDefaultOpener()))() : null;
+      let note = '';
+      if (on && browser === null) note = `\n${t(language, opener ? 'hook.windowDefaultBrowser' : 'hook.windowNoBrowser')}`;
+      if (on && (browser !== null || opener !== null) && refreshLauncher(ctx, language)) note += `\n${t(language, 'hook.windowLauncher')}`;
       if (!on) {
         try {
           ctx.launcher?.remove();

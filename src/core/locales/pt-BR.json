@@ -8,6 +8,8 @@
     "windowOn": "AI Chat Center: o app vai abrir em janela própria ao conectar. Para desligar: /ai-chat-center:cc window off",
     "windowOff": "AI Chat Center: o app não abre mais em janela própria.",
     "windowNoBrowser": "Nenhum Chrome, Chromium ou Edge encontrado: o link continua sendo mostrado.",
+    "windowDefaultBrowser": "Nenhum Chrome, Chromium ou Edge encontrado: o app vai abrir numa aba do navegador padrão.",
+    "tabMacTip": "O app abriu numa aba do navegador. No Safari (macOS Sonoma ou mais novo), Arquivo > Adicionar ao Dock deixa o app em janela própria.",
     "windowLauncher": "O atalho “AI Chat Center” foi adicionado aos seus aplicativos (menu de aplicativos no Linux, menu Iniciar no Windows, Aplicativos da sua pasta pessoal no macOS): ele abre o app (e inicia o hub, se preciso).",
     "launcherComment": "Acompanhe e responda suas sessões do Claude Code",
     "usageOn": "AI Chat Center: o app agora mostra o uso do período de 5 horas. Sua status line continua igual (ela passa por um pequeno wrapper do AI Chat Center). Para desfazer: /ai-chat-center:cc usage off",
