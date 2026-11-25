@@ -56,19 +56,38 @@ describe('runAsk: no decision, no wait', () => {
     await noWait();
   });
   it('an invalid session id', async () => noWait(inp({ session_id: '../x' })));
+});
+
+describe('runAsk: the question is left to the terminal dialog, marked as a waiting question', () => {
+  // The app says "question waiting" (and, for a background session, how to open its terminal).
+  const terminalQuestion = async (o: Partial<AskOptions> = {}) => {
+    const t0 = Date.now();
+    expect(await runAsk(inp(), opts({ deadlineMs: 5_000, ...o }))).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(1_000);
+    expect(await getPending(SID)).toBeNull();
+    expect((await getWaiting(SID))?.kind).toBe('question');
+  };
   it('answers from the app are off', async () => {
     await saveConfig({ answersFromApp: false });
-    await noWait();
+    await terminalQuestion();
   });
   it('the turn came from the terminal', async () => {
     await setTurnOrigin(SID, 'terminal');
-    await noWait();
+    await terminalQuestion();
   });
   it('the turn origin is unknown', async () => {
     fs.rmSync(paths().turnFile(SID));
-    await noWait();
+    await terminalQuestion();
   });
-  it('no app tab is open', async () => noWait(inp(), { present: async () => false }));
+  it('no app tab is open', async () => terminalQuestion({ present: async () => false }));
+});
+
+describe('runAsk: no decision, no wait (invalid input)', () => {
+  const noWait = async (i: AskInput = inp(), o: Partial<AskOptions> = {}) => {
+    expect(await runAsk(i, opts({ deadlineMs: 5_000, ...o }))).toBeNull();
+    expect(await getPending(SID)).toBeNull();
+    expect(await getWaiting(SID)).toBeNull();
+  };
   it('invalid questions', async () => noWait(inp({ tool_input: { questions: [{ question: Q, options: [{ label: 'only' }] }] } })));
   it('an invalid tool_use_id', async () => noWait(inp({ tool_use_id: '../evil' })));
 });
