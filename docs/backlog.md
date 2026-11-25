@@ -34,6 +34,10 @@ Pedido em 2026-11-25. O Claude Code mostra às vezes um resumo de onde a convers
 
 Pedido em 2026-11-25 (era a ideia 12). O Claude Code sugere às vezes a próxima mensagem, em cinza no campo de texto. Mais difícil que o recap: a sugestão **não** fica na transcrição (só fica `promptSource: "suggestion_accepted"` quando a pessoa aceita). Caminhos a avaliar: ler a sugestão da tela da sessão em segundo plano (`claude logs`, ver a ideia 2) ou pedir sugestões pelo `--prompt-suggestions` nas sessões criadas pelo app (confirmar se essa opção vale fora do modo `-p`). No app, a sugestão apareceria no campo de texto e o Tab aceitaria.
 
+### Abrir o app quando não há Chrome (Safari no macOS)
+
+Visto em 2026-11-25: no macOS, uma pessoa que usa só o Safari (sem Chrome) instalou o plugin, deu `/cc`, e o app não abriu; ela teve de copiar a URL e colar no navegador. Causa confirmada no código: `findBrowser` (`src/hooks/openWindow.ts`) só procura Chrome, Chromium e Edge (no macOS, em `/Applications`); sem nenhum deles, `launchAppWindow` devolve `false` e nada é aberto. Ideia: sem Chrome, abrir no navegador padrão (`open` no macOS, `xdg-open` no Linux, `start` no Windows) com o código de pareamento de uso único (`#pair=`), nunca o token, numa aba comum. Também procurar o Chrome em `~/Applications`. No Safari, dá para dizer na mensagem do `/cc` que "Arquivo > Adicionar ao Dock" (macOS Sonoma ou mais novo) cria o app numa janela própria. Ver também "Uma aba comum conta como janela aberta" em "Limites conhecidos".
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
