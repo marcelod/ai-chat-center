@@ -1,6 +1,6 @@
 # Pendências
 
-Itens combinados e deixados para depois. Estado em 2026-11-24, versão 0.5.1. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
+Itens combinados e deixados para depois. Estado em 2026-11-25, versão 0.6.0. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
 
 ## A fazer
 
@@ -9,20 +9,6 @@ Itens combinados e deixados para depois. Estado em 2026-11-24, versão 0.5.1. S�
 Em avaliação pelo autor (2026-11-24).
 
 No primeiro teste no Windows (2026-11-24), o atalho funcionou, mas a pessoa teve de instalar o Node, ajustar o PATH e fechar todos os VS Code e terminais antes de funcionar. Ideias: o `/cc` dizer claramente quando o Node não está no PATH que o Claude Code vê (e como corrigir); um guia curto de instalação no Windows; avaliar se os hooks podem achar o Node em locais comuns sem depender do PATH.
-
-### Lista de comandos ao digitar `/`
-
-Pedido do autor (2026-11-24). Numa sessão em segundo plano, ao digitar `/` no campo de mensagem, o app mostra uma lista com os comandos que funcionam pelo app, filtrada enquanto a pessoa digita. Se a pessoa digitar um comando que não funciona pelo app, o app avisa que ele tem de ser usado no terminal (`claude attach <id>`) e não o envia. Como os comandos se comportam pelo app (visto ao vivo na 0.5.1):
-
-- **Funcionam:** os que agem na sessão, como `/compact`, `/rename <nome>` e `/reload-plugins`. Skills e comandos de plugin com argumento (`/ai-chat-center:cc answers on`) também.
-- **Rodam, mas o resultado não chega ao app:** os que só mostram algo na tela, como `/status`, `/cost`, `/context` e `/help`. Hoje o app diz só "Comando enviado". Avaliar mostrar o resultado no app (ler a tela do attach?) ou avisar que ele só aparece no terminal.
-- **Não funcionam pelo app:** os que abrem um menu para escolher com setas e Enter, como `/resume`, `/model` sem argumento, `/config` e `/agents`. O app só digita uma linha. Para retomar, o botão Retomar já faz esse papel.
-
-A lista precisa ser conferida comando a comando antes de entrar no app. Ainda falta testar a maioria.
-
-### Saber quando um comando terminou
-
-Pedido do autor (2026-11-24). Hoje o app diz "Comando enviado" quando digitou o texto, mas não avisa quando o comando termina. Ideia: avisar quando a sessão volta a ficar parada depois do comando.
 
 ### Pergunta esperando resposta numa sessão em segundo plano
 
@@ -34,30 +20,30 @@ Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
 
 ### Memória dos waiters
 
-Cada sessão conectada mantém um processo Node de cerca de 60 MB esperando mensagens (4 sessões ≈ 240 MB). Medir de novo e, se continuar assim, reduzir: exige mudar a forma de espera; rodada própria.
+Medido em 2026-11-25: cada waiter mostra cerca de 63 MB, mas só cerca de 13,5 MB são dele. Os outros cerca de 45 MB são do próprio Node e são compartilhados entre todos os processos Node. 4 waiters custam cerca de 55 MB, não 250 MB. As flags de memória do V8 não ajudaram. Reduzir mais exige um waiter que não seja Node (por exemplo `sh` + `curl` no Linux e no macOS, com a lógica de entrega no hub): mudança grande, **aguarda decisão do autor** (`docs/superpowers/specs/2026-11-25-app-batch-design.md`).
 
-### Medir a CPU ao vivo
+### CPU do hub com tudo parado
 
-A queda esperada de consultas ao `claude agents` com tudo parado (de 12 para 2 por minuto, desde a 0.4.3) ainda não foi medida ao vivo; precisa de `/reload-plugins` e de um hub novo.
+Medido em 2026-11-25: com uma sessão trabalhando, 11 consultas ao `claude agents` por minuto e 2,6% de CPU (esperado). Com tudo parado, 6 por minuto (esperado: 2) e 1,9% de CPU. Causa provável, a confirmar: a regra do intervalo (`liveTtl` em `src/hub/provider.ts`) lê o `busy` cru do `claude agents`, enquanto a tela usa a marca de turno do hub; uma sessão em segundo plano parada pode aparecer como `busy`. Correção pequena, **aguarda o OK do autor**.
 
 ## Ideias
 
 Levantamento de 2026-11-24, feito a partir do app e das opções do Claude Code 2.1.332 (`claude --help`). ★ marca as mais úteis para o uso diário. Ainda não planejadas: viram item de "A fazer" quando o autor escolher. Quando o autor pedir as ideias de novo, devolver esta lista com as ★ e com os itens de "A fazer".
 
-Sugestão de ordem: 1 e 2 (fecham o "fazer tudo sem terminal"), depois 16, 9 e 21.
+Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ marca as feitas.
 
 ### Sessões em segundo plano
-1. ★ **Nova sessão pelo app:** botão "+" com a pasta (das já usadas), o nome, o modelo e o esforço. O hub roda `claude --bg -n <nome> --model … --effort … "/ai-chat-center:cc"`, e a sessão já nasce conectada.
-2. ★ **Ver a tela da sessão no app:** `claude logs <id>` mostra a tela da sessão. Resolve `/status`, `/cost` e `/context`: depois do comando, o app mostra o trecho da tela.
+1. ★ ✅ 0.6.0 **Nova sessão pelo app:** botão "+" com a pasta (das já usadas), o nome, o modelo e o esforço. O hub roda `claude --bg -n <nome> --model … --effort … "/ai-chat-center:cc"`, e a sessão já nasce conectada.
+2. ★ **Ver a tela da sessão no app:** `claude logs <id>` mostra a tela da sessão. Resolve `/status`, `/cost` e `/context`: depois do comando, o app mostra o trecho da tela. Cuidado visto em 2026-11-25: a tela guarda o link do `/cc` com o token do app; o trecho precisa ser filtrado antes de aparecer.
 3. **Parar, reiniciar e remover pelo menu ⋮:** `claude stop`, `claude respawn` (roda a versão nova do Claude Code depois de um update) e `claude rm`. Também limpar sessões paradas que sobraram.
-4. **Lista de comandos ao digitar `/`** (ver "A fazer").
-5. **Aviso de que o comando terminou** (ver "A fazer").
+4. ✅ 0.6.0 **Lista de comandos ao digitar `/`.**
+5. ✅ 0.6.0 **Aviso de que o comando terminou.**
 6. **Pergunta esperando resposta com `answers off`** (ver "A fazer").
-7. **Trocar modelo e esforço pelo app:** `/model <nome>` e `/effort <nível>` levam argumento e funcionam pelo attach. Botões no cabeçalho.
+7. ✅ 0.6.0 **Trocar modelo e esforço pelo app:** `/model <nome>` e `/effort <nível>` levam argumento e funcionam pelo attach. Botões no cabeçalho.
 8. **Sessão num worktree:** "nova sessão isolada" com `claude --bg -w <nome>`, para tarefas paralelas no mesmo projeto.
 
 ### Conversa
-9. ★ **Busca:** dentro da conversa e entre todas as conversas, incluindo as encerradas.
+9. ★ ✅ 0.6.0 **Busca:** dentro da conversa e entre todas as conversas, incluindo as encerradas.
 10. **Exportar uma conversa** em Markdown ou PDF.
 11. **Respostas rápidas:** botões com mensagens frequentes ("pode seguir", "faz o commit", "resume o que falta").
 12. **Sugestão da próxima mensagem:** `--prompt-suggestions` nas sessões criadas pelo app.
@@ -89,6 +75,13 @@ Sugestão de ordem: 1 e 2 (fecham o "fazer tudo sem terminal"), depois 16, 9 e 2
 
 - 0.5.0, sessões em segundo plano: retomar pelo app e comandos `/…` (`docs/testing/background-sessions.md`). Comandos no Windows ficam para depois (sem `script`; o node-pty traz ~30 MB); macOS não testado.
 
+- 0.6.0 (`docs/superpowers/specs/2026-11-25-app-batch-design.md`), na branch `feat/app-batch` até o merge:
+  - Nova sessão pelo app: testada ao vivo pelo hub do worktree; falta testar pelo botão "+" no app.
+  - Lista de comandos ao digitar `/`: conferir se os comandos marcados como "rodam pelo app" rodam mesmo, um por um.
+  - Aviso de comando terminado: conferir com um `/compact` real.
+  - Trocar modelo e esforço: o Claude Code também salva a escolha como padrão das novas sessões. No teste ao vivo, o modelo padrão foi devolvido para `opus`, mas o esforço padrão ficou `high` (o valor anterior não era conhecido): conferir `effortLevel` no `~/.claude/settings.json`. Avaliar se o hub deve devolver o padrão anterior depois de trocar.
+  - Busca: conferir a velocidade com transcrições grandes (uma tem 9 MB).
+
 ## Limites conhecidos (mexer só se atrapalharem)
 
 - Se o navegador fecha sem avisar o hub (crash), o `/cc` não abre janela por até 150 s.
@@ -106,6 +99,7 @@ Sugestão de ordem: 1 e 2 (fecham o "fazer tudo sem terminal"), depois 16, 9 e 2
 - 0.4.10: app na própria janela por padrão (`/ai-chat-center:cc window off` desliga).
 - 0.5.1: o Retomar não passa mais o `CLAUDE_CONFIG_DIR` padrão (o erro "Workspace not trusted" da 0.5.0); retomar e `/compact` pelo app confirmados ao vivo.
 - 0.5.0: retomar pelo app uma sessão encerrada (em segundo plano) e rodar comandos `/…` nas sessões em segundo plano.
+- 0.6.0: nova sessão pelo app (pasta, nome, modelo e esforço), lista de comandos ao digitar `/`, aviso de comando terminado, troca de modelo e esforço, busca na conversa e entre conversas; medição da memória dos waiters e da CPU do hub.
 - PWA: o Chrome oferece "Instalar app" sem service worker (confirmado em 2026-11-24).
 - Push da `main` para o origin (até a 0.4.10; os commits da 0.5.0 e da 0.5.1 ainda não foram enviados, a pedido do autor).
 

@@ -2,9 +2,9 @@ import { createRequire as __acc_createRequire } from 'node:module';
 const require = __acc_createRequire(import.meta.url);
 
 // src/hub/main.ts
-import fs14 from "node:fs/promises";
+import fs15 from "node:fs/promises";
 import fsSync from "node:fs";
-import path13 from "node:path";
+import path14 from "node:path";
 import crypto10 from "node:crypto";
 import { fileURLToPath } from "node:url";
 
@@ -745,7 +745,7 @@ async function cleanupAttachments(alive, now = Date.now(), maxAgeMs = ATTACHMENT
 }
 
 // src/core/version.ts
-var VERSION = "0.5.1";
+var VERSION = "0.6.0";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -1325,8 +1325,8 @@ var TranscriptParser = class {
 // src/hub/transcript/reader.ts
 var CHUNK = 64 * 1024;
 var TranscriptReader = class {
-  constructor(path14, keys) {
-    this.path = path14;
+  constructor(path15, keys) {
+    this.path = path15;
     this.keys = keys;
     this.parser = new TranscriptParser(keys);
   }
@@ -1460,13 +1460,12 @@ function configDirFor(configDir, home = os4.homedir(), platform = process.platfo
 }
 var RESUME_TIMEOUT_MS = 6e4;
 var MAX_ERROR = 500;
-async function resumeInBackground(reg, deps = {}) {
-  assertSessionId(reg.sessionId);
+function runBg(args, cwd, configDir, deps) {
   const platform = deps.platform ?? process.platform;
   const win = platform === "win32";
   const spawn = deps.spawn ?? nodeSpawn;
-  const cmd = win ? `claude --bg --resume ${reg.sessionId} ${RESUME_PROMPT}` : "claude";
-  const args = win ? [] : ["--bg", "--resume", reg.sessionId, RESUME_PROMPT];
+  const cmd = win ? ["claude", "--bg", ...args.map(winQuote)].join(" ") : "claude";
+  const argv = win ? [] : ["--bg", ...args];
   return new Promise((resolve) => {
     let out = "";
     let done = false;
@@ -1478,9 +1477,9 @@ async function resumeInBackground(reg, deps = {}) {
     };
     let child;
     try {
-      child = spawn(cmd, args, {
-        cwd: reg.cwd,
-        env: cleanEnv(deps.env ?? process.env, configDirFor(reg.configDir, deps.home, platform)),
+      child = spawn(cmd, argv, {
+        cwd,
+        env: cleanEnv(deps.env ?? process.env, configDirFor(configDir, deps.home, platform)),
         shell: win,
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"]
@@ -1499,10 +1498,40 @@ async function resumeInBackground(reg, deps = {}) {
     child.stderr?.on("data", collect);
     child.on("error", (e) => finish({ ok: false, error: e.message }));
     child.on("close", (code2) => {
-      if (code2 === 0) return finish({ ok: true });
+      if (code2 === 0) return finish({ ok: true, out: stripAnsi(out) });
       finish({ ok: false, error: stripAnsi(out).trim().slice(0, MAX_ERROR) || `claude exited with code ${code2}` });
     });
   });
+}
+function winQuote(a) {
+  return /^[\w:./-]+$/.test(a) ? a : `"${a}"`;
+}
+async function resumeInBackground(reg, deps = {}) {
+  assertSessionId(reg.sessionId);
+  const r = await runBg(["--resume", reg.sessionId, RESUME_PROMPT], reg.cwd, reg.configDir, deps);
+  return r.ok ? { ok: true } : r;
+}
+var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+var isEffort = (v) => typeof v === "string" && EFFORTS.includes(v);
+var isModel = (v) => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(\[1m\])?$/.test(v);
+var MAX_NAME = 60;
+var isSessionName = (v) => typeof v === "string" && v.length <= MAX_NAME && /^[\p{L}\p{N}][\p{L}\p{N} ._-]*$/u.test(v) && v.trim() === v;
+function bgIdFromOutput(out) {
+  const all = out.match(/\b[0-9a-f]{8}\b/g);
+  return all?.[all.length - 1];
+}
+async function startInBackground(s, deps = {}) {
+  if (s.name !== void 0 && !isSessionName(s.name)) throw new Error("invalid session name");
+  if (s.model !== void 0 && !isModel(s.model)) throw new Error("invalid model");
+  if (s.effort !== void 0 && !isEffort(s.effort)) throw new Error("invalid effort");
+  const args = [
+    ...s.name ? ["-n", s.name] : [],
+    ...s.model ? ["--model", s.model] : [],
+    ...s.effort ? ["--effort", s.effort] : [],
+    RESUME_PROMPT
+  ];
+  const r = await runBg(args, s.cwd, s.configDir, deps);
+  return r.ok ? { ok: true, bgId: bgIdFromOutput(r.out) } : r;
 }
 var stripAnsi = (s) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, "");
 var CommandUnsupportedError = class extends Error {
@@ -2053,8 +2082,8 @@ var ClaudeCodeProvider = class {
 
 // src/hub/server.ts
 import http from "node:http";
-import fs13 from "node:fs/promises";
-import path12 from "node:path";
+import fs14 from "node:fs/promises";
+import path13 from "node:path";
 import crypto9 from "node:crypto";
 
 // src/core/config.ts
@@ -2107,6 +2136,96 @@ function createPairing(now = Date.now) {
       return true;
     }
   };
+}
+
+// src/hub/folders.ts
+import fs13 from "node:fs/promises";
+import path12 from "node:path";
+var MAX_FOLDERS = 50;
+var isDir = async (p) => {
+  try {
+    return (await fs13.stat(p)).isDirectory();
+  } catch {
+    return false;
+  }
+};
+async function knownFolders(regs, live, exists = isDir) {
+  const seen = /* @__PURE__ */ new Map();
+  const add = (cwd, at) => {
+    if (!cwd || !path12.isAbsolute(cwd)) return;
+    const prev = seen.get(cwd);
+    if (!prev || prev < at) seen.set(cwd, at);
+  };
+  for (const r of regs) add(r.cwd, r.disconnectedAt ?? r.connectedAt ?? "");
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  for (const l of live ?? []) add(l.cwd, nowIso);
+  const all = [...seen].map(([cwd, lastUsed]) => ({ cwd, lastUsed })).sort((a, b) => a.lastUsed < b.lastUsed ? 1 : a.lastUsed > b.lastUsed ? -1 : 0);
+  const out = [];
+  for (const f of all) {
+    if (out.length >= MAX_FOLDERS) break;
+    if (await exists(f.cwd)) out.push(f);
+  }
+  return out;
+}
+function configDirOf(regs, cwd) {
+  const inDir = regs.filter((r) => r.cwd === cwd).sort((a, b) => a.connectedAt < b.connectedAt ? 1 : -1);
+  return inDir[0]?.configDir;
+}
+
+// src/shared/search.ts
+var MIN_QUERY = 2;
+var MAX_QUERY = 100;
+function fold(s) {
+  return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+}
+function eventText(e) {
+  switch (e.kind) {
+    case "user":
+    case "assistant":
+    case "agent":
+    case "toAgent":
+      return e.text;
+    default:
+      return null;
+  }
+}
+var matches = (e, q) => {
+  const text = eventText(e);
+  return text !== null && fold(text).includes(fold(q.trim()));
+};
+function snippet(text, q, width = 120) {
+  const flat = text.replace(/\s+/g, " ").trim();
+  const at = fold(flat).indexOf(fold(q.trim()));
+  if (at < 0 || flat.length <= width) return flat.length <= width ? flat : `${flat.slice(0, width)}\u2026`;
+  const start = Math.max(0, at - Math.floor((width - q.length) / 2));
+  const end = Math.min(flat.length, start + width);
+  return `${start > 0 ? "\u2026" : ""}${flat.slice(start, end)}${end < flat.length ? "\u2026" : ""}`;
+}
+
+// src/hub/search.ts
+var MAX_HITS = 50;
+var MAX_PER_SESSION = 5;
+async function searchAll(provider, q) {
+  const { connected } = await provider.listSessions();
+  const hits = [];
+  for (const s of connected) {
+    let events;
+    try {
+      events = await provider.events(s.sessionId);
+    } catch {
+      continue;
+    }
+    let n = 0;
+    for (let i = events.length - 1; i >= 0 && n < MAX_PER_SESSION; i--) {
+      const e = events[i];
+      if (!matches(e, q)) continue;
+      if (e.kind !== "user" && e.kind !== "assistant" && e.kind !== "agent" && e.kind !== "toAgent") continue;
+      hits.push({ sessionId: s.sessionId, name: s.name, eventId: e.id, ts: e.ts, kind: e.kind, snippet: snippet(eventText(e) ?? "", q) });
+      n++;
+    }
+  }
+  hits.sort((a, b) => a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0);
+  return hits.slice(0, MAX_HITS);
 }
 
 // src/hub/server.ts
@@ -2202,6 +2321,8 @@ async function createHub(opts) {
   const listLive = opts.bg?.listLive ?? (() => queryLiveSessions());
   const resume = opts.bg?.resume ?? ((reg) => resumeInBackground(reg));
   const type = opts.bg?.type ?? ((id, text) => typeCommand(id, text));
+  const start = opts.bg?.start ?? ((s) => startInBackground(s));
+  const folders = async () => knownFolders(await listRegistrations(), await listLive(), opts.bg?.folderExists);
   const bgPlatform = opts.bg?.platform ?? process.platform;
   const typing = /* @__PURE__ */ new Set();
   const now = opts.now ?? Date.now;
@@ -2293,15 +2414,15 @@ data: ${JSON.stringify(c)}
       return sendJson(res, 404, { error: "not found" });
     }
     if (rel.includes("\0")) return sendJson(res, 404, { error: "not found" });
-    const root = path12.resolve(staticDir);
-    const target = path12.resolve(root, "." + path12.sep + rel);
-    if (target !== root && !target.startsWith(root + path12.sep)) return sendJson(res, 404, { error: "not found" });
+    const root = path13.resolve(staticDir);
+    const target = path13.resolve(root, "." + path13.sep + rel);
+    if (target !== root && !target.startsWith(root + path13.sep)) return sendJson(res, 404, { error: "not found" });
     const send = async (file) => {
       try {
-        const st = await fs13.stat(file);
+        const st = await fs14.stat(file);
         if (!st.isFile()) return false;
-        const data = await fs13.readFile(file);
-        const ext = path12.extname(file).toLowerCase();
+        const data = await fs14.readFile(file);
+        const ext = path13.extname(file).toLowerCase();
         const type2 = MIME2[ext] ?? "application/octet-stream";
         const headers = { "Content-Type": type2, "Content-Length": data.length };
         if (ext === ".html") headers["Content-Security-Policy"] = CSP;
@@ -2314,12 +2435,12 @@ data: ${JSON.stringify(c)}
     };
     let rootExists = true;
     try {
-      rootExists = (await fs13.stat(root)).isDirectory();
+      rootExists = (await fs14.stat(root)).isDirectory();
     } catch {
       rootExists = false;
     }
     const accepts = String(req.headers.accept ?? "").includes("text/html");
-    const spaEligible = req.method === "GET" && accepts && path12.extname(pathname) === "";
+    const spaEligible = req.method === "GET" && accepts && path13.extname(pathname) === "";
     const isRoot = pathname === "/";
     if (!rootExists) {
       if (isRoot || spaEligible) {
@@ -2330,7 +2451,7 @@ data: ${JSON.stringify(c)}
     }
     if (target !== root && await send(target)) return;
     if (isRoot || spaEligible) {
-      if (await send(path12.join(root, "index.html"))) return;
+      if (await send(path13.join(root, "index.html"))) return;
     }
     sendJson(res, 404, { error: "not found" });
   };
@@ -2396,6 +2517,36 @@ data: ${JSON.stringify(c)}
       return sendJson(res, 200, { focus });
     }
     if (p === "/api/sessions" && method === "GET") return sendJson(res, 200, await provider.listSessions());
+    if (p === "/api/folders" && method === "GET") return sendJson(res, 200, { folders: await folders() });
+    if (p === "/api/search" && method === "GET") {
+      const q = (url.searchParams.get("q") ?? "").trim();
+      if (q.length < MIN_QUERY || q.length > MAX_QUERY) throw new HttpError(400, "invalid query");
+      return sendJson(res, 200, { hits: await searchAll(provider, q) });
+    }
+    if (p === "/api/sessions" && method === "POST") {
+      const body2 = await readJsonBody(req);
+      if (!body2 || typeof body2 !== "object" || Array.isArray(body2)) throw new HttpError(400, "invalid body");
+      const { cwd, name, model, effort } = body2;
+      const opt = (v) => v === void 0 || v === null || v === "";
+      if (typeof cwd !== "string") throw new HttpError(400, "invalid folder");
+      if (!opt(name) && !isSessionName(name)) throw new HttpError(400, "invalid name");
+      if (!opt(model) && !isModel(model)) throw new HttpError(400, "invalid model");
+      if (!opt(effort) && !isEffort(effort)) throw new HttpError(400, "invalid effort");
+      if (!(await folders()).some((f) => f.cwd === cwd)) throw new HttpError(400, "unknown folder");
+      const r = await start({
+        cwd,
+        name: opt(name) ? void 0 : name,
+        model: opt(model) ? void 0 : model,
+        effort: opt(effort) ? void 0 : effort,
+        configDir: configDirOf(await listRegistrations(), cwd)
+      });
+      if (!r.ok) {
+        log(`new session in ${cwd} failed: ${r.error}`);
+        return sendJson(res, 502, { error: r.error });
+      }
+      fanOut({ type: "sessions" });
+      return sendJson(res, 201, { ok: true, bgId: r.bgId });
+    }
     if (p === "/api/config" && method === "GET") return sendJson(res, 200, await loadConfig());
     if (p === "/api/config" && method === "PUT") {
       const body2 = await readJsonBody(req);
@@ -2461,7 +2612,7 @@ data: ${JSON.stringify(c)}
         if (!reg) throw new HttpError(404, "no such session");
         await setDisplayName(sid, name);
         let shown = name;
-        if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path12.basename(reg.cwd);
+        if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path13.basename(reg.cwd);
         return sendJson(res, 200, { name: shown });
       }
       if (m[2] === "pin" && method === "PUT") {
@@ -2681,7 +2832,7 @@ async function holdsHub(r, now = Date.now()) {
   if (r.pid !== null) return isAlive(r.pid);
   let last = Date.parse(r.connectedAt) || 0;
   try {
-    last = Math.max(last, (await fs14.stat(r.transcriptPath)).mtimeMs);
+    last = Math.max(last, (await fs15.stat(r.transcriptPath)).mtimeMs);
   } catch {
   }
   return now - last < UNKNOWN_PID_HOLD_MS;
@@ -2696,20 +2847,20 @@ async function prune(log) {
 }
 async function rotateToken() {
   const file = paths().token;
-  await ensureDir(path13.dirname(file));
+  await ensureDir(path14.dirname(file));
   const t = crypto10.randomBytes(32).toString("hex");
   await writeFileAtomic600(file, t);
-  await fs14.chmod(file, 384).catch(() => {
+  await fs15.chmod(file, 384).catch(() => {
   });
   return t;
 }
 async function writeFileAtomic600(file, data) {
   const tmp = `${file}.${process.pid}.${crypto10.randomUUID()}.tmp`;
   try {
-    await fs14.writeFile(tmp, data, { mode: 384 });
-    await withFsRetry(() => fs14.rename(tmp, file));
+    await fs15.writeFile(tmp, data, { mode: 384 });
+    await withFsRetry(() => fs15.rename(tmp, file));
   } catch (e) {
-    await fs14.rm(tmp, { force: true });
+    await fs15.rm(tmp, { force: true });
     throw e;
   }
 }
@@ -2719,7 +2870,7 @@ async function liveHubExists(self) {
   if (self && info.port === self.port) return false;
   let token;
   try {
-    token = (await fs14.readFile(paths().token, "utf8")).trim();
+    token = (await fs15.readFile(paths().token, "utf8")).trim();
   } catch {
     return false;
   }
@@ -2752,7 +2903,7 @@ async function acquireHubLock(lock) {
 async function startHub(opts = {}) {
   const logDir = paths().logDir;
   await ensureDir(logDir);
-  const logFile = path13.join(logDir, "hub.log");
+  const logFile = path14.join(logDir, "hub.log");
   let secret = "";
   const log = (msg) => {
     try {
@@ -2767,7 +2918,7 @@ async function startHub(opts = {}) {
     return null;
   };
   if (await liveHubExists()) return deferred("before the lock");
-  const lock = path13.join(paths().home, "hub.lock");
+  const lock = path14.join(paths().home, "hub.lock");
   const locked2 = await acquireHubLock(lock);
   let hub;
   try {
@@ -2776,7 +2927,7 @@ async function startHub(opts = {}) {
     secret = token;
     const base = pickPort();
     const tries = base === 0 ? 1 : 11;
-    const staticDir = path13.join(path13.dirname(fileURLToPath(import.meta.url)), "ui");
+    const staticDir = path14.join(path14.dirname(fileURLToPath(import.meta.url)), "ui");
     const provider = opts.listLive ? new ClaudeCodeProvider(opts.listLive) : new ClaudeCodeProvider();
     let lastErr;
     for (let i = 0; i < tries && !hub; i++) {
@@ -2867,7 +3018,7 @@ async function startHub(opts = {}) {
         clearInterval(ownTimer);
         await started.close();
         const cur = await readJson(paths().hubJson);
-        if (cur?.pid === process.pid && cur?.port === port) await fs14.rm(paths().hubJson, { force: true });
+        if (cur?.pid === process.pid && cur?.port === port) await fs15.rm(paths().hubJson, { force: true });
         log("hub stopped");
       }
     };
