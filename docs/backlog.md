@@ -47,6 +47,16 @@ Pedido em 2026-11-25 (print do autor). No "+", o campo "Pasta" é uma lista só 
 - Pasta nunca aberta no Claude Code: confirmar como o `claude --bg` se comporta com o aviso de confiança da pasta ("Do you trust the files in this folder?"). A 0.5.0 já teve o erro "Workspace not trusted". Se ele travar, o app precisa avisar antes ou oferecer a confiança de forma explícita.
 - Talvez: criar uma pasta nova ali mesmo.
 
+### Abrir um terminal da conversa pelo app
+
+Pedido em 2026-11-25. Na conversa, um botão "Abrir no terminal" para quando o terminal foi fechado ou a sessão nasceu pelo app (+) e é preciso algo que o app ainda não faz (responder uma permissão, um diálogo, um comando interativo). Parece possível:
+
+- Sessão em segundo plano (`bgId`): o hub abre o terminal do sistema rodando `claude attach <id>`. A sessão continua a mesma, e fechar o terminal não a encerra.
+- Sessão encerrada: abrir com `claude --resume <id>` (ou retomar em segundo plano e dar attach, como o Retomar já faz).
+- Sessão de terminal comum ainda aberta: já tem terminal; o botão não aparece (ou só avisa).
+- Qual terminal: Linux `x-terminal-emulator`, `gnome-terminal`, `konsole` e outros, na pasta da sessão; macOS o Terminal.app (`open -a Terminal` com um script `.command`, ou `osascript`); Windows o Windows Terminal (`wt`) ou o `cmd`. Sem shell montado com texto do usuário: o id vem do hub e é validado.
+- A confirmar: se dois `claude attach` na mesma sessão convivem (o do terminal e o que o hub usa para mandar comandos `/…`).
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
