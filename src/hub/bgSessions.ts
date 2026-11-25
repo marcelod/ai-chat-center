@@ -4,6 +4,7 @@
 // here: their output is not a stable API, so any surprise ends in an error, never in something stuck.
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import os from 'node:os';
+import path from 'node:path';
 import type { Registration } from '../core/registry.js';
 import { assertSessionId } from '../core/paths.js';
 
@@ -28,7 +29,8 @@ export const RESUME_PROMPT = '/ai-chat-center:cc';
 /**
  * The environment for a `claude` started by the hub: without the variables of the session that started the
  * hub (CLAUDECODE, CLAUDE_CODE_*, CLAUDE_PID, CLAUDE_EFFORT). Inherited, they make the new claude a child
- * session that writes no transcript (issue #2). CLAUDE_CONFIG_DIR is the session's own.
+ * session that writes no transcript (issue #2). CLAUDE_CONFIG_DIR is set only for a session that ran with a
+ * custom one (see configDirFor).
  */
 export function cleanEnv(env: NodeJS.ProcessEnv, configDir?: string): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
@@ -40,10 +42,26 @@ export function cleanEnv(env: NodeJS.ProcessEnv, configDir?: string): NodeJS.Pro
   return out;
 }
 
+/**
+ * The CLAUDE_CONFIG_DIR to pass for a session, or undefined for the default ~/.claude. Never pass the default
+ * explicitly: with CLAUDE_CONFIG_DIR set, Claude Code reads its global config (folder trust included) from
+ * <dir>/.claude.json instead of ~/.claude.json, and `claude --bg` then refuses every folder as not trusted
+ * (seen live with 0.5.0).
+ */
+export function configDirFor(configDir: string | undefined, home: string = os.homedir(), platform: NodeJS.Platform = process.platform): string | undefined {
+  if (!configDir) return undefined;
+  const a = path.resolve(configDir);
+  const b = path.resolve(home, '.claude');
+  const same = platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+  return same ? undefined : configDir;
+}
+
 export interface BgDeps {
   spawn?: Spawn;
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
+  /** The home folder (default os.homedir()), for configDirFor. */
+  home?: string;
 }
 
 export type ResumeResult = { ok: true } | { ok: false; error: string };
@@ -78,7 +96,7 @@ export async function resumeInBackground(reg: Registration, deps: BgDeps = {}): 
     try {
       child = spawn(cmd, args, {
         cwd: reg.cwd,
-        env: cleanEnv(deps.env ?? process.env, reg.configDir),
+        env: cleanEnv(deps.env ?? process.env, configDirFor(reg.configDir, deps.home, platform)),
         shell: win,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],

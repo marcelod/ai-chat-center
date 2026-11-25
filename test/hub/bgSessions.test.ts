@@ -4,6 +4,7 @@ import { PassThrough } from 'node:stream';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import {
   cleanEnv,
+  configDirFor,
   CommandUnsupportedError,
   isBgId,
   isValidCommand,
@@ -79,13 +80,24 @@ describe('cleanEnv', () => {
 describe('resumeInBackground', () => {
   it('runs claude --bg --resume <sid> /ai-chat-center:cc in the session folder, without the shell', async () => {
     const r = recorder((c) => c.emit('close', 0));
-    expect(await resumeInBackground(reg(), { spawn: r.spawn, platform: 'linux', env: { PATH: '/bin', CLAUDECODE: '1' } })).toEqual({ ok: true });
+    expect(await resumeInBackground(reg(), { spawn: r.spawn, platform: 'linux', env: { PATH: '/bin', CLAUDECODE: '1' }, home: '/home/u' })).toEqual({ ok: true });
     const [call] = r.calls;
     expect(call.cmd).toBe('claude');
     expect(call.args).toEqual(['--bg', '--resume', SID, RESUME_PROMPT]);
     expect(call.opts.cwd).toBe('/home/u/proj');
     expect(call.opts.shell).toBe(false);
-    expect(call.opts.env).toEqual({ PATH: '/bin', CLAUDE_CONFIG_DIR: '/home/u/.claude' });
+    // The default config dir is never passed: Claude Code would then read folder trust from the wrong file.
+    expect(call.opts.env).toEqual({ PATH: '/bin' });
+  });
+
+  it('passes a custom CLAUDE_CONFIG_DIR, never the default one', async () => {
+    expect(configDirFor('/home/u/.claude', '/home/u', 'linux')).toBeUndefined();
+    expect(configDirFor('/home/u/.claude/', '/home/u', 'linux')).toBeUndefined();
+    expect(configDirFor(undefined, '/home/u', 'linux')).toBeUndefined();
+    expect(configDirFor('/home/u/.claude-work', '/home/u', 'linux')).toBe('/home/u/.claude-work');
+    const r = recorder((c) => c.emit('close', 0));
+    await resumeInBackground(reg({ configDir: '/home/u/.claude-work' }), { spawn: r.spawn, platform: 'linux', env: { PATH: '/bin' }, home: '/home/u' });
+    expect(r.calls[0].opts.env).toEqual({ PATH: '/bin', CLAUDE_CONFIG_DIR: '/home/u/.claude-work' });
   });
 
   it('Windows: one command line through the shell (claude is a .cmd shim)', async () => {

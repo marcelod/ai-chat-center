@@ -4,7 +4,7 @@ const require = __acc_createRequire(import.meta.url);
 // src/hub/main.ts
 import fs14 from "node:fs/promises";
 import fsSync from "node:fs";
-import path12 from "node:path";
+import path13 from "node:path";
 import crypto10 from "node:crypto";
 import { fileURLToPath } from "node:url";
 
@@ -320,7 +320,7 @@ async function clearBackground(sid) {
 
 // src/hub/provider.ts
 import fs12 from "node:fs/promises";
-import path10 from "node:path";
+import path11 from "node:path";
 
 // src/core/registry.ts
 import fs9 from "node:fs/promises";
@@ -745,7 +745,7 @@ async function cleanupAttachments(alive, now = Date.now(), maxAgeMs = ATTACHMENT
 }
 
 // src/core/version.ts
-var VERSION = "0.5.0";
+var VERSION = "0.5.1";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -1325,8 +1325,8 @@ var TranscriptParser = class {
 // src/hub/transcript/reader.ts
 var CHUNK = 64 * 1024;
 var TranscriptReader = class {
-  constructor(path13, keys) {
-    this.path = path13;
+  constructor(path14, keys) {
+    this.path = path14;
     this.keys = keys;
     this.parser = new TranscriptParser(keys);
   }
@@ -1432,6 +1432,7 @@ function runClaudeAgentsJson(platform = process.platform) {
 // src/hub/bgSessions.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import os4 from "node:os";
+import path10 from "node:path";
 var BG_ID_RE = /^[0-9a-f]{8}$/;
 var isBgId = (id) => typeof id === "string" && BG_ID_RE.test(id);
 var MAX_COMMAND = 200;
@@ -1449,6 +1450,13 @@ function cleanEnv(env, configDir) {
   }
   if (configDir) out.CLAUDE_CONFIG_DIR = configDir;
   return out;
+}
+function configDirFor(configDir, home = os4.homedir(), platform = process.platform) {
+  if (!configDir) return void 0;
+  const a = path10.resolve(configDir);
+  const b = path10.resolve(home, ".claude");
+  const same = platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+  return same ? void 0 : configDir;
 }
 var RESUME_TIMEOUT_MS = 6e4;
 var MAX_ERROR = 500;
@@ -1472,7 +1480,7 @@ async function resumeInBackground(reg, deps = {}) {
     try {
       child = spawn(cmd, args, {
         cwd: reg.cwd,
-        env: cleanEnv(deps.env ?? process.env, reg.configDir),
+        env: cleanEnv(deps.env ?? process.env, configDirFor(reg.configDir, deps.home, platform)),
         shell: win,
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"]
@@ -1907,7 +1915,7 @@ var ClaudeCodeProvider = class {
       if (!disconnected && live.ok && l?.status === "idle") await this.dropStaleBusy(sid);
       const cwd = l?.cwd ?? reg.cwd;
       const queued = disconnected ? [] : await peek(sid);
-      const originalName = l?.name || path10.basename(cwd);
+      const originalName = l?.name || path11.basename(cwd);
       const custom = await getDisplayName(sid);
       const view = {
         sessionId: sid,
@@ -2034,7 +2042,7 @@ var ClaudeCodeProvider = class {
     if (!again || !isActive(again)) {
       const dir = paths().inboxDir(sid);
       try {
-        for (const n of await fs12.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs12.rm(path10.join(dir, n), { force: true });
+        for (const n of await fs12.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs12.rm(path11.join(dir, n), { force: true });
       } catch {
       }
       throw new SessionDisconnectedError(sid);
@@ -2046,7 +2054,7 @@ var ClaudeCodeProvider = class {
 // src/hub/server.ts
 import http from "node:http";
 import fs13 from "node:fs/promises";
-import path11 from "node:path";
+import path12 from "node:path";
 import crypto9 from "node:crypto";
 
 // src/core/config.ts
@@ -2285,15 +2293,15 @@ data: ${JSON.stringify(c)}
       return sendJson(res, 404, { error: "not found" });
     }
     if (rel.includes("\0")) return sendJson(res, 404, { error: "not found" });
-    const root = path11.resolve(staticDir);
-    const target = path11.resolve(root, "." + path11.sep + rel);
-    if (target !== root && !target.startsWith(root + path11.sep)) return sendJson(res, 404, { error: "not found" });
+    const root = path12.resolve(staticDir);
+    const target = path12.resolve(root, "." + path12.sep + rel);
+    if (target !== root && !target.startsWith(root + path12.sep)) return sendJson(res, 404, { error: "not found" });
     const send = async (file) => {
       try {
         const st = await fs13.stat(file);
         if (!st.isFile()) return false;
         const data = await fs13.readFile(file);
-        const ext = path11.extname(file).toLowerCase();
+        const ext = path12.extname(file).toLowerCase();
         const type2 = MIME2[ext] ?? "application/octet-stream";
         const headers = { "Content-Type": type2, "Content-Length": data.length };
         if (ext === ".html") headers["Content-Security-Policy"] = CSP;
@@ -2311,7 +2319,7 @@ data: ${JSON.stringify(c)}
       rootExists = false;
     }
     const accepts = String(req.headers.accept ?? "").includes("text/html");
-    const spaEligible = req.method === "GET" && accepts && path11.extname(pathname) === "";
+    const spaEligible = req.method === "GET" && accepts && path12.extname(pathname) === "";
     const isRoot = pathname === "/";
     if (!rootExists) {
       if (isRoot || spaEligible) {
@@ -2322,7 +2330,7 @@ data: ${JSON.stringify(c)}
     }
     if (target !== root && await send(target)) return;
     if (isRoot || spaEligible) {
-      if (await send(path11.join(root, "index.html"))) return;
+      if (await send(path12.join(root, "index.html"))) return;
     }
     sendJson(res, 404, { error: "not found" });
   };
@@ -2453,7 +2461,7 @@ data: ${JSON.stringify(c)}
         if (!reg) throw new HttpError(404, "no such session");
         await setDisplayName(sid, name);
         let shown = name;
-        if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path11.basename(reg.cwd);
+        if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path12.basename(reg.cwd);
         return sendJson(res, 200, { name: shown });
       }
       if (m[2] === "pin" && method === "PUT") {
@@ -2688,7 +2696,7 @@ async function prune(log) {
 }
 async function rotateToken() {
   const file = paths().token;
-  await ensureDir(path12.dirname(file));
+  await ensureDir(path13.dirname(file));
   const t = crypto10.randomBytes(32).toString("hex");
   await writeFileAtomic600(file, t);
   await fs14.chmod(file, 384).catch(() => {
@@ -2744,7 +2752,7 @@ async function acquireHubLock(lock) {
 async function startHub(opts = {}) {
   const logDir = paths().logDir;
   await ensureDir(logDir);
-  const logFile = path12.join(logDir, "hub.log");
+  const logFile = path13.join(logDir, "hub.log");
   let secret = "";
   const log = (msg) => {
     try {
@@ -2759,7 +2767,7 @@ async function startHub(opts = {}) {
     return null;
   };
   if (await liveHubExists()) return deferred("before the lock");
-  const lock = path12.join(paths().home, "hub.lock");
+  const lock = path13.join(paths().home, "hub.lock");
   const locked2 = await acquireHubLock(lock);
   let hub;
   try {
@@ -2768,7 +2776,7 @@ async function startHub(opts = {}) {
     secret = token;
     const base = pickPort();
     const tries = base === 0 ? 1 : 11;
-    const staticDir = path12.join(path12.dirname(fileURLToPath(import.meta.url)), "ui");
+    const staticDir = path13.join(path13.dirname(fileURLToPath(import.meta.url)), "ui");
     const provider = opts.listLive ? new ClaudeCodeProvider(opts.listLive) : new ClaudeCodeProvider();
     let lastErr;
     for (let i = 0; i < tries && !hub; i++) {
