@@ -38,6 +38,15 @@ Pedido em 2026-11-25 (era a ideia 12). O Claude Code sugere às vezes a próxima
 
 Visto em 2026-11-25 (print do autor): no topo da lista de conversas, ao lado do logo (`ui/src/components/Logo.tsx`) e dos botões +, configurações e recolher, o título aparece como "AI Chat" numa linha e "Center" na outra. Ajustar para ficar numa linha só (por exemplo `white-space: nowrap`, fonte um pouco menor ou menos espaço entre os botões); se não couber em listas estreitas, cortar com reticências em vez de quebrar.
 
+### Nova sessão em qualquer pasta
+
+Pedido em 2026-11-25 (print do autor). No "+", o campo "Pasta" é uma lista só com as pastas já usadas em alguma sessão. Para abrir um projeto novo, a pessoa precisa abrir um terminal antes, o que vai contra a ideia de usar só o app. Ideia: permitir escolher qualquer pasta do computador.
+
+- O seletor de pastas do navegador (`showDirectoryPicker`) não serve: ele não entrega o caminho completo, e o Safari e o Firefox não têm. O caminho viável é um navegador de pastas no próprio app, com o hub listando as subpastas (só pastas, sem arquivos), a partir da pasta pessoal, com "subir" e "entrar". Também aceitar digitar ou colar um caminho.
+- Segurança: rota do hub com o mesmo token das outras; limitar à pasta pessoal; não seguir links simbólicos para fora dela; esconder pastas ocultas por padrão.
+- Pasta nunca aberta no Claude Code: confirmar como o `claude --bg` se comporta com o aviso de confiança da pasta ("Do you trust the files in this folder?"). A 0.5.0 já teve o erro "Workspace not trusted". Se ele travar, o app precisa avisar antes ou oferecer a confiança de forma explícita.
+- Talvez: criar uma pasta nova ali mesmo.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
