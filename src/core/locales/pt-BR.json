@@ -167,6 +167,8 @@
       "image": "[imagem]",
       "images": "[{n} imagens]",
       "compacted": "Conversa compactada · {time}",
+      "commandRunning": "{cmd} rodando…",
+      "commandDone": "{cmd} terminou · {time}",
       "attachments": "Arquivos anexados",
       "resume": {"title": "Sessão encerrada", "body": "Retome-a em segundo plano: ela volta conectada ao app, sem abrir terminal.", "button": "Retomar em segundo plano", "resuming": "Retomando…", "failed": "Não foi possível retomar: {error}", "running": "Esta sessão ainda está aberta num terminal. Digite /cc nela para reconectar.", "error": "Não foi possível retomar a sessão."},
       "attach": "Abrir no terminal",

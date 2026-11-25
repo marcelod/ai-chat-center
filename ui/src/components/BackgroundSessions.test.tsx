@@ -88,7 +88,9 @@ describe('slash commands in the composer', () => {
     await user.type(screen.getByRole('textbox'), '/compact{Enter}');
     expect(onCommand).toHaveBeenCalledWith('/compact');
     expect(onSend).not.toHaveBeenCalled();
-    expect((await screen.findByRole('status')).textContent).toContain('/compact');
+    expect((await screen.findByText(/Command \/compact sent/)).textContent).toContain('/compact');
+    // ...and the conversation follows it until it ends (useCommandProgress).
+    expect(screen.getByTestId('command-progress').textContent).toContain('/compact is running');
   });
 
   it('background session: plain text and paths still go to onSend', async () => {

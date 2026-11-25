@@ -11,6 +11,7 @@ import { ChatMenu } from './ChatMenu';
 import type { BackgroundPreset } from '@shared/background';
 import { BackgroundPicker } from './BackgroundPicker';
 import { ChatBackground } from './ChatBackground';
+import { useCommandProgress } from '../useCommandProgress';
 import { AgentBubble, AssistantBubble, ToAgentBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
 
 type Props = {
@@ -346,13 +347,21 @@ export function ChatView({ session, events, pending, loading, onSend, onUpload, 
     setOverride((o) => (o && o.base !== session.name ? null : o));
   }, [session.name]);
 
+  const progress = useCommandProgress(session, events);
+  const runCommand = onCommand
+    ? async (text: string) => {
+        await onCommand(text);
+        progress.started(text);
+      }
+    : undefined;
+
   const reconciled = new Set(events.flatMap((e) => (e.kind === 'user' && e.appMessageId ? [e.appMessageId] : [])));
   const queued = pending.filter((m) => !reconciled.has(m.id));
 
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [events, queued.length, state, loading]);
+  }, [events, queued.length, state, loading, progress.run]);
 
   const onScroll = () => {
     const el = scroller.current;
@@ -469,6 +478,13 @@ export function ChatView({ session, events, pending, loading, onSend, onUpload, 
             <QueuedBubble key={m.id} text={m.text} />
           ),
         )}
+        {progress.run && (
+          <p data-testid="command-progress" role="status" className="self-center rounded-full bg-field px-3 py-1 text-xs text-muted">
+            {progress.run.doneAt
+              ? `✓ ${t('ui.chat.commandDone', { cmd: progress.run.cmd, time: formatTime(new Date(progress.run.doneAt).toISOString(), lang, t) })}`
+              : `⏳ ${t('ui.chat.commandRunning', { cmd: progress.run.cmd })}`}
+          </p>
+        )}
         {state === 'busy' && <Typing />}
         {session.deliveryStalled && state === 'idle' && (
           <div
@@ -529,7 +545,7 @@ export function ChatView({ session, events, pending, loading, onSend, onUpload, 
 
       <Composer key={session.sessionId} sessionId={session.sessionId} name={session.name} disabled={state === 'disconnected'}
         blockedByQuestion={Boolean(session.pendingQuestion)} onSend={onSend} onUpload={onUpload}
-        onCommand={session.bgId && state !== 'disconnected' ? onCommand : undefined} attachId={session.bgId} />
+        onCommand={session.bgId && state !== 'disconnected' ? runCommand : undefined} attachId={session.bgId} />
     </section>
   );
 }

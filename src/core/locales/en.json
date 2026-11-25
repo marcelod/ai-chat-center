@@ -167,6 +167,8 @@
       "image": "[image]",
       "images": "[{n} images]",
       "compacted": "Conversation compacted · {time}",
+      "commandRunning": "{cmd} is running…",
+      "commandDone": "{cmd} finished · {time}",
       "attachments": "Attached files",
       "resume": {"title": "Session ended", "body": "Resume it in the background: it comes back connected to the app, with no terminal.", "button": "Resume in the background", "resuming": "Resuming…", "failed": "Could not resume: {error}", "running": "This session is still open in a terminal. Type /cc there to reconnect.", "error": "Could not resume the session."},
       "attach": "Open in a terminal",
