@@ -68,24 +68,37 @@ function setup(
 }
 
 describe('ChatView', () => {
-  it("an agent's message is on Claude's side, labelled with the agent, never as the user's", () => {
-    const { container } = setup({ events: [{ kind: 'agent', id: 'g1', ts: ts(1), from: 'dev-c2-frontend', text: 'Os **dois** ajustes' }] });
+  it("an agent's message is on Claude's side, labelled with the agent, collapsed to its first line until expanded", async () => {
+    const text = '## Os **dois** ajustes\n\nDetalhe que só aparece aberto';
+    const { container } = setup({ events: [{ kind: 'agent', id: 'g1', ts: ts(1), from: 'dev-c2-frontend', text }] });
     const b = container.querySelector('[data-bubble="agent"]') as HTMLElement;
     expect(b).not.toBeNull();
     expect(within(b).getByText('Agent dev-c2-frontend')).toBeTruthy();
-    expect(within(b).getByText('dois').tagName).toBe('STRONG');
     expect(container.querySelector('[data-bubble="user"]')).toBeNull();
     expect(within(b).getByText('DC', { selector: '[data-avatar]' })).toBeTruthy();
+    expect(within(b).getByTestId('agent-preview')).toHaveTextContent('Os dois ajustes');
+    expect(b.textContent).not.toContain('Detalhe que só aparece aberto');
+    await userEvent.click(within(b).getByRole('button', { name: 'Show all' }));
+    expect(within(b).getByText('dois').tagName).toBe('STRONG');
+    expect(b.textContent).toContain('Detalhe que só aparece aberto');
+    expect(within(b).getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe('true');
   });
-  it("Claude's message to an agent shows who it is for, clamped with a toggle", async () => {
-    const long = 'Fix the casing. '.repeat(40);
+  it("Claude's message to an agent shows who it is for, collapsed to its first line with a toggle", async () => {
+    const long = 'Fix the casing.\n' + 'More detail. '.repeat(40);
     const { container } = setup({ events: [{ kind: 'toAgent', id: 'm1', ts: ts(1), to: 'dev-c2-frontend', text: long }] });
     const b = container.querySelector('[data-bubble="toAgent"]') as HTMLElement;
     expect(within(b).getByText('dev-c2-frontend')).toBeTruthy();
-    expect(b.textContent).not.toContain(long.trim());
+    expect(within(b).getByTestId('agent-preview')).toHaveTextContent('Fix the casing.');
+    expect(b.textContent).not.toContain('More detail.');
     await userEvent.click(within(b).getByRole('button', { name: 'Show all' }));
-    expect(b.textContent).toContain(long.trim());
+    expect(b.textContent).toContain('More detail. More detail.');
     expect(within(b).getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe('true');
+  });
+  it('a one-line agent message has nothing to expand', () => {
+    const { container } = setup({ events: [{ kind: 'agent', id: 'g2', ts: ts(1), from: 'x', text: 'Feito.' }] });
+    const b = container.querySelector('[data-bubble="agent"]') as HTMLElement;
+    expect(b.textContent).toContain('Feito.');
+    expect(within(b).queryByRole('button')).toBeNull();
   });
 
   it('header shows cwd, branch, model and effort, each with a label', () => {

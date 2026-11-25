@@ -136,6 +136,41 @@ function MarkdownText({ text }: { text: string }) {
   );
 }
 
+/** The first line with text, without Markdown marks, for the collapsed preview of an agent message. */
+export function firstLine(text: string, max = 160): string {
+  const line = text.split('\n').map((l) => l.trim()).find((l) => l.length > 0) ?? '';
+  const plain = line
+    .replace(/^(#{1,6}\s+|[-*+]\s+|>\s*|\d+\.\s+)/, '')
+    .replace(/[*_`~]+/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .trim();
+  return plain.length > max ? `${plain.slice(0, max).trimEnd()}…` : plain;
+}
+
+/** Agent traffic is mostly for Claude: it comes collapsed to its first line, with a toggle to read it all. */
+function Collapsible({ text }: { text: string }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const preview = firstLine(text);
+  const hasMore = text.trim() !== preview;
+  return (
+    <>
+      {open || !hasMore ? (
+        <MarkdownText text={text} />
+      ) : (
+        <p data-testid="agent-preview" className="truncate">
+          {preview}
+        </p>
+      )}
+      {hasMore && (
+        <button type="button" className="mt-1 text-xs font-semibold underline" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          {open ? t('ui.chat.showLess') : t('ui.chat.showAll')}
+        </button>
+      )}
+    </>
+  );
+}
+
 /** A teammate's or subagent's message: on the Claude side, with the agent's avatar and name. */
 export function AgentBubble({ event }: { event: Agent }) {
   const t = useT();
@@ -147,37 +182,27 @@ export function AgentBubble({ event }: { event: Agent }) {
         <p className="mb-1 text-xs font-semibold" style={{ color: agentIdentity(name).color }}>
           {event.from ? t('ui.chat.agentFrom', { name: event.from }) : t('ui.chat.agent')}
         </p>
-        <MarkdownText text={event.text} />
+        <Collapsible text={event.text} />
       </div>
     </div>
   );
 }
 
-const CLAMP = 280;
-
-/** What Claude asked an agent: "Claude → name", the request clamped with a toggle to read it all. */
+/** What Claude asked an agent: "Claude → name", collapsed to its first line with a toggle to read it all. */
 export function ToAgentBubble({ event }: { event: ToAgent }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
-  const long = event.text.length > CLAMP;
-  const shown = open || !long ? event.text : `${event.text.slice(0, CLAMP).trimEnd()}…`;
   const name = event.to || t('ui.chat.agent');
   return (
     <div
       data-bubble="toAgent"
-      className="md max-w-[min(100%,720px)] self-start break-words rounded-[14px_14px_14px_4px] border border-dashed border-line px-3.5 py-2 text-sm leading-relaxed text-muted"
+      className="md min-w-0 max-w-[min(100%,720px)] self-start break-words rounded-[14px_14px_14px_4px] border border-dashed border-line px-3.5 py-2 text-sm leading-relaxed text-muted"
     >
       <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold">
         <span>{t('ui.chat.toAgent')}</span>
         <AgentAvatarSmall name={name} />
         <span style={{ color: agentIdentity(name).color }}>{name}</span>
       </p>
-      <MarkdownText text={shown} />
-      {long && (
-        <button type="button" className="mt-1 text-xs font-semibold underline" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-          {open ? t('ui.chat.showLess') : t('ui.chat.showAll')}
-        </button>
-      )}
+      <Collapsible text={event.text} />
     </div>
   );
 }
