@@ -1,6 +1,6 @@
 # Pendências
 
-Itens combinados e deixados para depois. Estado em 2026-11-25, versão 0.6.1. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
+Itens combinados e deixados para depois. Estado em 2026-11-25, versão 0.6.2. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
 
 ## A fazer
 
@@ -10,52 +10,9 @@ Em avaliação pelo autor (2026-11-24).
 
 No primeiro teste no Windows (2026-11-24), o atalho funcionou, mas a pessoa teve de instalar o Node, ajustar o PATH e fechar todos os VS Code e terminais antes de funcionar. Ideias: o `/cc` dizer claramente quando o Node não está no PATH que o Claude Code vê (e como corrigir); um guia curto de instalação no Windows; avaliar se os hooks podem achar o Node em locais comuns sem depender do PATH.
 
-### Pergunta esperando resposta numa sessão em segundo plano
-
-Visto ao vivo (2026-11-24). Com `answers off`, o diálogo de opções (AskUserQuestion) numa sessão em segundo plano só pode ser respondido no terminal, e não há terminal aberto. O autor teve de abrir um terminal e usar o `/resume`. Ideia: o app avisar "pergunta esperando resposta: use `claude attach <id>` ou ligue as respostas pelo app (`/ai-chat-center:cc answers on`)".
-
-### Recursos de segundo plano visíveis nas sessões de terminal
-
-Pedido em 2026-11-25. A troca de modelo e esforço e a lista de comandos ao digitar `/` só aparecem em sessões em segundo plano (`bgId`), porque o app digita nelas pelo `claude attach`; numa sessão de terminal comum o texto do app chega como hook e o Claude Code não executa `/…`. Quem usa uma sessão de terminal acha que a atualização não carregou. Ideia: mostrar os botões desativados nessas sessões, com a dica "Disponível em sessões em segundo plano: retome a sessão pelo app".
-
-### Mostrar a versão em uso
-
-Pedido em 2026-11-25. Mostrar no app a versão do AI Chat Center que está rodando, por exemplo no menu de configurações ou no rodapé da lista. Dá para fazer:
-
-- Versão do hub (o app): o hub já sabe a dele (`VERSION` em `src/core/version.ts`).
-- Versão de cada sessão: o registro de cada sessão já guarda a versão do plugin que a conectou (`codeStamp`). Serve para ver qual sessão ainda roda uma versão antiga e precisa de `/reload-plugins`.
-- Versão do Claude Code de cada sessão: as linhas da transcrição trazem o campo `version`; daria para mostrar no cabeçalho da conversa (confirmar).
-
-### Recap da conversa
-
-Pedido em 2026-11-25. O Claude Code mostra às vezes um resumo de onde a conversa parou ("recap"), ao voltar depois de um tempo fora. Dá para fazer: ele fica gravado na transcrição como linha `type: "system"`, `subtype: "away_summary"`, com o texto em `content` (conferido: 418 linhas nas transcrições locais). O app pode mostrar essa linha na conversa como um cartão de resumo, diferente das mensagens. Detalhe: o texto termina com "(disable recaps in /config)", que pode ser tirado ou trocado por uma dica do app.
-
 ### Sugestão da próxima mensagem
 
-Pedido em 2026-11-25 (era a ideia 12). O Claude Code sugere às vezes a próxima mensagem, em cinza no campo de texto. Mais difícil que o recap: a sugestão **não** fica na transcrição (só fica `promptSource: "suggestion_accepted"` quando a pessoa aceita). Caminhos a avaliar: ler a sugestão da tela da sessão em segundo plano (`claude logs`, ver a ideia 2) ou pedir sugestões pelo `--prompt-suggestions` nas sessões criadas pelo app (confirmar se essa opção vale fora do modo `-p`). No app, a sugestão apareceria no campo de texto e o Tab aceitaria.
-
-### Título "AI Chat Center" quebrando em duas linhas
-
-Visto em 2026-11-25 (print do autor): no topo da lista de conversas, ao lado do logo (`ui/src/components/Logo.tsx`) e dos botões +, configurações e recolher, o título aparece como "AI Chat" numa linha e "Center" na outra. Ajustar para ficar numa linha só (por exemplo `white-space: nowrap`, fonte um pouco menor ou menos espaço entre os botões); se não couber em listas estreitas, cortar com reticências em vez de quebrar.
-
-### Nova sessão em qualquer pasta
-
-Pedido em 2026-11-25 (print do autor). No "+", o campo "Pasta" é uma lista só com as pastas já usadas em alguma sessão. Para abrir um projeto novo, a pessoa precisa abrir um terminal antes, o que vai contra a ideia de usar só o app. Ideia: permitir escolher qualquer pasta do computador.
-
-- O seletor de pastas do navegador (`showDirectoryPicker`) não serve: ele não entrega o caminho completo, e o Safari e o Firefox não têm. O caminho viável é um navegador de pastas no próprio app, com o hub listando as subpastas (só pastas, sem arquivos), a partir da pasta pessoal, com "subir" e "entrar". Também aceitar digitar ou colar um caminho.
-- Segurança: rota do hub com o mesmo token das outras; limitar à pasta pessoal; não seguir links simbólicos para fora dela; esconder pastas ocultas por padrão.
-- Pasta nunca aberta no Claude Code: confirmar como o `claude --bg` se comporta com o aviso de confiança da pasta ("Do you trust the files in this folder?"). A 0.5.0 já teve o erro "Workspace not trusted". Se ele travar, o app precisa avisar antes ou oferecer a confiança de forma explícita.
-- Talvez: criar uma pasta nova ali mesmo.
-
-### Abrir um terminal da conversa pelo app
-
-Pedido em 2026-11-25. Na conversa, um botão "Abrir no terminal" para quando o terminal foi fechado ou a sessão nasceu pelo app (+) e é preciso algo que o app ainda não faz (responder uma permissão, um diálogo, um comando interativo). Parece possível:
-
-- Sessão em segundo plano (`bgId`): o hub abre o terminal do sistema rodando `claude attach <id>`. A sessão continua a mesma, e fechar o terminal não a encerra.
-- Sessão encerrada: abrir com `claude --resume <id>` (ou retomar em segundo plano e dar attach, como o Retomar já faz).
-- Sessão de terminal comum ainda aberta: já tem terminal; o botão não aparece (ou só avisa).
-- Qual terminal: Linux `x-terminal-emulator`, `gnome-terminal`, `konsole` e outros, na pasta da sessão; macOS o Terminal.app (`open -a Terminal` com um script `.command`, ou `osascript`); Windows o Windows Terminal (`wt`) ou o `cmd`. Sem shell montado com texto do usuário: o id vem do hub e é validado.
-- A confirmar: se dois `claude attach` na mesma sessão convivem (o do terminal e o que o hub usa para mandar comandos `/…`).
+Pedido em 2026-11-25. Investigado na rodada 0.6.2 (Claude Code 2.1.332), **adiado**: a sugestão não fica na transcrição (só `promptSource: "suggestion_accepted"` quando aceita), não fica em `~/.claude` e nenhum hook a entrega. `--prompt-suggestions` só entrega a sugestão no modo `-p`/SDK (`stream-json`), o que exigiria outro modo de sessão (sem `--bg`, `/cc` e attach). Caminho possível depois da ideia 2 (ver a tela da sessão): ler a linha cinza do `claude logs <id>`, com o filtro de token; frágil a cada versão. Bônus barato, se o autor quiser: marcar no app as mensagens com `suggestion_accepted`. Cuidado registrado: `claude --bg --help` cria uma sessão de verdade; para ver a ajuda, use `claude --help`.
 
 ### Entrada por voz
 
@@ -92,7 +49,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 10. **Exportar uma conversa** em Markdown ou PDF.
 11. **Respostas rápidas:** botões com mensagens frequentes ("pode seguir", "faz o commit", "resume o que falta").
 12. **Sugestão da próxima mensagem** (ver "A fazer").
-13. **Diff dos arquivos editados**, com cores, em vez de só "Edit arquivo X".
+13. ✅ 0.6.2 **Diff dos arquivos editados**, com cores, em vez de só "Edit arquivo X".
 14. **Fila de mensagens visível:** ver o que foi mandado com a sessão ocupada, com opção de editar ou cancelar antes de ela ler.
 15. **Agendar uma mensagem:** por exemplo, "às 23:30 manda 'pode começar'".
 
@@ -110,6 +67,16 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 22. **Remote Control oficial:** comparar o `claude --remote-control` (acesso pelo claude.ai) com a ideia 21 antes de construir.
 
 ## A testar no uso
+
+- 0.6.2 (rodada em paralelo, specs e roteiros em `docs/testing/background-sessions.md`):
+  - Pergunta esperando numa sessão em segundo plano: conferir que o `claude agents` mostra `waiting` durante o diálogo e que o aviso aparece (com e sem `answers on`).
+  - Abrir no terminal (menu ⋮ e aviso): Linux (qual terminal abre; o `-e` do `x-terminal-emulator`), macOS (o `.command` no Terminal com o PATH do shell de login), Windows (`wt -d .` e, sem `wt`, o `cmd start`). Conferir também dois `claude attach` ao mesmo tempo: o do terminal aberto e o que o hub usa por ~2 s ao mandar um comando `/…`.
+  - Nova sessão em qualquer pasta: navegador de pastas e caminho colado; numa pasta nunca aberta no Claude Code, ver o texto real do erro de confiança do `claude --bg` e se o app mostra a mensagem clara (ou se o `--bg` trava e cai no limite de 60 s). Decisão pendente do autor: avisar antes lendo `~/.claude.json` (`hasTrustDialogAccepted`) ou deixar como está.
+  - Botões de segundo plano desativados numa sessão de terminal, e a linha de aviso ao digitar `/`.
+  - Versões: versão do app nas configurações; "plugin X" e "Claude Code X" no cabeçalho; destaque de versão antiga numa sessão aberta antes de atualizar o plugin.
+  - Título numa linha só, com reticências numa lista estreita.
+  - Recap: cartão "Resumo" numa conversa com `away_summary`, nos dois temas.
+  - Diff: "Ver alterações" em Edit/MultiEdit/Write, rolagem, cores nos dois temas, e o peso de abrir uma conversa grande com muitas edições (cada ação leva até 400 linhas).
 
 - 0.6.1, app sem Chrome: no macOS só com Safari, o `/cc` abre o app numa aba do Safari e mostra a dica "Arquivo > Adicionar ao Dock"; a janela criada pelo Dock deve trocar o código `#pair=` sozinha. Testar também com o Chrome em `~/Applications`. No Windows sem Chrome nem Edge, conferir que o `rundll32` abre a aba com o `#pair=` (o fragmento não pode se perder). Uma aba aberta conta como janela: o `/cc` seguinte não abre outra. O Safari pode suspender uma aba em segundo plano por muito tempo; se ela parar de avisar o hub por 150 s, o `/cc` abre uma aba nova.
 
@@ -131,9 +98,13 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 - Uma aba comum (ou do VS Code) com o app conta como janela aberta.
 - O Chrome pode não trazer a janela para a frente (`window.focus()`).
 - O atalho do Linux supõe Chrome com o perfil "Default" (`StartupWMClass`).
+- Marca de pergunta (0.6.2): se o diálogo de pergunta for fechado com Esc, a marca "pergunta esperando" só sai no próximo prompt ou Stop; só aparece no app se o `claude agents` falhar. Correção possível: limpar num PostToolUse do AskUserQuestion.
+- "Abrir no terminal" diz que abriu assim que o terminal é iniciado; se faltar `DISPLAY`/`WAYLAND_DISPLAY` no hub ou o terminal sair com erro, nada aparece. No macOS, um `.command` que o Terminal nunca rodou deixa a pasta temporária.
+- A busca entre conversas não traz os recaps (só a busca dentro da conversa).
 
 ## Feito
 
+- 0.6.2: aviso de pergunta esperando numa sessão em segundo plano; "Abrir no terminal" (`claude attach`) pelo menu ⋮ e pelos avisos; nova sessão em qualquer pasta da pasta pessoal; botões de segundo plano visíveis (desativados) nas sessões de terminal; versão do app, do plugin e do Claude Code; título numa linha; recap da conversa; diff dos arquivos editados. Sugestão da próxima mensagem investigada e adiada.
 - 0.6.1: sem Chrome, Chromium ou Edge, o `/cc` abre o app numa aba do navegador padrão (Safari no macOS), com o código de uso único, e no macOS dá a dica "Arquivo > Adicionar ao Dock"; o Chrome também é procurado em `~/Applications`.
 - Confirmados no uso em 2026-11-25: "trabalhando" travado não voltou (se voltar, entra de novo na lista); anexos numa sessão sem modo auto funcionam; modo da sessão aparece no cabeçalho ("auto mode"); uso de 5 horas ok; atalho no Windows aprovado.
 - 0.4.2: uma única janela do app, atalho no menu do Linux, logo novo.
