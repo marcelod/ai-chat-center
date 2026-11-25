@@ -14,7 +14,7 @@ import { BackgroundPicker } from './BackgroundPicker';
 import { ChatBackground } from './ChatBackground';
 import { useCommandProgress } from '../useCommandProgress';
 import { SessionControls } from './SessionControls';
-import { AgentBubble, AssistantBubble, ToAgentBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
+import { AgentBubble, RecapCard, AssistantBubble, ToAgentBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
 
 type Props = {
   /** Opens the conversation search with this text (a hit picked in the list search). */
@@ -385,6 +385,8 @@ export function ChatView({ initialSearch, session, events, pending, loading, onS
         return <AssistantBubble key={e.id} text={e.text} />;
       case 'agent':
         return <AgentBubble key={e.id} event={e} />;
+      case 'recap':
+        return <RecapCard key={e.id} text={e.text} />;
       case 'toAgent':
         return <ToAgentBubble key={e.id} event={e} />;
       case 'actions':

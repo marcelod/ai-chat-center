@@ -17,6 +17,7 @@ export function eventText(e: ChatEvent): string | null {
     case 'assistant':
     case 'agent':
     case 'toAgent':
+    case 'recap':
       return e.text;
     default:
       return null;

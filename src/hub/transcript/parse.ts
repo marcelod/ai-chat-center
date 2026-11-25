@@ -3,6 +3,7 @@ import { isCcCommand } from '../../core/ccCommand.js';
 import { parseQuestions } from '../../core/questions.js';
 import type { ChatEvent, ToolAction } from '../../shared/types.js';
 import { splitAttachments } from '../../shared/attachments.js';
+import { toolDiff } from '../../shared/diff.js';
 
 type ActionsEvent = Extract<ChatEvent, { kind: 'actions' }>;
 type QuestionEvent = Extract<ChatEvent, { kind: 'question' }>;
@@ -112,9 +113,37 @@ function summarize(name: string, input: unknown): string {
   if (!isRecord(input)) return '';
   let value: unknown;
   if (name === 'Bash') value = input.command;
-  else if (name === 'Read' || name === 'Edit' || name === 'Write') value = input.file_path;
+  else if (name === 'Read' || name === 'Edit' || name === 'MultiEdit' || name === 'Write') value = input.file_path;
   else value = Object.values(input).find((v) => typeof v === 'string');
   return typeof value === 'string' ? truncate(value, SUMMARY_MAX) : '';
+}
+
+/** The diff of an Edit, MultiEdit or Write call, when its input has the old/new texts. */
+function actionDiff(name: string, input: unknown): ToolAction['diff'] {
+  if (!isRecord(input)) return undefined;
+  const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+  const edits: { oldText: string; newText: string }[] = [];
+  if (name === 'Edit') {
+    const o = str(input.old_string);
+    const n = str(input.new_string);
+    if (o !== undefined && n !== undefined) edits.push({ oldText: o, newText: n });
+  } else if (name === 'MultiEdit' && Array.isArray(input.edits)) {
+    for (const e of input.edits) {
+      if (!isRecord(e)) continue;
+      const o = str(e.old_string);
+      const n = str(e.new_string);
+      if (o !== undefined && n !== undefined) edits.push({ oldText: o, newText: n });
+    }
+  } else if (name === 'Write') {
+    const c = str(input.content);
+    if (c !== undefined) edits.push({ oldText: '', newText: c });
+  }
+  return (edits.length && toolDiff(edits)) || undefined;
+}
+
+/** The recap text without Claude Code's trailing "(disable recaps in /config)" hint. */
+export function cleanRecap(content: string): string {
+  return content.replace(/\s*\(\s*disable\s+recaps?\s+in\s+\/config\s*\)\s*\.?\s*$/i, '').trim();
 }
 
 function resultText(content: unknown): string {
@@ -183,6 +212,12 @@ export class TranscriptParser {
     const ts = entry.timestamp;
     if (typeof uuid !== 'string' || typeof ts !== 'string') return [];
     if (entry.isSidechain === true) return [];
+    if (entry.type === 'system' && entry.subtype === 'away_summary' && typeof entry.content === 'string') {
+      const text = cleanRecap(entry.content);
+      if (!text) return [];
+      this.open = null;
+      return [{ kind: 'recap', id: uuid, ts, text }];
+    }
     if (entry.type === 'attachment') return this.attachment(uuid, ts, entry.attachment);
     const message = isRecord(entry.message) ? entry.message : undefined;
     if (!message) return [];
@@ -260,6 +295,8 @@ export class TranscriptParser {
           continue;
         }
         const action: ToolAction = { toolUseId: block.id, name, summary: summarize(name, block.input) };
+        const diff = actionDiff(name, block.input);
+        if (diff) action.diff = diff;
         if (!this.open) {
           this.open = { kind: 'actions', id: uuid, ts, items: [] };
           created.push(this.open);

@@ -3,12 +3,24 @@
 
 import type { ChatBackground } from './background.js';
 
+/** One line of a diff: unchanged, removed, added, or `~` (a gap between two edits of one file). */
+export type DiffLine = { op: ' ' | '-' | '+' | '~'; text: string };
+export type ToolDiff = {
+  lines: DiffLine[];
+  added: number;
+  removed: number;
+  /** The diff was cut for size (the lines shown are the first ones). */
+  truncated?: true;
+};
+
 export type ToolAction = {
   toolUseId: string;
   name: string;
   summary: string;
   result?: string;
   isError?: boolean;
+  /** Edit, MultiEdit and Write: what changed. */
+  diff?: ToolDiff;
 };
 
 export type ChatEvent =
@@ -31,6 +43,8 @@ export type ChatEvent =
   | { kind: 'agent'; id: string; ts: string; from: string; text: string }
   /** What Claude asked a subagent or sent a teammate (Agent, SendMessage): to whom, and the request. */
   | { kind: 'toAgent'; id: string; ts: string; to: string; text: string }
+  /** The "while you were away" summary Claude Code writes (`away_summary`), without its settings hint. */
+  | { kind: 'recap'; id: string; ts: string; text: string }
   | { kind: 'actions'; id: string; ts: string; items: ToolAction[] }
   | {
       kind: 'question';

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ToolAction } from '@shared/types';
+import type { DiffLine, ToolAction, ToolDiff } from '@shared/types';
 import { useT } from '../i18n';
 import { CheckIcon, ChevronDownIcon, WrenchIcon } from './icons';
 
@@ -11,6 +11,53 @@ function Status({ item }: { item: ToolAction }) {
     <span role="img" aria-label={t('ui.chat.done')} className="text-ok">
       <CheckIcon width={16} height={16} />
     </span>
+  );
+}
+
+const DIFF_PAGE = 200;
+
+const ROW: Record<DiffLine['op'], string> = {
+  '+': 'bg-[color-mix(in_srgb,var(--c-ok)_18%,transparent)] text-ink',
+  '-': 'bg-[color-mix(in_srgb,var(--c-danger)_18%,transparent)] text-ink',
+  ' ': 'text-muted',
+  '~': 'text-muted',
+};
+
+/** Colored line diff of an edit, folded by default, the first 200 lines then "show more". */
+export function DiffView({ diff }: { diff: ToolDiff }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState(DIFF_PAGE);
+  const rest = diff.lines.length - shown;
+  return (
+    <div data-diff className="mt-2">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="text-xs font-semibold text-accent underline"
+      >
+        {open ? t('ui.chat.diffHide') : t('ui.chat.diffShow', { added: diff.added, removed: diff.removed })}
+      </button>
+      {open && (
+        <div className="mt-1 max-h-96 overflow-auto rounded-lg border border-line bg-field font-mono text-xs">
+          {diff.lines.slice(0, shown).map((l, k) => (
+            <div key={k} data-diff-line={l.op} className={`flex whitespace-pre px-2 ${ROW[l.op]}`}>
+              <span aria-hidden="true" className="w-4 shrink-0 select-none">
+                {l.op === '~' ? '⋯' : l.op}
+              </span>
+              <span>{l.text}</span>
+            </div>
+          ))}
+          {rest > 0 && (
+            <button type="button" className="w-full px-2 py-1 text-left font-semibold text-accent underline" onClick={() => setShown((n) => n + DIFF_PAGE)}>
+              {t('ui.chat.diffMore', { n: rest })}
+            </button>
+          )}
+          {diff.truncated && rest <= 0 && <p className="px-2 py-1 text-muted">{t('ui.chat.diffCut')}</p>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -44,6 +91,7 @@ export function ActionsGroup({ items }: { items: ToolAction[] }) {
                 </span>
                 <Status item={i} />
               </div>
+              {i.diff ? <DiffView diff={i.diff} /> : null}
               {/* `!` shell mode: the output is the point, so show it (other tools keep only their status). */}
               {i.name === 'Shell' && i.result ? (
                 <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-field p-2 font-mono text-xs">
