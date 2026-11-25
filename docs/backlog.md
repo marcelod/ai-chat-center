@@ -1,6 +1,6 @@
 # Pendências
 
-Itens combinados e deixados para depois. Estado em 2026-11-25, versão 0.6.0. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
+Itens combinados e deixados para depois. Estado em 2026-11-25, versão 0.6.1. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
 
 ## A fazer
 
@@ -34,9 +34,9 @@ Pedido em 2026-11-25. O Claude Code mostra às vezes um resumo de onde a convers
 
 Pedido em 2026-11-25 (era a ideia 12). O Claude Code sugere às vezes a próxima mensagem, em cinza no campo de texto. Mais difícil que o recap: a sugestão **não** fica na transcrição (só fica `promptSource: "suggestion_accepted"` quando a pessoa aceita). Caminhos a avaliar: ler a sugestão da tela da sessão em segundo plano (`claude logs`, ver a ideia 2) ou pedir sugestões pelo `--prompt-suggestions` nas sessões criadas pelo app (confirmar se essa opção vale fora do modo `-p`). No app, a sugestão apareceria no campo de texto e o Tab aceitaria.
 
-### Abrir o app quando não há Chrome (Safari no macOS)
+### Título "AI Chat Center" quebrando em duas linhas
 
-Visto em 2026-11-25: no macOS, uma pessoa que usa só o Safari (sem Chrome) instalou o plugin, deu `/cc`, e o app não abriu; ela teve de copiar a URL e colar no navegador. Causa confirmada no código: `findBrowser` (`src/hooks/openWindow.ts`) só procura Chrome, Chromium e Edge (no macOS, em `/Applications`); sem nenhum deles, `launchAppWindow` devolve `false` e nada é aberto. Ideia: sem Chrome, abrir no navegador padrão (`open` no macOS, `xdg-open` no Linux, `start` no Windows) com o código de pareamento de uso único (`#pair=`), nunca o token, numa aba comum. Também procurar o Chrome em `~/Applications`. No Safari, dá para dizer na mensagem do `/cc` que "Arquivo > Adicionar ao Dock" (macOS Sonoma ou mais novo) cria o app numa janela própria. Ver também "Uma aba comum conta como janela aberta" em "Limites conhecidos".
+Visto em 2026-11-25 (print do autor): no topo da lista de conversas, ao lado do logo (`ui/src/components/Logo.tsx`) e dos botões +, configurações e recolher, o título aparece como "AI Chat" numa linha e "Center" na outra. Ajustar para ficar numa linha só (por exemplo `white-space: nowrap`, fonte um pouco menor ou menos espaço entre os botões); se não couber em listas estreitas, cortar com reticências em vez de quebrar.
 
 ### Entrada por voz
 
@@ -92,6 +92,8 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## A testar no uso
 
+- 0.6.1, app sem Chrome: no macOS só com Safari, o `/cc` abre o app numa aba do Safari e mostra a dica "Arquivo > Adicionar ao Dock"; a janela criada pelo Dock deve trocar o código `#pair=` sozinha. Testar também com o Chrome em `~/Applications`. No Windows sem Chrome nem Edge, conferir que o `rundll32` abre a aba com o `#pair=` (o fragmento não pode se perder). Uma aba aberta conta como janela: o `/cc` seguinte não abre outra. O Safari pode suspender uma aba em segundo plano por muito tempo; se ela parar de avisar o hub por 150 s, o `/cc` abre uma aba nova.
+
 - Atalho no macOS: ainda não testado; o autor está procurando alguém com Mac (`docs/testing/launcher-windows-macos.md`).
 - Fundo por conversa: ok por enquanto; rever cores e véu (76%) com calma nos dois temas.
 
@@ -113,6 +115,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## Feito
 
+- 0.6.1: sem Chrome, Chromium ou Edge, o `/cc` abre o app numa aba do navegador padrão (Safari no macOS), com o código de uso único, e no macOS dá a dica "Arquivo > Adicionar ao Dock"; o Chrome também é procurado em `~/Applications`.
 - Confirmados no uso em 2026-11-25: "trabalhando" travado não voltou (se voltar, entra de novo na lista); anexos numa sessão sem modo auto funcionam; modo da sessão aparece no cabeçalho ("auto mode"); uso de 5 horas ok; atalho no Windows aprovado.
 - 0.4.2: uma única janela do app, atalho no menu do Linux, logo novo.
 - 0.4.3: menos consultas ao `claude agents` com tudo parado.
