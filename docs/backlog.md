@@ -88,12 +88,8 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## A testar no uso
 
-- "Trabalhando" preso com tarefa em segundo plano: corrigido na 0.4.4; ainda não reapareceu.
-- Atalhos: Windows aprovado (ver "Instalação mais fácil no Windows"); macOS ainda não testado (`docs/testing/launcher-windows-macos.md`).
-- Anexos: testar numa sessão sem modo auto. Ler um anexo fora da pasta do projeto pode pedir permissão no terminal e travar quem usa só o app; se pedir, avaliar liberar `~/.ai-chat-center/attachments` na sessão ao dar `/cc`. Não há limite total de espaço por sessão, só a limpeza de 30 dias.
-- Fundo por conversa: cores e opacidade do véu (76%) escolhidas sem ver na tela; ajustar olhando nos dois temas.
-- 0.4.9, modo da sessão: confirmar que o Claude Code manda `permission_mode` nos hooks (prompt, notificação e Stop). A troca com Shift+Tab só aparece no próximo evento (prompt enviado ou fim do turno).
-- 0.4.9, uso de 5 horas: `/ai-chat-center:cc usage on` troca a status line do `settings.json` por um wrapper que grava o uso e chama a status line anterior; `usage off` restaura. Conferir que a status line no terminal continua igual, que o rodapé da lista mostra o uso e que o `off` devolve o `settings.json` como era. Uma status line definida nas configurações do projeto ganha da do usuário, e aí o wrapper não roda.
+- Atalho no macOS: ainda não testado; o autor está procurando alguém com Mac (`docs/testing/launcher-windows-macos.md`).
+- Fundo por conversa: ok por enquanto; rever cores e véu (76%) com calma nos dois temas.
 
 - 0.5.0, sessões em segundo plano: retomar pelo app e comandos `/…` (`docs/testing/background-sessions.md`). Comandos no Windows ficam para depois (sem `script`; o node-pty traz ~30 MB); macOS não testado.
 
@@ -113,6 +109,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## Feito
 
+- Confirmados no uso em 2026-11-25: "trabalhando" travado não voltou (se voltar, entra de novo na lista); anexos numa sessão sem modo auto funcionam; modo da sessão aparece no cabeçalho ("auto mode"); uso de 5 horas ok; atalho no Windows aprovado.
 - 0.4.2: uma única janela do app, atalho no menu do Linux, logo novo.
 - 0.4.3: menos consultas ao `claude agents` com tudo parado.
 - 0.4.4 a 0.4.7: "trabalhando" preso corrigido, rascunho por conversa, menu ⋮ com Renomear e Remover do app, atalhos do Windows e do macOS, manifesto do PWA, conversa em grupo com os agentes.
