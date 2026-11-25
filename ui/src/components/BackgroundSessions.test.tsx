@@ -122,6 +122,7 @@ describe('open in a terminal (backlog 2026-11-25)', () => {
     const cases: [Error, RegExp][] = [
       [errCode(502, 'no-terminal'), /No terminal program found\. Run in a terminal: claude attach 5e1b5e9b/],
       [errCode(409, 'not-background'), /no longer runs in the background/],
+      [errCode(409, 'folder-missing'), /folder of this session no longer exists/],
       [errCode(502, 'spawn-failed'), /Could not open a terminal\. Run in a terminal: claude attach 5e1b5e9b/],
     ];
     for (const [e, text] of cases) {

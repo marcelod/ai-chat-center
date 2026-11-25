@@ -84,12 +84,14 @@ export interface OpenTerminalDeps {
   home?: string;
   /** Whether a terminal program exists (Linux, Windows). */
   exists?: (p: string) => boolean;
+  /** Whether the session folder exists and is a folder (default: fs.statSync). */
+  isDir?: (p: string) => boolean;
   /** macOS: makes the private folder of the `.command` file (default: mkdtemp under os.tmpdir(), 0700). */
   mkdtemp?: () => string;
   writeFile?: (p: string, data: string, mode: number) => void;
 }
 
-export type OpenTerminalResult = { ok: true } | { ok: false; code: 'no-terminal' | 'spawn-failed'; error: string };
+export type OpenTerminalResult = { ok: true } | { ok: false; code: 'no-terminal' | 'spawn-failed' | 'folder-missing'; error: string };
 
 export interface TerminalTarget {
   bgId: string;
@@ -109,6 +111,14 @@ export async function openTerminal(t: TerminalTarget, deps: OpenTerminalDeps = {
   const configDir = configDirFor(t.configDir, deps.home, platform);
   const isAbs = platform === 'win32' ? path.win32.isAbsolute : path.posix.isAbsolute;
   if (!isAbs(t.cwd)) return { ok: false, code: 'spawn-failed', error: 'the session folder is not an absolute path' };
+
+  let isDir = false;
+  try {
+    isDir = (deps.isDir ?? ((p) => fs.statSync(p).isDirectory()))(t.cwd);
+  } catch {
+    isDir = false;
+  }
+  if (!isDir) return { ok: false, code: 'folder-missing', error: 'the session folder does not exist' };
 
   let cmd: string;
   let args: string[];

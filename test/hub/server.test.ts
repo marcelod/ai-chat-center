@@ -1129,6 +1129,14 @@ describe('open-terminal endpoint (background sessions)', () => {
     expect(JSON.parse(r.body)).toEqual({ error: 'no terminal program found', code: 'no-terminal' });
     expect(r.body).not.toContain(TOKEN);
   });
+  it('409 folder-missing when the session folder is gone', async () => {
+    const u = await start(fakeProvider(), {
+      bg: { listLive: async () => [bgLive()], openTerminal: async () => ({ ok: false as const, code: 'folder-missing' as const, error: 'the session folder does not exist' }) },
+    });
+    const r = await post(u);
+    expect(r.status).toBe(409);
+    expect(JSON.parse(r.body).code).toBe('folder-missing');
+  });
 });
 
 describe('new session endpoint (spec 2026-11-25-app-batch)', () => {

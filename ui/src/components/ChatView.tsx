@@ -166,11 +166,12 @@ function AttachCommand({ id, bullet = true }: { id: string; bullet?: boolean }) 
   );
 }
 
-type TerminalOutcome = 'opened' | 'noTerminal' | 'failed' | 'notBackground';
+type TerminalOutcome = 'opened' | 'noTerminal' | 'failed' | 'notBackground' | 'folderMissing';
 
 /** What the hub's refusal of "Open in a terminal" means for the user. */
 function terminalOutcome(e: unknown): TerminalOutcome {
   const code = (e as { code?: unknown } | null)?.code;
+  if (code === 'folder-missing') return 'folderMissing';
   if (statusOf(e) === 409) return 'notBackground';
   return code === 'no-terminal' ? 'noTerminal' : 'failed';
 }
