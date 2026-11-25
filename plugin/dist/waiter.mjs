@@ -486,7 +486,7 @@ var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
 var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
 
 // src/core/version.ts
-var VERSION = "0.4.10";
+var VERSION = "0.5.0";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -607,6 +607,10 @@ function isCcCommand(prompt) {
   return "unknown";
 }
 
+// src/hub/bgSessions.ts
+var BG_ID_RE = /^[0-9a-f]{8}$/;
+var isBgId = (id) => typeof id === "string" && BG_ID_RE.test(id);
+
 // src/hub/status.ts
 function toLive(x) {
   if (!x || typeof x !== "object") return null;
@@ -614,7 +618,7 @@ function toLive(x) {
   if (typeof o.sessionId !== "string" || !o.sessionId) return null;
   if (typeof o.pid !== "number" || typeof o.cwd !== "string") return null;
   if (o.kind !== "interactive" && o.kind !== "background") return null;
-  return {
+  const live = {
     pid: o.pid,
     cwd: o.cwd,
     kind: o.kind,
@@ -623,6 +627,8 @@ function toLive(x) {
     // Presence never depends on status: unknown values degrade to idle.
     status: o.status === "busy" || o.status === "waiting" ? o.status : "idle"
   };
+  if (o.kind === "background" && isBgId(o.id)) live.bgId = o.id;
+  return live;
 }
 async function queryLiveSessions(run = runClaudeAgentsJson) {
   try {

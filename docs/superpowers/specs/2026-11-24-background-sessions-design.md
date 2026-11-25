@@ -1,6 +1,6 @@
 # Retomar sessões e rodar comandos pelo app (sessões em segundo plano): design
 
-Data: 2026-11-24 · Status: aguardando aprovação do usuário
+Data: 2026-11-24 · Status: aprovado e implementado na 0.5.0
 
 Itens 1 e 2 do `docs/backlog.md`, feitos juntos (decisão do usuário: pelo caminho oficial das sessões em segundo plano do Claude Code).
 
@@ -23,7 +23,8 @@ A mensagem do app chega como texto de hook, então um comando interno não roda.
 - Uma conversa encerrada (`exited`, `off` ou `clear`, ainda não removida) ganha o botão **Retomar** no cabeçalho e no menu ⋮.
 - Ao clicar, o hub roda `claude --bg --resume <sessionId> "/ai-chat-center:cc"` na `cwd` da registration, com `CLAUDE_CONFIG_DIR` igual ao `configDir` dela, desligado do hub (`detached`, `unref`). O app mostra "Retomando…" até a sessão voltar ativa. Se ela não voltar em 60 s, o app mostra a saída de erro do comando (por exemplo, "Workspace not trusted").
 - O `/cc` passa pelo hook como se a pessoa o digitasse, o que mantém o modelo de confiança atual: chave nova, contexto "AI Chat Center: connected". *(Decisão do Claude: não criar outro caminho de registro.)*
-- O `/cc` rodado numa sessão em segundo plano não abre a janela do app *(decisão do Claude)*: quem clicou já está no app. O hook sabe disso por uma variável de ambiente que o hub passa ao `claude --bg` (`AI_CHAT_CENTER_NO_WINDOW=1`).
+- O `/cc` da sessão retomada segue as regras de sempre para a janela: com o app aberto (quem clicou está nele), o `/cc` não abre outra janela e só foca a conversa. *(Mudou na implementação: a variável `AI_CHAT_CENTER_NO_WINDOW` prevista não foi necessária.)*
+- O hub chama o `claude` sem as variáveis `CLAUDECODE`, `CLAUDE_CODE_*`, `CLAUDE_PID` e `CLAUDE_EFFORT` que herdou da sessão que o iniciou. Com elas, a sessão retomada viraria uma "sessão filha" sem transcrição (issue #2).
 - A sessão retomada fica em segundo plano. Para vê-la no terminal: `claude attach <id>`. O app mostra esse comando no cabeçalho, com botão de copiar.
 - Sessão ainda ativa num terminal: o botão não aparece. Duas instâncias da mesma conversa não podem rodar ao mesmo tempo.
 
@@ -38,15 +39,15 @@ A mensagem do app chega como texto de hook, então um comando interno não roda.
 Um pedido de permissão para a sessão, e não há terminal aberto. O app já mostra "esperando permissão" (Notification hook). O aviso passa a incluir o comando `claude attach <id>` para responder no terminal. *(O app nunca responde permissões; continua assim.)*
 
 ## Hub
-- `SessionView` ganha `background?: { id: string }`, a partir do `claude agents --json` que o provider já lê.
-- `POST /api/sessions/<sid>/resume`: 404 para sessão desconhecida ou removida, 409 se ativa, 202 ao iniciar. A saída de erro do `claude --bg` fica guardada por 60 s e aparece em `SessionView.resumeError?`.
+- `SessionView` ganha `bgId?: string` (o nome `background` já era do fundo da conversa), `resuming?` e `resumeError?`. O `bgId` vem do `claude agents --json` que o provider já lê, e o estado de retomada fica em memória (`src/hub/resumeState.ts`).
+- `POST /api/sessions/<sid>/resume`: 404 para sessão desconhecida ou removida, 409 se ativa, 202 ao iniciar. 409 também se o `claude agents` ainda lista a sessão, e 503 se a consulta falhar. A saída de erro do `claude --bg`, ou "não reconectou em 60 s", aparece em `SessionView.resumeError` por 5 min.
 - `POST /api/sessions/<sid>/command` com `{ text }`: `text` precisa começar com `/`, ter uma linha só e no máximo 200 caracteres. 404 se a sessão não estiver em segundo plano, 409 se ela não estiver `idle`, 501 no Windows, 200 depois de digitar. Um comando por sessão de cada vez (lock).
 - As duas rotas usam o mesmo token e a mesma checagem de origem das outras. Só chamam o `claude` com argumentos em array (`execFile`/`spawn`, sem shell). O `script` recebe uma linha de comando montada só com o `id` curto validado (`/^[0-9a-f]{8}$/`).
 
 ## Riscos
-- `claude attach` e a saída do `--bg` não são uma API estável. Se o formato mudar, o app mostra o erro e não fica preso. Todo o contato fica em `src/hub/background.ts`.
+- `claude attach` e a saída do `--bg` não são uma API estável. Se o formato mudar, o app mostra o erro e não fica preso. Todo o contato fica em `src/hub/bgSessions.ts`.
 - Reconhecer o prompt pronto no attach: esperar o caractere `❯` na saída, com prazo de 10 s, senão desistir com erro.
 - macOS: a sintaxe do `script` não foi testada ao vivo; entra no checklist de teste.
 
 ## Testes
-Hub, com `claude` e `script` falsos injetados: retomar (202, 409 ativa, 404 removida, erro do comando aparece), comando (validação do texto, 409 ocupada, 404 interativa, 501 Windows, lock), `background.id` na `SessionView`. Hook: `AI_CHAT_CENTER_NO_WINDOW=1` não abre janela. UI: botão Retomar só em encerradas, "Retomando…", aviso do `/` em sessão interativa, comando de attach copiável. Ao vivo (checklist): retomar uma sessão real, `/compact` pelo app, permissão em segundo plano, macOS.
+Hub, com `claude` e `script` falsos injetados: retomar (202, 409 ativa, 404 removida, erro do comando aparece), comando (validação do texto, 409 ocupada, 404 interativa, 501 Windows, lock), `background.id` na `SessionView`. UI: botão Retomar só em encerradas, "Retomando…", aviso do `/` em sessão interativa, comando de attach copiável. Ao vivo (checklist): retomar uma sessão real, `/compact` pelo app, permissão em segundo plano, macOS.

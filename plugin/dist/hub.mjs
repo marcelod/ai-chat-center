@@ -745,7 +745,7 @@ async function cleanupAttachments(alive, now = Date.now(), maxAgeMs = ATTACHMENT
 }
 
 // src/core/version.ts
-var VERSION = "0.4.10";
+var VERSION = "0.5.0";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -1429,6 +1429,141 @@ function runClaudeAgentsJson(platform = process.platform) {
   });
 }
 
+// src/hub/bgSessions.ts
+import { spawn as nodeSpawn } from "node:child_process";
+import os4 from "node:os";
+var BG_ID_RE = /^[0-9a-f]{8}$/;
+var isBgId = (id) => typeof id === "string" && BG_ID_RE.test(id);
+var MAX_COMMAND = 200;
+function isValidCommand(text) {
+  if (typeof text !== "string" || text.length > MAX_COMMAND) return false;
+  if (/[\x00-\x1f\x7f]/.test(text)) return false;
+  return /^\/[A-Za-z0-9][\w:.-]*( .*)?$/.test(text);
+}
+var RESUME_PROMPT = "/ai-chat-center:cc";
+function cleanEnv(env, configDir) {
+  const out = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (k === "CLAUDECODE" || k.startsWith("CLAUDE_CODE_") || k === "CLAUDE_PID" || k === "CLAUDE_EFFORT" || k === "CLAUDE_CONFIG_DIR") continue;
+    out[k] = v;
+  }
+  if (configDir) out.CLAUDE_CONFIG_DIR = configDir;
+  return out;
+}
+var RESUME_TIMEOUT_MS = 6e4;
+var MAX_ERROR = 500;
+async function resumeInBackground(reg, deps = {}) {
+  assertSessionId(reg.sessionId);
+  const platform = deps.platform ?? process.platform;
+  const win = platform === "win32";
+  const spawn = deps.spawn ?? nodeSpawn;
+  const cmd = win ? `claude --bg --resume ${reg.sessionId} ${RESUME_PROMPT}` : "claude";
+  const args = win ? [] : ["--bg", "--resume", reg.sessionId, RESUME_PROMPT];
+  return new Promise((resolve) => {
+    let out = "";
+    let done = false;
+    const finish = (r) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    let child;
+    try {
+      child = spawn(cmd, args, {
+        cwd: reg.cwd,
+        env: cleanEnv(deps.env ?? process.env, reg.configDir),
+        shell: win,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+    } catch (e) {
+      return resolve({ ok: false, error: e.message });
+    }
+    const timer = setTimeout(() => {
+      child.kill();
+      finish({ ok: false, error: "claude --bg did not answer in 60 s" });
+    }, RESUME_TIMEOUT_MS);
+    const collect = (d) => {
+      if (out.length < 4 * MAX_ERROR) out += String(d);
+    };
+    child.stdout?.on("data", collect);
+    child.stderr?.on("data", collect);
+    child.on("error", (e) => finish({ ok: false, error: e.message }));
+    child.on("close", (code2) => {
+      if (code2 === 0) return finish({ ok: true });
+      finish({ ok: false, error: stripAnsi(out).trim().slice(0, MAX_ERROR) || `claude exited with code ${code2}` });
+    });
+  });
+}
+var stripAnsi = (s) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, "");
+var CommandUnsupportedError = class extends Error {
+  constructor() {
+    super("commands from the app are not available on Windows yet");
+    this.name = "CommandUnsupportedError";
+  }
+};
+function scriptArgs(id, platform) {
+  if (!isBgId(id)) throw new Error("invalid background session id");
+  if (platform === "darwin") return ["-q", "/dev/null", "claude", "attach", id];
+  return ["-qfec", `claude attach ${id}`, "/dev/null"];
+}
+var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+async function typeCommand(id, text, deps = {}) {
+  const platform = deps.platform ?? process.platform;
+  if (platform === "win32") throw new CommandUnsupportedError();
+  if (!isValidCommand(text)) throw new Error("invalid command");
+  const args = scriptArgs(id, platform);
+  const spawn = deps.spawn ?? nodeSpawn;
+  const child = spawn("script", args, {
+    cwd: os4.homedir(),
+    env: { ...cleanEnv(deps.env ?? process.env), TERM: "xterm-256color", COLUMNS: "120", LINES: "40" },
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  let exited = false;
+  let exitError = null;
+  const closed = new Promise((resolve) => {
+    child.on("error", (e) => {
+      exitError = e;
+      exited = true;
+      resolve();
+    });
+    child.on("close", () => {
+      exited = true;
+      resolve();
+    });
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      let seen = "";
+      const timer = setTimeout(() => reject(new Error("the session prompt did not show")), deps.promptTimeoutMs ?? 1e4);
+      const onData = (d) => {
+        seen = (seen + String(d)).slice(-4096);
+        if (seen.includes("\u276F")) {
+          clearTimeout(timer);
+          child.stdout?.off("data", onData);
+          resolve();
+        }
+      };
+      child.stdout?.on("data", onData);
+      void closed.then(() => {
+        clearTimeout(timer);
+        reject(exitError ?? new Error(`claude attach ended: ${stripAnsi(seen).trim().slice(0, MAX_ERROR)}`));
+      });
+    });
+    child.stdout?.resume();
+    await sleep2(deps.settleMs ?? 1e3);
+    if (exited) throw new Error("claude attach ended");
+    child.stdin?.write(text);
+    await sleep2(deps.enterDelayMs ?? 300);
+    child.stdin?.write("\r");
+    await sleep2(deps.afterMs ?? 2e3);
+  } finally {
+    if (!exited) child.kill();
+    child.stderr?.resume();
+  }
+}
+
 // src/hub/status.ts
 function toLive(x) {
   if (!x || typeof x !== "object") return null;
@@ -1436,7 +1571,7 @@ function toLive(x) {
   if (typeof o.sessionId !== "string" || !o.sessionId) return null;
   if (typeof o.pid !== "number" || typeof o.cwd !== "string") return null;
   if (o.kind !== "interactive" && o.kind !== "background") return null;
-  return {
+  const live = {
     pid: o.pid,
     cwd: o.cwd,
     kind: o.kind,
@@ -1445,6 +1580,8 @@ function toLive(x) {
     // Presence never depends on status: unknown values degrade to idle.
     status: o.status === "busy" || o.status === "waiting" ? o.status : "idle"
   };
+  if (o.kind === "background" && isBgId(o.id)) live.bgId = o.id;
+  return live;
 }
 async function queryLiveSessions(run = runClaudeAgentsJson) {
   try {
@@ -1488,6 +1625,42 @@ function createClaudeProcessCheck(platform = process.platform, readArgv = (p) =>
     cache.set(pid, { at: t, ok });
     return ok;
   };
+}
+
+// src/hub/resumeState.ts
+var RESUME_WAIT_MS = 6e4;
+var RESUME_ERROR_MS = 5 * 6e4;
+var states = /* @__PURE__ */ new Map();
+function startResume(sid, now = Date.now()) {
+  states.set(sid, { at: now });
+}
+function failResume(sid, error, now = Date.now()) {
+  const s = states.get(sid);
+  if (s) states.set(sid, { ...s, error, errorAt: now });
+}
+function isResuming(sid) {
+  const s = states.get(sid);
+  return !!s && s.error === void 0;
+}
+function resumeView(sid, connectedAt, now = Date.now()) {
+  const s = states.get(sid);
+  if (!s) return {};
+  if (connectedAt !== null && (Date.parse(connectedAt) || 0) >= s.at - 1e3) {
+    states.delete(sid);
+    return {};
+  }
+  if (s.error === void 0 && now - s.at > RESUME_WAIT_MS) {
+    s.error = "the session did not reconnect within 60 s";
+    s.errorAt = now;
+  }
+  if (s.error !== void 0) {
+    if (now - (s.errorAt ?? s.at) > RESUME_ERROR_MS) {
+      states.delete(sid);
+      return {};
+    }
+    return { resumeError: s.error };
+  }
+  return { resuming: true };
 }
 
 // src/hub/provider.ts
@@ -1763,6 +1936,8 @@ var ClaudeCodeProvider = class {
       if (mode && !disconnected) view.mode = mode;
       const background = await getBackground(sid);
       if (background) view.background = background;
+      if (!disconnected && l?.bgId) view.bgId = l.bgId;
+      Object.assign(view, resumeView(sid, disconnected ? null : reg.connectedAt, this.now()));
       connected.push(view);
     }
     connected.sort((a, b) => {
@@ -1838,7 +2013,10 @@ var ClaudeCodeProvider = class {
         s.effort ?? null,
         s.mode ?? null,
         s.background ?? null,
-        s.pinned ?? false
+        s.pinned ?? false,
+        s.bgId ?? null,
+        s.resuming ?? false,
+        s.resumeError ?? null
       ])
     });
     if (signature !== this.lastSignature) {
@@ -2013,6 +2191,11 @@ async function createHub(opts) {
   });
   let port = opts.port;
   const pairing = createPairing();
+  const listLive = opts.bg?.listLive ?? (() => queryLiveSessions());
+  const resume = opts.bg?.resume ?? ((reg) => resumeInBackground(reg));
+  const type = opts.bg?.type ?? ((id, text) => typeCommand(id, text));
+  const bgPlatform = opts.bg?.platform ?? process.platform;
+  const typing = /* @__PURE__ */ new Set();
   const now = opts.now ?? Date.now;
   const windows = /* @__PURE__ */ new Map();
   let focus = null;
@@ -2111,8 +2294,8 @@ data: ${JSON.stringify(c)}
         if (!st.isFile()) return false;
         const data = await fs13.readFile(file);
         const ext = path11.extname(file).toLowerCase();
-        const type = MIME2[ext] ?? "application/octet-stream";
-        const headers = { "Content-Type": type, "Content-Length": data.length };
+        const type2 = MIME2[ext] ?? "application/octet-stream";
+        const headers = { "Content-Type": type2, "Content-Length": data.length };
         if (ext === ".html") headers["Content-Security-Policy"] = CSP;
         res.writeHead(200, headers);
         res.end(req.method === "HEAD" ? void 0 : data);
@@ -2212,7 +2395,7 @@ data: ${JSON.stringify(c)}
       await saveConfig({ language: body2.language });
       return sendJson(res, 200, { language: body2.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|pin|disconnect|remove|background|background-image|attachments|questions\/([^/]+))$/.exec(p);
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|pin|disconnect|remove|resume|command|background|background-image|attachments|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid;
       try {
@@ -2294,6 +2477,53 @@ data: ${JSON.stringify(c)}
         req.resume();
         if (!await markRemoved(sid)) throw new HttpError(404, "no such session");
         fanOut({ type: "sessions" });
+        return sendJson(res, 200, { ok: true });
+      }
+      if (m[2] === "resume" && method === "POST") {
+        req.resume();
+        const reg = await getRegistration(sid);
+        if (!reg || isRemoved(reg)) throw new HttpError(404, "no such session");
+        if (isActive(reg)) throw new HttpError(409, "session is connected");
+        if (isResuming(sid)) throw new HttpError(409, "already resuming");
+        const live = await listLive();
+        if (live === null) throw new HttpError(503, "could not list running sessions");
+        if (live.some((l) => l.sessionId === sid)) throw new HttpError(409, "session is still running");
+        startResume(sid, now());
+        fanOut({ type: "sessions" });
+        void resume(reg).then((r) => {
+          if (!r.ok) {
+            log(`resume of ${sid} failed: ${r.error}`);
+            failResume(sid, r.error, now());
+            fanOut({ type: "sessions" });
+          }
+        }).catch((e) => {
+          failResume(sid, e.message, now());
+          fanOut({ type: "sessions" });
+        });
+        return sendJson(res, 202, { ok: true });
+      }
+      if (m[2] === "command" && method === "POST") {
+        const body2 = await readJsonBody(req);
+        const text = body2 && typeof body2 === "object" && !Array.isArray(body2) ? body2.text : void 0;
+        if (!isValidCommand(text)) throw new HttpError(400, "invalid command");
+        const reg = await getRegistration(sid);
+        if (!reg || !isActive(reg)) throw new HttpError(404, "no such session");
+        if (bgPlatform === "win32") throw new HttpError(501, "not available on Windows yet");
+        const live = await listLive();
+        if (live === null) throw new HttpError(503, "could not list running sessions");
+        const l = live.find((x) => x.sessionId === sid);
+        if (!l || l.kind !== "background" || !l.bgId) throw new HttpError(404, "not a background session");
+        if (l.status !== "idle" || typing.has(sid)) throw new HttpError(409, "session is busy");
+        typing.add(sid);
+        try {
+          await type(l.bgId, text);
+        } catch (e) {
+          if (e instanceof CommandUnsupportedError) throw new HttpError(501, "not available on Windows yet");
+          log(`command for ${sid} failed: ${e.message}`);
+          throw new HttpError(502, "could not type the command");
+        } finally {
+          typing.delete(sid);
+        }
         return sendJson(res, 200, { ok: true });
       }
       if (m[2] === "background" && method === "PUT") {

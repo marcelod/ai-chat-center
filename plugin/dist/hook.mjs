@@ -272,7 +272,7 @@ var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
 var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
 
 // src/core/version.ts
-var VERSION = "0.4.10";
+var VERSION = "0.5.0";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -662,7 +662,7 @@ var en_default = {
       failed: "Couldn't rename"
     },
     pinned: "Pinned",
-    chatMenu: { label: "Conversation actions", rename: "Rename", remove: "Remove from app", confirmRemove: "Remove? Confirm", removeFailed: "Couldn't remove", pin: "Pin to top", unpin: "Unpin", disconnect: "Disconnect", confirmDisconnect: "Disconnect? Confirm", pinFailed: "Couldn't change the pin", disconnectFailed: "Couldn't disconnect" },
+    chatMenu: { label: "Conversation actions", rename: "Rename", remove: "Remove from app", confirmRemove: "Remove? Confirm", removeFailed: "Couldn't remove", pin: "Pin to top", unpin: "Unpin", disconnect: "Disconnect", confirmDisconnect: "Disconnect? Confirm", pinFailed: "Couldn't change the pin", disconnectFailed: "Couldn't disconnect", resume: "Resume in the background" },
     background: {
       menu: "Background",
       title: "Conversation background",
@@ -776,7 +776,12 @@ var en_default = {
       image: "[image]",
       images: "[{n} images]",
       compacted: "Conversation compacted \xB7 {time}",
-      attachments: "Attached files"
+      attachments: "Attached files",
+      resume: { title: "Session ended", body: "Resume it in the background: it comes back connected to the app, with no terminal.", button: "Resume in the background", resuming: "Resuming\u2026", failed: "Could not resume: {error}", running: "This session is still open in a terminal. Type /cc there to reconnect.", error: "Could not resume the session." },
+      attach: "Open in a terminal",
+      attachCopy: "Copy {cmd}",
+      attachCopied: "Copied",
+      waitingBgHint: "This session runs in the background: answer in a terminal with {cmd}."
     },
     composer: {
       placeholder: "Message {name}\u2026",
@@ -797,7 +802,14 @@ var en_default = {
       attachTooMany: "At most {max} files per message.",
       attachFailed: "Could not upload the attachments. Try again.",
       uploading: "Uploading attachments\u2026",
-      dropHere: "Drop files to attach them"
+      dropHere: "Drop files to attach them",
+      commandSent: "Command {cmd} sent.",
+      commandBusy: "The session is busy. Send the command when it is done.",
+      commandWindows: "Commands from the app do not work on Windows yet.",
+      commandFailed: "Could not send the command.",
+      slashInteractive: "Claude Code commands only run from the app in background sessions. In this session, {cmd} would arrive as text.",
+      sendAsText: "Send as text",
+      cancel: "Cancel"
     },
     usage: {
       label: "5-hour usage",
@@ -851,7 +863,7 @@ var pt_BR_default = {
       failed: "N\xE3o foi poss\xEDvel renomear"
     },
     pinned: "Fixada",
-    chatMenu: { label: "A\xE7\xF5es da conversa", rename: "Renomear", remove: "Remover do app", confirmRemove: "Remover? Confirmar", removeFailed: "N\xE3o foi poss\xEDvel remover", pin: "Fixar no topo", unpin: "Desafixar", disconnect: "Desconectar", confirmDisconnect: "Desconectar? Confirmar", pinFailed: "N\xE3o foi poss\xEDvel alterar a fixa\xE7\xE3o", disconnectFailed: "N\xE3o foi poss\xEDvel desconectar" },
+    chatMenu: { label: "A\xE7\xF5es da conversa", rename: "Renomear", remove: "Remover do app", confirmRemove: "Remover? Confirmar", removeFailed: "N\xE3o foi poss\xEDvel remover", pin: "Fixar no topo", unpin: "Desafixar", disconnect: "Desconectar", confirmDisconnect: "Desconectar? Confirmar", pinFailed: "N\xE3o foi poss\xEDvel alterar a fixa\xE7\xE3o", disconnectFailed: "N\xE3o foi poss\xEDvel desconectar", resume: "Retomar em segundo plano" },
     background: {
       menu: "Fundo",
       title: "Fundo da conversa",
@@ -965,7 +977,12 @@ var pt_BR_default = {
       image: "[imagem]",
       images: "[{n} imagens]",
       compacted: "Conversa compactada \xB7 {time}",
-      attachments: "Arquivos anexados"
+      attachments: "Arquivos anexados",
+      resume: { title: "Sess\xE3o encerrada", body: "Retome-a em segundo plano: ela volta conectada ao app, sem abrir terminal.", button: "Retomar em segundo plano", resuming: "Retomando\u2026", failed: "N\xE3o foi poss\xEDvel retomar: {error}", running: "Esta sess\xE3o ainda est\xE1 aberta num terminal. Digite /cc nela para reconectar.", error: "N\xE3o foi poss\xEDvel retomar a sess\xE3o." },
+      attach: "Abrir no terminal",
+      attachCopy: "Copiar {cmd}",
+      attachCopied: "Copiado",
+      waitingBgHint: "Esta sess\xE3o roda em segundo plano: responda no terminal com {cmd}."
     },
     composer: {
       placeholder: "Mensagem para {name}\u2026",
@@ -986,7 +1003,14 @@ var pt_BR_default = {
       attachTooMany: "No m\xE1ximo {max} arquivos por mensagem.",
       attachFailed: "N\xE3o foi poss\xEDvel enviar os anexos. Tente de novo.",
       uploading: "Enviando anexos\u2026",
-      dropHere: "Solte os arquivos para anex\xE1-los"
+      dropHere: "Solte os arquivos para anex\xE1-los",
+      commandSent: "Comando {cmd} enviado.",
+      commandBusy: "A sess\xE3o est\xE1 ocupada. Envie o comando quando ela terminar.",
+      commandWindows: "Comandos pelo app ainda n\xE3o funcionam no Windows.",
+      commandFailed: "N\xE3o foi poss\xEDvel enviar o comando.",
+      slashInteractive: "Comandos do Claude Code s\xF3 rodam pelo app em sess\xF5es em segundo plano. Nesta sess\xE3o, {cmd} chegaria como texto.",
+      sendAsText: "Enviar como texto",
+      cancel: "Cancelar"
     },
     usage: {
       label: "Uso de 5 horas",

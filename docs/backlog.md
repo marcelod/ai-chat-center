@@ -1,19 +1,8 @@
 # Pendências
 
-Itens combinados e deixados para depois. Estado em 2026-11-24, versão 0.4.9. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
+Itens combinados e deixados para depois. Estado em 2026-11-24, versão 0.5.0. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
 
 ## A fazer
-
-### Comandos da sessão a partir do app
-
-Rodar comandos como `/compact` e `/reload-plugins` pelo app.
-
-- Limite conhecido: a mensagem do app chega à sessão como texto de hook, então um comando interno do Claude Code enviado assim não é executado (visto com `/compact` em 2026-11-24). É preciso outro caminho, por exemplo enviar as teclas ao terminal da sessão; investigar o que é viável no Linux, no Windows e no macOS.
-- Comandos que a sessão consegue rodar pelo Bash ou por skills podem funcionar já pelo caminho atual.
-
-### Retomar pelo app uma sessão encerrada
-
-Hoje uma sessão sai do app quando o terminal dela fecha. Para continuar no dia seguinte pelo app, seria preciso abrir um terminal com `claude --resume <id>` a partir do app. Ligado aos atalhos do Windows e do macOS; rodada própria.
 
 ### Instalação mais fácil no Windows
 
@@ -42,6 +31,8 @@ A queda esperada de consultas ao `claude agents` com tudo parado (de 12 para 2 p
 - 0.4.9, modo da sessão: confirmar que o Claude Code manda `permission_mode` nos hooks (prompt, notificação e Stop). A troca com Shift+Tab só aparece no próximo evento (prompt enviado ou fim do turno).
 - 0.4.9, uso de 5 horas: `/ai-chat-center:cc usage on` troca a status line do `settings.json` por um wrapper que grava o uso e chama a status line anterior; `usage off` restaura. Conferir que a status line no terminal continua igual, que o rodapé da lista mostra o uso e que o `off` devolve o `settings.json` como era. Uma status line definida nas configurações do projeto ganha da do usuário, e aí o wrapper não roda.
 
+- 0.5.0, sessões em segundo plano: retomar pelo app e comandos `/…` (`docs/testing/background-sessions.md`). Comandos no Windows ficam para depois (sem `script`; o node-pty traz ~30 MB); macOS não testado.
+
 ## Limites conhecidos (mexer só se atrapalharem)
 
 - Se o navegador fecha sem avisar o hub (crash), o `/cc` não abre janela por até 150 s.
@@ -57,6 +48,7 @@ A queda esperada de consultas ao `claude agents` com tudo parado (de 12 para 2 p
 - 0.4.8: anexos (📎, arrastar, Ctrl+V), fundo por conversa, Fixar no topo e Desconectar no menu ⋮.
 - 0.4.9: modo da sessão no cabeçalho da conversa, uso de 5 horas no rodapé da lista (`/ai-chat-center:cc usage on|off`), teste do `connectedAt` isolado.
 - 0.4.10: app na própria janela por padrão (`/ai-chat-center:cc window off` desliga).
+- 0.5.0: retomar pelo app uma sessão encerrada (em segundo plano) e rodar comandos `/…` nas sessões em segundo plano.
 - PWA: o Chrome oferece "Instalar app" sem service worker (confirmado em 2026-11-24).
 - Push da `main` para o origin.
 
