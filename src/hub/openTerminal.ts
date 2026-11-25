@@ -22,18 +22,21 @@ export interface TerminalCommand {
 }
 
 /**
- * Linux terminals in the order tried, each with the arguments that run `claude attach <id>` in `cwd`.
+ * Linux terminals in the order tried (those with a known syntax first), each with the arguments that run `claude attach <id>` in `cwd`.
  * Where a terminal has a working-directory option it is used (gnome-terminal opens its window from a
  * server process, whose own cwd is not ours); the process cwd is set as well for the others.
  */
 const LINUX_TERMINALS: [string, (cwd: string, run: string[]) => string[]][] = [
-  ['x-terminal-emulator', (_cwd, run) => ['-e', ...run]],
   ['gnome-terminal', (cwd, run) => [`--working-directory=${cwd}`, '--', ...run]],
   ['konsole', (cwd, run) => ['--workdir', cwd, '-e', ...run]],
   ['xfce4-terminal', (cwd, run) => [`--working-directory=${cwd}`, '-x', ...run]],
   ['kitty', (cwd, run) => ['--directory', cwd, ...run]],
   ['alacritty', (cwd, run) => ['--working-directory', cwd, '-e', ...run]],
   ['xterm', (_cwd, run) => ['-e', ...run]],
+  // Last: it is a Debian alternative that may be any terminal, so only the one syntax every one of them
+  // takes is used: `-e` with the whole command as ONE string (the id is 8 validated hex characters, so
+  // nothing in it needs quoting). The folder is the process cwd.
+  ['x-terminal-emulator', (_cwd, run) => ['-e', run.join(' ')]],
 ];
 
 /** The first Linux terminal found in an absolute PATH entry, with its arguments; null when there is none. */

@@ -29,15 +29,17 @@ describe('linuxTerminal', () => {
   });
   it('gives each terminal its own way of running a command', () => {
     const args = (name: string) => linuxTerminal(ID, '/p', env, (p) => p === `/usr/bin/${name}`)?.args;
-    expect(args('x-terminal-emulator')).toEqual(['-e', 'claude', 'attach', ID]);
+    expect(args('x-terminal-emulator')).toEqual(['-e', `claude attach ${ID}`]);
     expect(args('gnome-terminal')).toEqual(['--working-directory=/p', '--', 'claude', 'attach', ID]);
     expect(args('xfce4-terminal')).toEqual(['--working-directory=/p', '-x', 'claude', 'attach', ID]);
     expect(args('kitty')).toEqual(['--directory', '/p', 'claude', 'attach', ID]);
     expect(args('alacritty')).toEqual(['--working-directory', '/p', '-e', 'claude', 'attach', ID]);
     expect(args('xterm')).toEqual(['-e', 'claude', 'attach', ID]);
   });
-  it('x-terminal-emulator comes first; relative PATH entries are ignored; none found is null', () => {
-    expect(linuxTerminal(ID, '/p', env, () => true)?.cmd).toBe('/usr/local/bin/x-terminal-emulator');
+  it('x-terminal-emulator is the last resort; relative PATH entries are ignored; none found is null', () => {
+    expect(linuxTerminal(ID, '/p', env, () => true)?.cmd).toBe('/usr/local/bin/gnome-terminal');
+    expect(linuxTerminal(ID, '/p', env, (p) => p.endsWith('/x-terminal-emulator') || p.endsWith('/xterm'))?.cmd).toBe('/usr/local/bin/xterm');
+    expect(linuxTerminal(ID, '/p', env, (p) => p === '/usr/bin/x-terminal-emulator')?.cmd).toBe('/usr/bin/x-terminal-emulator');
     expect(linuxTerminal(ID, '/p', { PATH: 'bin:.' }, () => true)).toBeNull();
     expect(linuxTerminal(ID, '/p', env, () => false)).toBeNull();
     expect(
