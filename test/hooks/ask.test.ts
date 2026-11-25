@@ -96,6 +96,8 @@ describe('runAsk: waits for the app', () => {
   it('returns allow with the answers, then removes the pending question and the waiting state', async () => {
     const run = runAsk(inp(), opts());
     await pendingSeen();
+    // The hook writes the pending question first and the waiting state right after: wait for it (slower on Windows).
+    for (let i = 0; i < 500 && !(await getWaiting(SID)); i++) await new Promise((r) => setTimeout(r, 5));
     expect((await getWaiting(SID))?.kind).toBe('question');
     expect(await writeAnswer(SID, ID, { answers: { [Q]: 'Blue' } })).toBe('ok');
     const out = JSON.parse((await run)!) as Out;

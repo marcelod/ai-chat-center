@@ -6,6 +6,7 @@ import {
 import { tmpDir } from '../helpers/tmp.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import { getWaiting, setWaiting } from '../../src/core/waiting.js';
 import { paths } from '../../src/core/paths.js';
 
 beforeEach(() => {
@@ -90,6 +91,16 @@ describe('pending and answers', () => {
     expect(fs.existsSync(path.join(paths().questionsDir('s1'), 'b.json'))).toBe(false);
     expect(fs.existsSync(path.join(paths().questionsDir('s1'), 'b.answer.json'))).toBe(false);
     expect(fs.existsSync(path.join(paths().questionsDir('s1'), 'a.json'))).toBe(true);
+  });
+
+  it('getPending also clears the question waiting state left by a hook that died without cleanup', async () => {
+    await putPending('s1', { ...pending('a', '2026-01-01T00:00:00.000Z'), pid: 2 ** 30 });
+    await setWaiting('s1', 'question');
+    expect(await getPending('s1')).toBeNull();
+    expect(await getWaiting('s1')).toBeNull();
+    await setWaiting('s1', 'input'); // another kind is not ours to clear
+    expect(await getPending('s1')).toBeNull();
+    expect((await getWaiting('s1'))?.kind).toBe('input');
   });
 
   it('getPending ignores answer files', async () => {

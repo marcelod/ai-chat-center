@@ -49,7 +49,7 @@ describe('macOS launcher', () => {
     expect(installLauncher(o)).toBe(true);
     const p = macLauncherPaths(home);
     expect(fs.readFileSync(p.exec, 'utf8')).toBe(launchScript('/opt/node/bin/node', path.join(dist, 'open.mjs')));
-    expect(fs.statSync(p.exec).mode & 0o777).toBe(0o755);
+    if (process.platform !== 'win32') expect(fs.statSync(p.exec).mode & 0o777).toBe(0o755); // POSIX modes
     expect(fs.readFileSync(p.plist, 'utf8')).toBe(infoPlist());
     const icns = fs.readFileSync(p.icon);
     expect(icns.toString('latin1', 8, 12)).toBe('ic09');

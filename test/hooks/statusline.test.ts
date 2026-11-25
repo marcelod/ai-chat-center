@@ -27,7 +27,7 @@ describe('status line wrapper', () => {
     expect(await installStatusline(opts())).toBe('installed');
     const s = settings();
     expect(s.model).toBe('opus');
-    expect(s.statusLine).toEqual({ type: 'command', command: `"/usr/bin/node" "${paths().statuslineScript}"`, padding: 0 });
+    expect(s.statusLine).toEqual({ type: 'command', command: `"/usr/bin/node" "${paths().statuslineScript.replace(/\\/g, '/')}"`, padding: 0 });
     expect(isOurs(s.statusLine)).toBe(true);
     expect(fs.readFileSync(paths().statuslineScript, 'utf8')).toBe('// v1');
     expect(await readStatuslineState()).toEqual({ original });
