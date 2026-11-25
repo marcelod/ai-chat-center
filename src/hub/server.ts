@@ -39,6 +39,7 @@ import { configDirOf, knownFolders } from './folders.js';
 import { searchAll } from './search.js';
 import { MAX_QUERY, MIN_QUERY } from '../shared/search.js';
 import { failResume, isResuming, startResume } from './resumeState.js';
+import { openTerminal, type OpenTerminalResult, type TerminalTarget } from './openTerminal.js';
 
 export interface HubOptions {
   provider: Provider;
@@ -55,6 +56,8 @@ export interface HubOptions {
     resume?: (reg: Registration) => Promise<ResumeResult>;
     type?: (id: string, text: string) => Promise<void>;
     start?: (s: NewSession) => Promise<StartResult>;
+    /** Opens the system terminal running `claude attach <bgId>` (default: openTerminal). */
+    openTerminal?: (t: TerminalTarget) => Promise<OpenTerminalResult>;
     /** Whether a folder exists (default: stat). */
     folderExists?: (p: string) => Promise<boolean>;
     platform?: NodeJS.Platform;
@@ -101,7 +104,7 @@ const FALLBACK_PAGE =
   '<!doctype html><html><head><meta charset="utf-8"><title>AI Chat Center</title></head><body><h1>UI not built</h1><p>Run the build to generate the web UI.</p></body></html>';
 
 class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public code?: string) {
     super(message);
   }
 }
@@ -171,6 +174,7 @@ export async function createHub(
   const resume = opts.bg?.resume ?? ((reg: Registration) => resumeInBackground(reg));
   const type = opts.bg?.type ?? ((id: string, text: string) => typeCommand(id, text));
   const start = opts.bg?.start ?? ((s: NewSession) => startInBackground(s));
+  const openTerm = opts.bg?.openTerminal ?? ((t: TerminalTarget) => openTerminal(t));
   const folders = async () => knownFolders(await listRegistrations(), await listLive(), opts.bg?.folderExists);
   const bgPlatform = opts.bg?.platform ?? process.platform;
   /** Sessions with a command being typed: one at a time each. */
@@ -422,7 +426,7 @@ export async function createHub(
       await saveConfig({ language: body.language as Lang });
       return sendJson(res, 200, { language: body.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|pin|disconnect|remove|resume|command|background|background-image|attachments|questions\/([^/]+))$/.exec(p);
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|pin|disconnect|remove|resume|command|open-terminal|background|background-image|attachments|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid: string;
       try {
@@ -563,6 +567,28 @@ export async function createHub(
         }
         return sendJson(res, 200, { ok: true });
       }
+      if (m[2] === 'open-terminal' && method === 'POST') {
+        // Opens the system terminal on a background session: `claude attach <bgId>` in its folder.
+        req.resume();
+        const reg = await getRegistration(sid);
+        if (!reg || isRemoved(reg)) throw new HttpError(404, 'no such session');
+        if (!isActive(reg)) throw new HttpError(409, 'session is disconnected', 'session-disconnected');
+        const live = await listLive();
+        if (live === null) throw new HttpError(503, 'could not list running sessions');
+        const l = live.find((x) => x.sessionId === sid);
+        if (!l || l.kind !== 'background' || !l.bgId) throw new HttpError(409, 'not a background session', 'not-background');
+        let r: OpenTerminalResult;
+        try {
+          r = await openTerm({ bgId: l.bgId, cwd: reg.cwd, configDir: reg.configDir });
+        } catch (e) {
+          r = { ok: false, code: 'spawn-failed', error: (e as Error).message };
+        }
+        if (!r.ok) {
+          log(`open terminal for ${sid} failed: ${r.error}`);
+          throw new HttpError(502, r.code === 'no-terminal' ? 'no terminal program found' : 'could not open a terminal', r.code);
+        }
+        return sendJson(res, 200, { ok: true });
+      }
       if (m[2] === 'background' && method === 'PUT') {
         // Preset ids only (never CSS from the client); null clears. Images come by the upload route below.
         const v = validBackgroundPreset(await readJsonBody(req));
@@ -666,7 +692,7 @@ export async function createHub(
       else await serveStatic(req, res, url.pathname);
     } catch (e) {
       if (res.headersSent) return void res.end();
-      if (e instanceof HttpError) return sendJson(res, e.status, { error: e.message });
+      if (e instanceof HttpError) return sendJson(res, e.status, e.code ? { error: e.message, code: e.code } : { error: e.message });
       if (e instanceof SessionDisconnectedError) return sendJson(res, 409, { error: 'session disconnected', code: 'session-disconnected' });
       if (e instanceof SessionProtocolError) {
         return sendJson(res, 409, { error: `session runs ${e.direction === 'older' ? 'an older' : 'a newer'} version`, code: `session-${e.direction}-version` });
