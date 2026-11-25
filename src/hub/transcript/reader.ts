@@ -40,6 +40,11 @@ export class TranscriptReader {
     return this.parser.model;
   }
 
+  /** Claude Code version recorded in the latest transcript lines, if any. */
+  claudeVersion(): string | undefined {
+    return this.parser.claudeVersion;
+  }
+
   private reset(): void {
     this.offset = 0;
     this.partial = [];

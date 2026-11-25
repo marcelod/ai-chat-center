@@ -35,6 +35,17 @@ const reg = (sid = 's1') =>
 const line = (uuid: string, text: string) =>
   JSON.stringify({ type: 'assistant', uuid, timestamp: '2026-01-01T00:00:00Z', message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n';
 
+describe('provider: versions', () => {
+  it('carries the hub version, the plugin version of the registration and the Claude Code version of the transcript', async () => {
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', uuid: 'a', version: '2.1.332', timestamp: '2026-01-01T00:00:00Z', message: { role: 'assistant', content: [{ type: 'text', text: 'x' }] } }) + '\n');
+    await register({ sessionId: 's1', transcriptPath: transcript, cwd: '/home/u/proj', pid: 1, version: '0.5.0', protocol: PROTOCOL });
+    const r = await new ClaudeCodeProvider(async () => [live()]).listSessions();
+    expect(r.hubVersion).toBe(VERSION);
+    expect(r.connected[0].pluginVersion).toBe('0.5.0');
+    expect(r.connected[0].claudeVersion).toBe('2.1.332');
+  });
+});
+
 describe('provider: busy needs the turn marker', () => {
   it('claude agents busy + turn marker -> busy', async () => {
     await reg();

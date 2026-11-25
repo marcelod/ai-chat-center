@@ -15,7 +15,7 @@ import { getWaiting } from '../core/waiting.js';
 import { paths } from '../core/paths.js';
 import { TranscriptReader } from './transcript/reader.js';
 import { queryLiveSessions } from './status.js';
-import { PROTOCOL } from '../core/version.js';
+import { PROTOCOL, VERSION } from '../core/version.js';
 import { createClaudeProcessCheck } from '../hooks/parentClaude.js';
 import { resumeView } from './resumeState.js';
 
@@ -350,6 +350,9 @@ export class ClaudeCodeProvider implements Provider {
       if (mode && !disconnected) view.mode = mode; // a stale mode would mislead
       const background = await getBackground(sid);
       if (background) view.background = background;
+      if (!disconnected && reg.version) view.pluginVersion = reg.version;
+      const claudeVersion = disconnected ? undefined : this.readers.get(sid)?.reader.claudeVersion();
+      if (claudeVersion) view.claudeVersion = claudeVersion;
       if (!disconnected && l?.bgId) view.bgId = l.bgId;
       Object.assign(view, resumeView(sid, disconnected ? null : reg.connectedAt, this.now()));
       connected.push(view);
@@ -368,7 +371,7 @@ export class ClaudeCodeProvider implements Provider {
 
     const others = live.list.filter((l) => l.kind === 'interactive' && !activeIds.has(l.sessionId));
     const usage = await readUsage();
-    return { connected: connected.map(({ _sort, ...v }) => v), others, ...(usage ? { usage } : {}) };
+    return { connected: connected.map(({ _sort, ...v }) => v), others, hubVersion: VERSION, ...(usage ? { usage } : {}) };
   }
 
   async events(sid: string): Promise<ChatEvent[]> {

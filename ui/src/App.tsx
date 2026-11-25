@@ -77,6 +77,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
           connected={data.connected}
           others={data.others}
           usage={data.usage}
+          hubVersion={data.hubVersion}
           unread={unread.counts}
           selectedId={selectedId}
           onSelect={select}
@@ -103,6 +104,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
             key={hitSearch?.sid === selected.sessionId ? `${selected.sessionId}:${hitSearch.n}` : selected.sessionId}
             initialSearch={hitSearch?.sid === selected.sessionId ? hitSearch.q : undefined}
             session={selected}
+            hubVersion={data.hubVersion}
             events={eventsById[selected.sessionId] ?? []}
             pending={pending[selected.sessionId] ?? []}
             loading={loading}

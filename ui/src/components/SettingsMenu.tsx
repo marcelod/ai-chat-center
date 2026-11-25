@@ -10,11 +10,14 @@ export function SettingsMenu({
   onLanguage,
   notifications,
   usageHint = false,
+  version,
 }: {
   onLanguage: (l: Language) => void;
   notifications?: NotificationsControl;
   /** No usage recorded: say how to turn it on. */
   usageHint?: boolean;
+  /** Version of AI Chat Center running (the hub's). */
+  version?: string;
 }) {
   const t = useT();
   const lang = useLang();
@@ -88,6 +91,11 @@ export function SettingsMenu({
               />
               {t('ui.notifications.enable')}
             </label>
+          )}
+          {version && (
+            <p data-testid="app-version" className="mt-3 text-xs text-muted">
+              {t('ui.version', { v: version })}
+            </p>
           )}
           {usageHint && <p className="mt-3 rounded-[10px] bg-field p-2 text-xs text-muted">{t('ui.usage.hint')}</p>}
         </div>

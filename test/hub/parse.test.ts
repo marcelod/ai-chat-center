@@ -406,6 +406,23 @@ describe('TranscriptParser model', () => {
   });
 });
 
+describe('TranscriptParser claudeVersion', () => {
+  const e = (uuid: string, extra: object) => ({
+    type: 'assistant', uuid, timestamp: '2026-01-01T00:00:00Z', ...extra,
+    message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
+  });
+  it('keeps the latest main-thread version, ignoring sidechain and non-string', () => {
+    const p = new TranscriptParser();
+    expect(p.claudeVersion).toBeUndefined();
+    p.push(e('a1', { version: '2.1.330' }));
+    p.push(e('a2', { version: '9.9.9', isSidechain: true }));
+    p.push(e('a3', { version: 5 }));
+    expect(p.claudeVersion).toBe('2.1.330');
+    p.push(e('a4', { version: '2.1.332' }));
+    expect(p.claudeVersion).toBe('2.1.332');
+  });
+});
+
 describe('TranscriptParser: app attachments', () => {
   const K = 'k'.repeat(32);
   const A = '/h/attachments/s1/0123456789abcdef-shot.png';

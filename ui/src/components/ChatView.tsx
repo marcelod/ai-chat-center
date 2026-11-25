@@ -17,6 +17,8 @@ import { SessionControls } from './SessionControls';
 import { AgentBubble, RecapCard, AssistantBubble, ToAgentBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
 
 type Props = {
+  /** Version of the hub (the app); a session whose plugin differs is flagged in the header. */
+  hubVersion?: string;
   /** Opens the conversation search with this text (a hit picked in the list search). */
   initialSearch?: string;
   session: SessionView;
@@ -74,6 +76,29 @@ function InfoPart({ label, value, glyph, cls }: { label: string; value: string; 
       {glyph && <span aria-hidden="true">{glyph}</span>}
       {value}
     </span>
+  );
+}
+
+/** Plugin and Claude Code versions of the session, discreet; the plugin's is flagged when it differs from the hub's. */
+function VersionInfo({ session, hubVersion }: { session: SessionView; hubVersion?: string }) {
+  const t = useT();
+  const { pluginVersion, claudeVersion } = session;
+  if (!pluginVersion && !claudeVersion) return null;
+  const stale = Boolean(pluginVersion && hubVersion && pluginVersion !== hubVersion);
+  return (
+    <div data-testid="version-info" className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
+      {pluginVersion && (
+        <span
+          data-stale={stale ? 'true' : undefined}
+          title={stale ? t('ui.chat.versionOld') : t('ui.chat.pluginVersion')}
+          className={stale ? 'font-semibold text-waiting-text' : undefined}
+        >
+          {t('ui.chat.pluginVersionValue', { v: pluginVersion })}
+          {stale && ` · ${t('ui.chat.versionOld')}`}
+        </span>
+      )}
+      {claudeVersion && <span title={t('ui.chat.claudeVersion')}>{t('ui.chat.claudeVersionValue', { v: claudeVersion })}</span>}
+    </div>
   );
 }
 
@@ -338,7 +363,7 @@ function SessionTitle({
   );
 }
 
-export function ChatView({ initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, ...bg }: Props) {
+export function ChatView({ hubVersion, initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, ...bg }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -457,6 +482,8 @@ export function ChatView({ initialSearch, session, events, pending, loading, onS
             )}
           </div>
           {runCommand && session.bgId && state !== 'disconnected' && <SessionControls onCommand={runCommand} disabled={state !== 'idle'} />}
+          {!session.bgId && state !== 'disconnected' && <SessionControls onCommand={async () => {}} disabled unavailable />}
+          <VersionInfo session={session} hubVersion={hubVersion} />
         </div>
         <button
           type="button"
@@ -589,7 +616,7 @@ export function ChatView({ initialSearch, session, events, pending, loading, onS
 
       <Composer key={session.sessionId} sessionId={session.sessionId} name={session.name} disabled={state === 'disconnected'}
         blockedByQuestion={Boolean(session.pendingQuestion)} onSend={onSend} onUpload={onUpload}
-        onCommand={session.bgId && state !== 'disconnected' ? runCommand : undefined} attachId={session.bgId} />
+        onCommand={session.bgId && state !== 'disconnected' ? runCommand : undefined} attachId={session.bgId} terminalHint={!session.bgId && state !== 'disconnected'} />
     </section>
   );
 }
