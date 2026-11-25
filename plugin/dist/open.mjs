@@ -66,7 +66,7 @@ function isAlive(pid) {
 }
 
 // src/core/version.ts
-var VERSION = "0.6.0";
+var VERSION = "0.6.1";
 
 // src/core/healthProof.ts
 import crypto from "node:crypto";
@@ -234,9 +234,9 @@ import path3 from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 var LINUX_NAMES = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge", "microsoft-edge-stable"];
 var MAC_APPS = [
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  "/Applications/Chromium.app/Contents/MacOS/Chromium",
-  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+  "Google Chrome.app/Contents/MacOS/Google Chrome",
+  "Chromium.app/Contents/MacOS/Chromium",
+  "Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
 ];
 var WIN_EXES = [
   ["Google", "Chrome", "Application", "chrome.exe"],
@@ -263,8 +263,10 @@ function findBrowser(env = process.env, platform = process.platform, exists = (p
     }
   };
   let candidates;
-  if (platform === "darwin") candidates = MAC_APPS;
-  else if (platform === "win32") {
+  if (platform === "darwin") {
+    const roots = ["/Applications", ...env.HOME && path3.posix.isAbsolute(env.HOME) ? [path3.posix.join(env.HOME, "Applications")] : []];
+    candidates = MAC_APPS.flatMap((app) => roots.map((r) => path3.posix.join(r, app)));
+  } else if (platform === "win32") {
     const bases = WIN_BASES.map((k) => env[k]).filter((b) => !!b && path3.win32.isAbsolute(b));
     candidates = WIN_EXES.flatMap((exe) => bases.map((b) => path3.win32.join(b, ...exe)));
   } else {
@@ -272,6 +274,25 @@ function findBrowser(env = process.env, platform = process.platform, exists = (p
     candidates = LINUX_NAMES.flatMap((n) => dirs.map((d) => path3.posix.join(d, n)));
   }
   return candidates.find(ok) ?? null;
+}
+function findDefaultOpener(env = process.env, platform = process.platform, exists = (p) => isExecutableFile(p, platform)) {
+  const ok = (p) => {
+    try {
+      return exists(p);
+    } catch {
+      return false;
+    }
+  };
+  if (platform === "darwin") return ok("/usr/bin/open") ? { cmd: "/usr/bin/open", args: [] } : null;
+  if (platform === "win32") {
+    const root = env.SystemRoot ?? env.SYSTEMROOT ?? env.windir;
+    if (!root || !path3.win32.isAbsolute(root)) return null;
+    const exe2 = path3.win32.join(root, "System32", "rundll32.exe");
+    return ok(exe2) ? { cmd: exe2, args: ["url.dll,FileProtocolHandler"] } : null;
+  }
+  const dirs = (env.PATH ?? "").split(path3.posix.delimiter).filter((d) => path3.posix.isAbsolute(d));
+  const exe = dirs.map((d) => path3.posix.join(d, "xdg-open")).find(ok);
+  return exe ? { cmd: exe, args: [] } : null;
 }
 function openAppWindow(browser, url, deps = {}) {
   const spawn2 = deps.spawn ?? nodeSpawn;
@@ -289,10 +310,27 @@ function openAppWindow(browser, url, deps = {}) {
     return false;
   }
 }
+function openDefaultBrowser(opener, url, deps = {}) {
+  const spawn2 = deps.spawn ?? nodeSpawn;
+  try {
+    const child = spawn2(opener.cmd, [...opener.args, url], { detached: true, stdio: "ignore", shell: false, windowsHide: true });
+    child.on?.("error", (e) => {
+      try {
+        deps.onError?.(`app tab: could not start ${opener.cmd}: ${String(e?.message ?? e).split(url).join("<url>")}`);
+      } catch {
+      }
+    });
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
 var CODE_RE = /^[0-9a-f]{64}$/;
 async function launchAppWindow(hubUrl, deps = {}, sessionId) {
   const browser = (deps.findBrowser ?? (() => findBrowser()))();
-  if (!browser) return false;
+  const opener = browser ? null : (deps.findDefaultOpener ?? (() => findDefaultOpener()))();
+  if (!browser && !opener) return false;
   const u = new URL(hubUrl);
   const token = new URLSearchParams(u.hash.slice(1)).get("token");
   if (u.protocol !== "http:" || u.hostname !== "127.0.0.1" || !token) throw new Error("app window: unexpected hub url");
@@ -313,8 +351,13 @@ async function launchAppWindow(hubUrl, deps = {}, sessionId) {
   if (answer?.live === true) return "reused";
   const code = answer?.code;
   if (typeof code !== "string" || !CODE_RE.test(code)) throw new Error("app window: pair-code answer has no valid code");
-  if (!openAppWindow(browser, `${u.origin}/#pair=${code}`, deps)) throw new Error(`app window: could not start ${browser}`);
-  return "opened";
+  const appUrl = `${u.origin}/#pair=${code}`;
+  if (browser) {
+    if (!openAppWindow(browser, appUrl, deps)) throw new Error(`app window: could not start ${browser}`);
+    return "opened";
+  }
+  if (!openDefaultBrowser(opener, appUrl, deps)) throw new Error(`app tab: could not start ${opener.cmd}`);
+  return "tab";
 }
 
 // src/hooks/open.ts
@@ -324,7 +367,7 @@ async function openApp(deps = {}) {
     const url = await (deps.ensureHub ?? ((notice) => ensureHub({ notice })))(log);
     const r = await (deps.launch ?? launchAppWindow)(url, { onError: log });
     if (r === false) {
-      log("launcher: no Chrome, Chromium or Edge found");
+      log("launcher: no browser found");
       return "no-browser";
     }
     return r;

@@ -272,7 +272,7 @@ var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
 var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
 
 // src/core/version.ts
-var VERSION = "0.6.0";
+var VERSION = "0.6.1";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -649,6 +649,8 @@ var en_default = {
     windowOn: "AI Chat Center: the app will open in its own window when you connect. To turn off: /ai-chat-center:cc window off",
     windowOff: "AI Chat Center: the app will no longer open in its own window.",
     windowNoBrowser: "No Chrome, Chromium or Edge found: the link is still shown.",
+    windowDefaultBrowser: "No Chrome, Chromium or Edge found: the app will open in a tab of your default browser.",
+    tabMacTip: "Opened in a browser tab. In Safari (macOS Sonoma or newer), File > Add to Dock gives the app its own window.",
     windowLauncher: "The \u201CAI Chat Center\u201D shortcut was added to your apps (the app menu on Linux, the Start menu on Windows, Applications in your home folder on macOS): it opens the app (and starts the hub if needed).",
     launcherComment: "Follow and answer your Claude Code sessions",
     usageOn: "AI Chat Center: the app now shows the 5-hour usage. Your status line stays the same (it runs through a small AI Chat Center wrapper). To undo: /ai-chat-center:cc usage off",
@@ -895,6 +897,8 @@ var pt_BR_default = {
     windowOn: "AI Chat Center: o app vai abrir em janela pr\xF3pria ao conectar. Para desligar: /ai-chat-center:cc window off",
     windowOff: "AI Chat Center: o app n\xE3o abre mais em janela pr\xF3pria.",
     windowNoBrowser: "Nenhum Chrome, Chromium ou Edge encontrado: o link continua sendo mostrado.",
+    windowDefaultBrowser: "Nenhum Chrome, Chromium ou Edge encontrado: o app vai abrir numa aba do navegador padr\xE3o.",
+    tabMacTip: "O app abriu numa aba do navegador. No Safari (macOS Sonoma ou mais novo), Arquivo > Adicionar ao Dock deixa o app em janela pr\xF3pria.",
     windowLauncher: "O atalho \u201CAI Chat Center\u201D foi adicionado aos seus aplicativos (menu de aplicativos no Linux, menu Iniciar no Windows, Aplicativos da sua pasta pessoal no macOS): ele abre o app (e inicia o hub, se preciso).",
     launcherComment: "Acompanhe e responda suas sess\xF5es do Claude Code",
     usageOn: "AI Chat Center: o app agora mostra o uso do per\xEDodo de 5 horas. Sua status line continua igual (ela passa por um pequeno wrapper do AI Chat Center). Para desfazer: /ai-chat-center:cc usage off",
@@ -1227,9 +1231,9 @@ import path8 from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 var LINUX_NAMES = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge", "microsoft-edge-stable"];
 var MAC_APPS = [
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  "/Applications/Chromium.app/Contents/MacOS/Chromium",
-  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+  "Google Chrome.app/Contents/MacOS/Google Chrome",
+  "Chromium.app/Contents/MacOS/Chromium",
+  "Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
 ];
 var WIN_EXES = [
   ["Google", "Chrome", "Application", "chrome.exe"],
@@ -1256,8 +1260,10 @@ function findBrowser(env = process.env, platform = process.platform, exists = (p
     }
   };
   let candidates;
-  if (platform === "darwin") candidates = MAC_APPS;
-  else if (platform === "win32") {
+  if (platform === "darwin") {
+    const roots = ["/Applications", ...env.HOME && path8.posix.isAbsolute(env.HOME) ? [path8.posix.join(env.HOME, "Applications")] : []];
+    candidates = MAC_APPS.flatMap((app) => roots.map((r) => path8.posix.join(r, app)));
+  } else if (platform === "win32") {
     const bases = WIN_BASES.map((k) => env[k]).filter((b) => !!b && path8.win32.isAbsolute(b));
     candidates = WIN_EXES.flatMap((exe) => bases.map((b) => path8.win32.join(b, ...exe)));
   } else {
@@ -1265,6 +1271,25 @@ function findBrowser(env = process.env, platform = process.platform, exists = (p
     candidates = LINUX_NAMES.flatMap((n) => dirs.map((d) => path8.posix.join(d, n)));
   }
   return candidates.find(ok) ?? null;
+}
+function findDefaultOpener(env = process.env, platform = process.platform, exists = (p) => isExecutableFile(p, platform)) {
+  const ok = (p) => {
+    try {
+      return exists(p);
+    } catch {
+      return false;
+    }
+  };
+  if (platform === "darwin") return ok("/usr/bin/open") ? { cmd: "/usr/bin/open", args: [] } : null;
+  if (platform === "win32") {
+    const root = env.SystemRoot ?? env.SYSTEMROOT ?? env.windir;
+    if (!root || !path8.win32.isAbsolute(root)) return null;
+    const exe2 = path8.win32.join(root, "System32", "rundll32.exe");
+    return ok(exe2) ? { cmd: exe2, args: ["url.dll,FileProtocolHandler"] } : null;
+  }
+  const dirs = (env.PATH ?? "").split(path8.posix.delimiter).filter((d) => path8.posix.isAbsolute(d));
+  const exe = dirs.map((d) => path8.posix.join(d, "xdg-open")).find(ok);
+  return exe ? { cmd: exe, args: [] } : null;
 }
 function openAppWindow(browser, url, deps = {}) {
   const spawn2 = deps.spawn ?? nodeSpawn;
@@ -1282,10 +1307,27 @@ function openAppWindow(browser, url, deps = {}) {
     return false;
   }
 }
+function openDefaultBrowser(opener, url, deps = {}) {
+  const spawn2 = deps.spawn ?? nodeSpawn;
+  try {
+    const child = spawn2(opener.cmd, [...opener.args, url], { detached: true, stdio: "ignore", shell: false, windowsHide: true });
+    child.on?.("error", (e) => {
+      try {
+        deps.onError?.(`app tab: could not start ${opener.cmd}: ${String(e?.message ?? e).split(url).join("<url>")}`);
+      } catch {
+      }
+    });
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
 var CODE_RE = /^[0-9a-f]{64}$/;
 async function launchAppWindow(hubUrl, deps = {}, sessionId) {
   const browser = (deps.findBrowser ?? (() => findBrowser()))();
-  if (!browser) return false;
+  const opener = browser ? null : (deps.findDefaultOpener ?? (() => findDefaultOpener()))();
+  if (!browser && !opener) return false;
   const u = new URL(hubUrl);
   const token = new URLSearchParams(u.hash.slice(1)).get("token");
   if (u.protocol !== "http:" || u.hostname !== "127.0.0.1" || !token) throw new Error("app window: unexpected hub url");
@@ -1306,8 +1348,13 @@ async function launchAppWindow(hubUrl, deps = {}, sessionId) {
   if (answer?.live === true) return "reused";
   const code2 = answer?.code;
   if (typeof code2 !== "string" || !CODE_RE.test(code2)) throw new Error("app window: pair-code answer has no valid code");
-  if (!openAppWindow(browser, `${u.origin}/#pair=${code2}`, deps)) throw new Error(`app window: could not start ${browser}`);
-  return "opened";
+  const appUrl = `${u.origin}/#pair=${code2}`;
+  if (browser) {
+    if (!openAppWindow(browser, appUrl, deps)) throw new Error(`app window: could not start ${browser}`);
+    return "opened";
+  }
+  if (!openDefaultBrowser(opener, appUrl, deps)) throw new Error(`app tab: could not start ${opener.cmd}`);
+  return "tab";
 }
 
 // src/hooks/launcher.ts
@@ -1687,7 +1734,9 @@ async function connect(input, resolve, ctx) {
     status = CONNECTED;
     if (openWindow) {
       refreshLauncher(ctx, language);
-      await openWindowQuietly(url, ctx, sid);
+      const opened = await openWindowQuietly(url, ctx, sid);
+      if (opened === "tab" && (ctx.platform ?? process.platform) === "darwin") shown += `
+${t(language, "hook.tabMacTip")}`;
     }
   } catch (e) {
     logError(e);
@@ -1732,14 +1781,16 @@ function refreshLauncher(ctx, language) {
 }
 async function openWindowQuietly(url, ctx, sid) {
   try {
-    await launchAppWindow(url, {
+    return await launchAppWindow(url, {
       findBrowser: ctx.findBrowser ?? (() => findBrowser()),
+      findDefaultOpener: ctx.findDefaultOpener ?? (() => findDefaultOpener()),
       ...ctx.fetch ? { fetch: ctx.fetch } : {},
       ...ctx.spawn ? { spawn: ctx.spawn } : {},
       onError: (msg) => logError(msg)
     }, sid);
   } catch (e) {
     logError(e instanceof Error ? e.message : String(e));
+    return false;
   }
 }
 async function handleHook(event, input, ctx) {
@@ -1760,9 +1811,11 @@ async function handleHook(event, input, ctx) {
       const { language } = await saveConfig({ openWindow: on });
       const find = ctx.findBrowser ?? (() => findBrowser());
       const browser = on ? find() : null;
-      let note = on && browser === null ? `
-${t(language, "hook.windowNoBrowser")}` : "";
-      if (on && browser !== null && refreshLauncher(ctx, language)) note += `
+      const opener = on && browser === null ? (ctx.findDefaultOpener ?? (() => findDefaultOpener()))() : null;
+      let note = "";
+      if (on && browser === null) note = `
+${t(language, opener ? "hook.windowDefaultBrowser" : "hook.windowNoBrowser")}`;
+      if (on && (browser !== null || opener !== null) && refreshLauncher(ctx, language)) note += `
 ${t(language, "hook.windowLauncher")}`;
       if (!on) {
         try {
