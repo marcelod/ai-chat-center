@@ -182,6 +182,20 @@ export function ToAgentBubble({ event }: { event: ToAgent }) {
   );
 }
 
+/** The recap Claude Code writes when you come back after a while: a soft card, apart from the messages. */
+export function RecapCard({ text }: { text: string }) {
+  const t = useT();
+  return (
+    <div
+      data-bubble="recap"
+      className="md max-w-[min(100%,760px)] self-center break-words rounded-xl border border-accent/40 bg-selected px-4 py-3 text-sm leading-relaxed"
+    >
+      <p className="mb-1 text-xs font-bold uppercase tracking-wide text-accent">{t('ui.chat.recap')}</p>
+      <MarkdownText text={text} />
+    </div>
+  );
+}
+
 function AgentAvatarSmall({ name }: { name: string }) {
   const { initials, color } = agentIdentity(name);
   return (

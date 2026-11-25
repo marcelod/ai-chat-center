@@ -32,6 +32,8 @@ function eventPreview(e: ChatEvent | undefined, t: T): string {
       return e.text;
     case 'agent':
       return `${e.from || t('ui.chat.agent')}: ${e.text}`;
+    case 'recap':
+      return `${t('ui.chat.recap')}: ${e.text}`;
     case 'toAgent':
       return `→ ${e.to || t('ui.chat.agent')}: ${e.text}`;
     case 'actions':
