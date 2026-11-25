@@ -13,7 +13,15 @@ type Props = {
   onSend: (text: string) => Promise<void>;
   /** Uploads one file to the hub and resolves to its absolute path. Without it, nothing can be attached. */
   onUpload?: (file: File) => Promise<string>;
+  /**
+   * Types a slash command into a background session (spec 2026-11-24-background-sessions). Present only for
+   * a background session: there, a one-line message starting with `/` goes here instead of onSend.
+   */
+  onCommand?: (text: string) => Promise<void>;
 };
+/** A one-line message that names a slash command (`/compact`, `/rename x`): the hub's rule (bgSessions.isValidCommand). A path such as `/home/x` is text. */
+export const isSlashCommand = (text: string) => text.length <= 200 && /^\/[A-Za-z0-9][\w:.-]*( [^\n]*)?$/.test(text);
+type CommandNote = { kind: 'sent' | 'busy' | 'windows' | 'failed'; cmd: string };
 type Failure = { kind: 'disconnected' } | { kind: 'version'; direction: 'older' | 'newer' } | { kind: 'failed'; text: string };
 type AttachError = { kind: 'tooLarge'; name: string } | { kind: 'tooMany' } | { kind: 'upload' };
 
@@ -47,7 +55,7 @@ export const PAD_PX = 12;
 export const MAX_LINES = 8;
 export const MAX_HEIGHT = MAX_LINES * LINE_PX + 2 * PAD_PX;
 
-export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuestion = false, onSend, onUpload }: Props) {
+export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuestion = false, onSend, onUpload, onCommand }: Props) {
   const t = useT();
   const disabled = sessionOff || blockedByQuestion;
   const [text, setText] = useState(() => loadDraft(sessionId));
@@ -57,6 +65,9 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
   const [attachError, setAttachError] = useState<AttachError | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [command, setCommand] = useState<CommandNote | null>(null);
+  /** A slash command typed in an interactive session: held until the user says to send it as text. */
+  const [asText, setAsText] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const filesRef = useRef(files);
@@ -156,10 +167,38 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
     }
   };
 
+  const runCommand = async (cmd: string) => {
+    if (!onCommand) return;
+    setFailure(null);
+    setCommand(null);
+    try {
+      await onCommand(cmd);
+      if (mounted.current) setCommand({ kind: 'sent', cmd });
+    } catch (e) {
+      if (!mounted.current) return keepAsDraft(cmd);
+      const st = statusOf(e);
+      setText((cur) => (cur === '' ? cmd : cur));
+      setCommand({ kind: st === 409 ? 'busy' : st === 501 ? 'windows' : 'failed', cmd });
+    }
+  };
+
   const submit = async () => {
     const typed = text.trim();
     const batch = filesRef.current;
     if ((!typed && batch.length === 0) || disabled || uploading) return;
+    setCommand(null);
+    if (batch.length === 0 && isSlashCommand(typed)) {
+      if (onCommand) {
+        setText('');
+        void runCommand(typed);
+        return;
+      }
+      if (asText !== typed) {
+        setAsText(typed); // asks once; the text stays in the box
+        return;
+      }
+    }
+    setAsText(null);
     if (batch.length === 0 || !onUpload) {
       if (!typed) return;
       setText('');
@@ -259,6 +298,28 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
         </p>
       )}
       <PendingAttachments files={files} onRemove={removeFile} disabled={uploading} />
+      {command && (
+        <p role={command.kind === 'sent' ? 'status' : 'alert'} className={`mb-2 text-sm ${command.kind === 'sent' ? 'text-muted' : 'text-danger'}`}>
+          {command.kind === 'sent'
+            ? t('ui.composer.commandSent', { cmd: command.cmd })
+            : command.kind === 'busy'
+              ? t('ui.composer.commandBusy')
+              : command.kind === 'windows'
+                ? t('ui.composer.commandWindows')
+                : t('ui.composer.commandFailed')}
+        </p>
+      )}
+      {asText !== null && asText === text.trim() && (
+        <div role="alert" className="mb-2 flex flex-wrap items-center gap-2 text-sm text-waiting-text">
+          <span>{t('ui.composer.slashInteractive', { cmd: asText.split(' ')[0] })}</span>
+          <button type="button" onClick={() => void submit()} className="min-h-11 rounded-lg px-3 font-semibold underline">
+            {t('ui.composer.sendAsText')}
+          </button>
+          <button type="button" onClick={() => setAsText(null)} className="min-h-11 rounded-lg px-3 underline">
+            {t('ui.composer.cancel')}
+          </button>
+        </div>
+      )}
       {failure?.kind === 'disconnected' && (
         <p role="alert" className="mb-2 text-sm text-danger">
           {t('ui.composer.sendDisconnected')}

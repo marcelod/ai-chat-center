@@ -14,6 +14,8 @@ type Props = {
   onDisconnect?: () => Promise<void>;
   /** Opens the background picker (absent: no Background item). */
   onBackground?: () => void;
+  /** Resumes the ended session in the background (absent: no Resume item). Rejects when the hub refused. */
+  onResume?: () => Promise<void>;
 };
 
 /**
@@ -21,7 +23,7 @@ type Props = {
  * the button, a click outside closes it, arrow keys move between items. "Remove from app" asks to confirm
  * in place (a second click), never with window.confirm.
  */
-export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({ onRename, onRemove, onPin, pinned = false, onDisconnect, onBackground }, button) {
+export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({ onRename, onRemove, onPin, pinned = false, onDisconnect, onBackground, onResume }, button) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState<'disconnect' | 'remove' | null>(null);
@@ -69,7 +71,7 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
     };
   }, [open]);
 
-  if (!onRename && !onRemove && !onPin && !onDisconnect && !onBackground) return null;
+  if (!onRename && !onRemove && !onPin && !onDisconnect && !onBackground && !onResume) return null;
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Tab') {
@@ -119,6 +121,19 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
     }
   };
 
+  const resume = async () => {
+    if (!onResume || busy) return;
+    setBusy(true);
+    try {
+      await onResume();
+      close(false);
+    } catch {
+      setFailed('ui.chat.resume.error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const itemCls = 'flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm hover:bg-field focus:bg-field focus:outline-none';
 
   return (
@@ -142,6 +157,11 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
           onKeyDown={onKeyDown}
           className="absolute left-0 top-12 z-10 w-56 rounded-xl border border-line bg-surface p-1.5 shadow-lg"
         >
+          {onResume && (
+            <button type="button" role="menuitem" tabIndex={-1} aria-disabled={busy || undefined} className={itemCls} onClick={() => void resume()}>
+              {t('ui.chatMenu.resume')}
+            </button>
+          )}
           {onRename && (
             <button
               type="button"

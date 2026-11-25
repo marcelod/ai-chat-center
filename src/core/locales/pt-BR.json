@@ -21,7 +21,7 @@
       "failed": "Não foi possível renomear"
     },
     "pinned": "Fixada",
-    "chatMenu": {"label": "Ações da conversa", "rename": "Renomear", "remove": "Remover do app", "confirmRemove": "Remover? Confirmar", "removeFailed": "Não foi possível remover", "pin": "Fixar no topo", "unpin": "Desafixar", "disconnect": "Desconectar", "confirmDisconnect": "Desconectar? Confirmar", "pinFailed": "Não foi possível alterar a fixação", "disconnectFailed": "Não foi possível desconectar"},
+    "chatMenu": {"label": "Ações da conversa", "rename": "Renomear", "remove": "Remover do app", "confirmRemove": "Remover? Confirmar", "removeFailed": "Não foi possível remover", "pin": "Fixar no topo", "unpin": "Desafixar", "disconnect": "Desconectar", "confirmDisconnect": "Desconectar? Confirmar", "pinFailed": "Não foi possível alterar a fixação", "disconnectFailed": "Não foi possível desconectar", "resume": "Retomar em segundo plano"},
     "background": {
       "menu": "Fundo",
       "title": "Fundo da conversa",
@@ -135,7 +135,12 @@
       "image": "[imagem]",
       "images": "[{n} imagens]",
       "compacted": "Conversa compactada · {time}",
-      "attachments": "Arquivos anexados"
+      "attachments": "Arquivos anexados",
+      "resume": {"title": "Sessão encerrada", "body": "Retome-a em segundo plano: ela volta conectada ao app, sem abrir terminal.", "button": "Retomar em segundo plano", "resuming": "Retomando…", "failed": "Não foi possível retomar: {error}", "running": "Esta sessão ainda está aberta num terminal. Digite /cc nela para reconectar.", "error": "Não foi possível retomar a sessão."},
+      "attach": "Abrir no terminal",
+      "attachCopy": "Copiar {cmd}",
+      "attachCopied": "Copiado",
+      "waitingBgHint": "Esta sessão roda em segundo plano: responda no terminal com {cmd}."
     },
     "composer": {
       "placeholder": "Mensagem para {name}…",
@@ -156,7 +161,14 @@
       "attachTooMany": "No máximo {max} arquivos por mensagem.",
       "attachFailed": "Não foi possível enviar os anexos. Tente de novo.",
       "uploading": "Enviando anexos…",
-      "dropHere": "Solte os arquivos para anexá-los"
+      "dropHere": "Solte os arquivos para anexá-los",
+      "commandSent": "Comando {cmd} enviado.",
+      "commandBusy": "A sessão está ocupada. Envie o comando quando ela terminar.",
+      "commandWindows": "Comandos pelo app ainda não funcionam no Windows.",
+      "commandFailed": "Não foi possível enviar o comando.",
+      "slashInteractive": "Comandos do Claude Code só rodam pelo app em sessões em segundo plano. Nesta sessão, {cmd} chegaria como texto.",
+      "sendAsText": "Enviar como texto",
+      "cancel": "Cancelar"
     },
     "usage": {
       "label": "Uso de 5 horas",

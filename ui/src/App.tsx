@@ -93,6 +93,11 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
             onSetBackground={(bg) => api.setBackground(selected.sessionId, bg)}
             onUploadBackground={(file) => api.uploadBackgroundImage(selected.sessionId, file)}
             onLoadBackgroundImage={() => api.getBackgroundImage(selected.sessionId)}
+            onResume={async () => {
+              await api.resumeSession(selected.sessionId);
+              await live.refresh();
+            }}
+            onCommand={(text) => api.sendCommand(selected.sessionId, text)}
             onBack={() => select(null)}
           />
         ) : (

@@ -37,6 +37,10 @@ type Props = {
   onUploadBackground?: (file: File) => Promise<void>;
   /** Fetches the background image (with the token) when the background is an image. */
   onLoadBackgroundImage?: () => Promise<Blob>;
+  /** Resumes an ended session in the background (spec 2026-11-24-background-sessions); rejects with ApiError. */
+  onResume?: () => Promise<void>;
+  /** Types a slash command into a background session; rejects with ApiError (409 busy, 501 Windows). */
+  onCommand?: (text: string) => Promise<void>;
   onBack: () => void;
 };
 
@@ -89,6 +93,91 @@ function StatusPill({ state, asking }: { state: SessionView['state']; asking: bo
   );
 }
 
+const statusOf = (e: unknown): number | undefined => {
+  const s = (e as { status?: unknown } | null)?.status;
+  return typeof s === 'number' ? s : undefined;
+};
+
+/** `claude attach <id>` for a background session, with a copy button (spec 2026-11-24-background-sessions). */
+function AttachCommand({ id }: { id: string }) {
+  const t = useT();
+  const cmd = `claude attach ${id}`;
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard?.writeText(cmd);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* no clipboard: the command is on screen */
+    }
+  };
+  return (
+    <span className="flex min-w-0 items-baseline gap-1" data-testid="attach-command">
+      <span aria-hidden="true" className="hidden md:inline">
+        {'· '}
+      </span>
+      <span title={t('ui.chat.attach')} className="truncate">
+        {cmd}
+      </span>
+      <button
+        type="button"
+        onClick={() => void copy()}
+        aria-label={t('ui.chat.attachCopy', { cmd })}
+        className="rounded px-1 text-accent underline hover:bg-field"
+      >
+        {copied ? t('ui.chat.attachCopied') : '⧉'}
+      </button>
+    </span>
+  );
+}
+
+/** Offers to resume an ended session in the background; shows the hub's progress and failures. */
+function ResumePanel({ session, onResume }: { session: SessionView; onResume: () => Promise<void> }) {
+  const t = useT();
+  const [sending, setSending] = useState(false);
+  const [refused, setRefused] = useState<'running' | 'error' | null>(null);
+  const resuming = sending || !!session.resuming;
+  const click = async () => {
+    if (resuming) return;
+    setSending(true);
+    setRefused(null);
+    try {
+      await onResume();
+    } catch (e) {
+      setRefused(statusOf(e) === 409 ? 'running' : 'error');
+    } finally {
+      setSending(false);
+    }
+  };
+  return (
+    <div data-testid="resume-panel" className="flex flex-wrap items-center gap-3 self-stretch rounded-xl border border-line bg-surface p-3.5">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold">{t('ui.chat.resume.title')}</p>
+        <p className="mt-0.5 text-[13px] text-muted">{t('ui.chat.resume.body')}</p>
+        {session.resumeError && !resuming && (
+          <p role="alert" className="mt-1 text-[13px] text-danger">
+            {t('ui.chat.resume.failed', { error: session.resumeError })}
+          </p>
+        )}
+        {refused && (
+          <p role="alert" className="mt-1 text-[13px] text-danger">
+            {t(refused === 'running' ? 'ui.chat.resume.running' : 'ui.chat.resume.error')}
+          </p>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => void click()}
+        disabled={resuming}
+        className="min-h-11 shrink-0 rounded-xl bg-accent px-4 text-sm font-semibold text-accent-contrast disabled:opacity-60"
+      >
+        {resuming ? t('ui.chat.resume.resuming') : t('ui.chat.resume.button')}
+      </button>
+    </div>
+  );
+}
+
 function Typing() {
   const t = useT();
   return (
@@ -115,6 +204,7 @@ function SessionTitle({
   onDisconnect,
   onSetBackground,
   onUploadBackground,
+  onResume,
 }: {
   session: SessionView;
   name: string;
@@ -125,6 +215,7 @@ function SessionTitle({
   onDisconnect?: () => Promise<void>;
   onSetBackground?: (bg: BackgroundPreset | null) => Promise<void>;
   onUploadBackground?: (file: File) => Promise<void>;
+  onResume?: () => Promise<void>;
 }) {
   const t = useT();
   const [picking, setPicking] = useState(false);
@@ -225,6 +316,7 @@ function SessionTitle({
         pinned={!!session.pinned}
         onDisconnect={session.state === 'disconnected' ? undefined : onDisconnect}
         onBackground={onSetBackground && onUploadBackground ? () => setPicking(true) : undefined}
+        onResume={session.state === 'disconnected' && !session.resuming ? onResume : undefined}
       />
       {picking && onSetBackground && onUploadBackground && (
         <BackgroundPicker
@@ -241,7 +333,7 @@ function SessionTitle({
   );
 }
 
-export function ChatView({ session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, ...bg }: Props) {
+export function ChatView({ session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, ...bg }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -326,9 +418,11 @@ export function ChatView({ session, events, pending, loading, onSend, onUpload, 
             onDisconnect={onDisconnect}
             onSetBackground={bg.onSetBackground}
             onUploadBackground={bg.onUploadBackground}
+            onResume={onResume}
           />
           <div data-testid="session-info" className="flex min-w-0 flex-col overflow-hidden font-mono text-xs text-muted md:flex-row md:items-baseline md:gap-1.5">
             <span className="min-w-0 truncate md:min-w-[6ch]">{session.cwd}</span>
+            {session.bgId && state !== 'disconnected' && <AttachCommand id={session.bgId} />}
             {(session.branch || session.model || session.effort || session.mode) && (
               <span className="flex min-w-0 gap-x-2 md:shrink-0 md:gap-x-1.5">
                 {session.branch && (
@@ -409,6 +503,7 @@ export function ChatView({ session, events, pending, loading, onSend, onUpload, 
             <p className="text-sm">{t('ui.chat.undeliveredUnsigned')}</p>
           </div>
         )}
+        {state === 'disconnected' && onResume && <ResumePanel session={session} onResume={onResume} />}
         {state === 'waiting' && (
           <div className="flex items-start gap-3 self-stretch rounded-xl border border-banner-border bg-banner-bg p-3.5 text-waiting-text">
             <WarningIcon className="mt-0.5 shrink-0" />
@@ -423,6 +518,9 @@ export function ChatView({ session, events, pending, loading, onSend, onUpload, 
                 )}
               </p>
               {session.waitingKind !== 'input' && session.waitingKind !== 'question' && <p className="mt-0.5 text-[13px]">{t('ui.chat.waitingBannerHint')}</p>}
+              {session.bgId && session.waitingKind !== 'question' && (
+                <p className="mt-0.5 text-[13px]">{t('ui.chat.waitingBgHint', { cmd: `claude attach ${session.bgId}` })}</p>
+              )}
             </div>
           </div>
         )}
@@ -430,7 +528,8 @@ export function ChatView({ session, events, pending, loading, onSend, onUpload, 
       </div>
 
       <Composer key={session.sessionId} sessionId={session.sessionId} name={session.name} disabled={state === 'disconnected'}
-        blockedByQuestion={Boolean(session.pendingQuestion)} onSend={onSend} onUpload={onUpload} />
+        blockedByQuestion={Boolean(session.pendingQuestion)} onSend={onSend} onUpload={onUpload}
+        onCommand={session.bgId && state !== 'disconnected' ? onCommand : undefined} />
     </section>
   );
 }

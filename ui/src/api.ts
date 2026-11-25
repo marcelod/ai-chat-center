@@ -273,6 +273,23 @@ export const renameSession = (sid: string, name: string) =>
 export async function removeSession(sid: string): Promise<void> {
   await request<unknown>(`/api/sessions/${encodeURIComponent(sid)}/remove`, { method: 'POST' });
 }
+/** Resumes an ended session in the background (spec 2026-11-24-background-sessions); 202 once started. */
+export async function resumeSession(sid: string): Promise<void> {
+  await request<unknown>(`/api/sessions/${encodeURIComponent(sid)}/resume`, { method: 'POST' });
+}
+/**
+ * Types a slash command into a background session. Rejects with ApiError: 409 busy, 501 Windows, 404 not a
+ * background session. Like sendMessage, never POSTs to a server that cannot prove it is the hub.
+ */
+export async function sendCommand(sid: string, text: string): Promise<void> {
+  const check = await verifyHub();
+  if (check === 'mismatch') {
+    dropToken();
+    throw new ApiError(401);
+  }
+  if (check === 'unreachable') throw new ApiError(0);
+  await request<unknown>(`/api/sessions/${encodeURIComponent(sid)}/command`, { method: 'POST', body: JSON.stringify({ text }) });
+}
 /** Pins or unpins the conversation at the top of the list, for every window. */
 export async function pinSession(sid: string, pinned: boolean): Promise<void> {
   await request<unknown>(`/api/sessions/${encodeURIComponent(sid)}/pin`, { method: 'PUT', body: JSON.stringify({ pinned }) });
