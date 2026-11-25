@@ -12,6 +12,7 @@ import type { BackgroundPreset } from '@shared/background';
 import { BackgroundPicker } from './BackgroundPicker';
 import { ChatBackground } from './ChatBackground';
 import { useCommandProgress } from '../useCommandProgress';
+import { SessionControls } from './SessionControls';
 import { AgentBubble, AssistantBubble, ToAgentBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
 
 type Props = {
@@ -445,6 +446,7 @@ export function ChatView({ session, events, pending, loading, onSend, onUpload, 
               </span>
             )}
           </div>
+          {runCommand && session.bgId && state !== 'disconnected' && <SessionControls onCommand={runCommand} disabled={state !== 'idle'} />}
         </div>
         <StatusPill state={state} asking={session.waitingKind === 'question'} />
       </header>

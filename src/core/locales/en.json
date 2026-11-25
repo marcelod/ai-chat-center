@@ -58,8 +58,8 @@
       "desc": {
         "compact": "Summarizes the conversation to free up context",
         "rename": "Renames the session",
-        "model": "Switches the model",
-        "effort": "Switches the reasoning effort",
+        "model": "Switches the model (also the default for new sessions)",
+        "effort": "Switches the reasoning effort (also the default for new sessions)",
         "reloadPlugins": "Reloads the plugins",
         "cc": "AI Chat Center settings of this session",
         "status": "Status of the session",
@@ -144,6 +144,9 @@
       "branch": "Branch",
       "model": "Model",
       "effort": "Reasoning level",
+      "switchModel": "Switch model",
+      "switchEffort": "Switch effort",
+      "switchSavesDefault": "also becomes the default for new sessions",
       "mode": "Permission mode",
       "modes": {
         "default": "default",

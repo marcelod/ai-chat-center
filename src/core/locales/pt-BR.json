@@ -58,8 +58,8 @@
       "desc": {
         "compact": "Resume a conversa para liberar contexto",
         "rename": "Renomeia a sessão",
-        "model": "Troca o modelo",
-        "effort": "Troca o esforço de raciocínio",
+        "model": "Troca o modelo (também vira o padrão das novas sessões)",
+        "effort": "Troca o esforço de raciocínio (também vira o padrão das novas sessões)",
         "reloadPlugins": "Recarrega os plugins",
         "cc": "Configurações do AI Chat Center nesta sessão",
         "status": "Estado da sessão",
@@ -144,6 +144,9 @@
       "branch": "Branch",
       "model": "Modelo",
       "effort": "Nível de raciocínio",
+      "switchModel": "Trocar modelo",
+      "switchEffort": "Trocar esforço",
+      "switchSavesDefault": "também vira o padrão das novas sessões",
       "mode": "Modo de permissão",
       "modes": {
         "default": "padrão",
