@@ -14,6 +14,10 @@ No primeiro teste no Windows (2026-11-24), o atalho funcionou, mas a pessoa teve
 
 Visto ao vivo (2026-11-24). Com `answers off`, o diálogo de opções (AskUserQuestion) numa sessão em segundo plano só pode ser respondido no terminal, e não há terminal aberto. O autor teve de abrir um terminal e usar o `/resume`. Ideia: o app avisar "pergunta esperando resposta: use `claude attach <id>` ou ligue as respostas pelo app (`/ai-chat-center:cc answers on`)".
 
+### Recursos de segundo plano visíveis nas sessões de terminal
+
+Pedido em 2026-11-25. A troca de modelo e esforço e a lista de comandos ao digitar `/` só aparecem em sessões em segundo plano (`bgId`), porque o app digita nelas pelo `claude attach`; numa sessão de terminal comum o texto do app chega como hook e o Claude Code não executa `/…`. Quem usa uma sessão de terminal acha que a atualização não carregou. Ideia: mostrar os botões desativados nessas sessões, com a dica "Disponível em sessões em segundo plano: retome a sessão pelo app".
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
