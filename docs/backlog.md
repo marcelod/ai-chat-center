@@ -30,9 +30,11 @@ Pedido em 2026-11-25. Mostrar no app a versão do AI Chat Center que está rodan
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
 
-### Memória dos waiters
+### Memória dos waiters e lentidão na primeira vez
 
-Medido em 2026-11-25: cada waiter mostra cerca de 63 MB, mas só cerca de 13,5 MB são dele. Os outros cerca de 45 MB são do próprio Node e são compartilhados entre todos os processos Node. 4 waiters custam cerca de 55 MB, não 250 MB. As flags de memória do V8 não ajudaram. Reduzir mais exige um waiter que não seja Node (por exemplo `sh` + `curl` no Linux e no macOS, com a lógica de entrega no hub): mudança grande, **aguarda decisão do autor** (`docs/superpowers/specs/2026-11-25-app-batch-design.md`).
+Medido de novo em 2026-11-25 com 4 sessões: um waiter por sessão, nenhum sobrando, cerca de 51 MB privados no total (o monitor mostra ~60 MB por processo porque conta o binário do Node, compartilhado). Caminhos: enxugar o waiter em Node (3 a 7 MB por sessão a menos, risco baixo) ou um waiter `sh` + `curl` no Linux e no macOS (1 a 2 MB, rodada grande, muda o modelo de segurança).
+
+O que incomodou o autor foi outra coisa: nas duas primeiras execuções, uma em cada notebook, a máquina ficou um pouco lenta. Suspeitos a medir: o primeiro `/cc` (o hub sobe, abre a janela do Chrome, cria o atalho) e as consultas ao `claude agents`. **Verificar com calma mais pra frente**, a pedido do autor.
 
 ### CPU do hub com tudo parado
 
