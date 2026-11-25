@@ -167,8 +167,39 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (res.status === 401) dropToken();
-  if (!res.ok) throw new ApiError(res.status, await errorCode(res));
+  if (!res.ok) {
+    const body = await errorBody(res);
+    throw Object.assign(new ApiError(res.status, body.code), body.detail ? { detail: body.detail } : {});
+  }
   return (await res.json()) as T;
+}
+
+async function errorBody(res: Response): Promise<{ code?: string; detail?: string }> {
+  try {
+    const j = (await res.json()) as { code?: unknown; error?: unknown };
+    return { code: typeof j?.code === 'string' ? j.code : undefined, detail: typeof j?.error === 'string' ? j.error : undefined };
+  } catch {
+    return {};
+  }
+}
+
+export type Folder = { cwd: string; lastUsed: string };
+/** The folders the user already ran sessions in: the only ones a new session may start in. */
+export async function listFolders(): Promise<Folder[]> {
+  return (await request<{ folders: Folder[] }>('/api/folders')).folders;
+}
+export type NewSessionInput = { cwd: string; name?: string; model?: string; effort?: string };
+/**
+ * Starts a new background session that connects to the app at once. Resolves to its short id when
+ * `claude --bg` showed one. Rejects with ApiError (`detail`: the output of `claude --bg` on a 502).
+ */
+export async function newSession(input: NewSessionInput): Promise<{ bgId?: string }> {
+  const check = await verifyHub();
+  if (check === 'mismatch') {
+    dropToken();
+    throw new ApiError(401);
+  }
+  return request<{ bgId?: string }>('/api/sessions', { method: 'POST', body: JSON.stringify(input) });
 }
 
 /** Drops the token (the hub could not prove it knows it): the app shows the "open the /cc link" screen. */

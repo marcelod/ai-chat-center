@@ -1088,3 +1088,46 @@ describe('command endpoint (background sessions)', () => {
     expect((await post(f, { text: '/compact' })).status).toBe(502);
   });
 });
+
+describe('new session endpoint (spec 2026-11-25-app-batch)', () => {
+  const live = (over: Partial<LiveSession> = {}): LiveSession => ({ pid: 7, cwd: '/live/dir', kind: 'interactive', sessionId: 'l1', name: 'n', status: 'idle', ...over });
+  const post = (u: URL, body: unknown) => req(u, '/api/sessions', { method: 'POST', headers: json, body: JSON.stringify(body) });
+  beforeEach(async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/proj/a', pid: 42 });
+  });
+  const exists = async (p: string) => p !== '/gone';
+
+  it('lists the known folders: of registrations and of running sessions, only existing ones', async () => {
+    await register({ sessionId: 's2', transcriptPath: '/t2.jsonl', cwd: '/gone', pid: 43 });
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [live()], folderExists: exists } });
+    const r = await req(u, '/api/folders', { headers: auth });
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.body).folders.map((f: { cwd: string }) => f.cwd).sort()).toEqual(['/live/dir', '/proj/a']);
+    expect((await req(u, '/api/folders')).status).toBe(401);
+  });
+
+  it('201 starts claude --bg in a known folder with the validated options and returns the short id', async () => {
+    const startFn = vi.fn(async () => ({ ok: true as const, bgId: 'abcd1234' }));
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [], start: startFn, folderExists: exists } });
+    const r = await post(u, { cwd: '/proj/a', name: 'minha sessão', model: 'opus', effort: 'high' });
+    expect(r.status).toBe(201);
+    expect(JSON.parse(r.body)).toEqual({ ok: true, bgId: 'abcd1234' });
+    expect(startFn).toHaveBeenCalledWith(expect.objectContaining({ cwd: '/proj/a', name: 'minha sessão', model: 'opus', effort: 'high' }));
+  });
+
+  it('400 for an unknown folder or an invalid option; nothing is started', async () => {
+    const startFn = vi.fn(async () => ({ ok: true as const }));
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [], start: startFn, folderExists: exists } });
+    for (const body of [{ cwd: '/etc' }, { cwd: '/proj/a', name: 'a"; rm' }, { cwd: '/proj/a', model: 'x y' }, { cwd: '/proj/a', effort: 'huge' }, { cwd: 3 }, []]) {
+      expect((await post(u, body)).status).toBe(400);
+    }
+    expect(startFn).not.toHaveBeenCalled();
+  });
+
+  it('502 with the output of claude --bg when it fails', async () => {
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [], start: async () => ({ ok: false as const, error: 'Workspace not trusted.' }), folderExists: exists } });
+    const r = await post(u, { cwd: '/proj/a' });
+    expect(r.status).toBe(502);
+    expect(JSON.parse(r.body).error).toBe('Workspace not trusted.');
+  });
+});

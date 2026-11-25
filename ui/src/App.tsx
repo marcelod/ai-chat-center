@@ -3,6 +3,7 @@ import * as api from './api';
 import type { Language } from './api';
 import { SessionList } from './components/SessionList';
 import { ChatView } from './components/ChatView';
+import { NewSessionDialog } from './components/NewSessionDialog';
 import { notificationsSupported } from './notify';
 import { useLiveSessions } from './useLiveSessions';
 import { useAppWindow } from './useAppWindow';
@@ -29,6 +30,17 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
   const { data, eventsById, pending, unread, selectedId, select, send, retry, error, loading } = live;
   const selected = data.connected.find((s) => s.sessionId === selectedId);
   useAppWindow(select);
+  const [newOpen, setNewOpen] = useState(false);
+  /** The short id of a session started from the app: selected as soon as it connects. */
+  const [startedBg, setStartedBg] = useState<string | null>(null);
+  useEffect(() => {
+    if (!startedBg) return;
+    const s = data.connected.find((x) => x.bgId === startedBg && x.state !== 'disconnected');
+    if (s) {
+      select(s.sessionId);
+      setStartedBg(null);
+    }
+  }, [startedBg, data.connected, select]);
 
   const pendingId = selected?.pendingQuestion?.toolUseId;
   useEffect(() => {
@@ -41,6 +53,17 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
 
   return (
     <div className="flex h-full">
+      {newOpen && (
+        <NewSessionDialog
+          loadFolders={api.listFolders}
+          onStart={async (input) => {
+            const r = await api.newSession(input);
+            if (r.bgId) setStartedBg(r.bgId);
+            await live.refresh();
+          }}
+          onClose={() => setNewOpen(false)}
+        />
+      )}
       <aside
         className={`h-full w-full shrink-0 border-r border-line md:block ${
           collapsed ? 'md:w-[72px]' : 'md:w-[360px]'
@@ -59,6 +82,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
           error={error}
           collapsed={collapsed}
           onToggleCollapsed={toggleCollapsed}
+          onNewSession={() => setNewOpen(true)}
           notifications={{
             supported: notificationsSupported(),
             enabled: live.notify,

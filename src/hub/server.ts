@@ -14,7 +14,7 @@ import { setDisplayName, validDisplayName } from '../core/names.js';
 import { setPinned } from '../core/pins.js';
 import { readBackgroundImage, saveBackgroundImage, setBackground, validBackgroundPreset } from '../core/background.js';
 import { BACKGROUND_IMAGE_MAX } from '../shared/background.js';
-import { getRegistration, isActive, isRemoved, markDisconnected, markRemoved, type Registration } from '../core/registry.js';
+import { getRegistration, isActive, listRegistrations, isRemoved, markDisconnected, markRemoved, type Registration } from '../core/registry.js';
 import { VERSION } from '../core/version.js';
 import { CHALLENGE_RE, healthProof } from '../core/healthProof.js';
 import { createPairing } from './pairing.js';
@@ -22,7 +22,20 @@ import { AttachmentTooLargeError, storeAttachment } from '../core/attachments.js
 import { MAX_ATTACHMENT_BYTES } from '../shared/attachments.js';
 import type { LiveSession } from '../shared/types.js';
 import { queryLiveSessions } from './status.js';
-import { CommandUnsupportedError, isValidCommand, resumeInBackground, typeCommand, type ResumeResult } from './bgSessions.js';
+import {
+  CommandUnsupportedError,
+  isEffort,
+  isModel,
+  isSessionName,
+  isValidCommand,
+  resumeInBackground,
+  startInBackground,
+  typeCommand,
+  type NewSession,
+  type ResumeResult,
+  type StartResult,
+} from './bgSessions.js';
+import { configDirOf, knownFolders } from './folders.js';
 import { failResume, isResuming, startResume } from './resumeState.js';
 
 export interface HubOptions {
@@ -39,6 +52,9 @@ export interface HubOptions {
     listLive?: () => Promise<LiveSession[] | null>;
     resume?: (reg: Registration) => Promise<ResumeResult>;
     type?: (id: string, text: string) => Promise<void>;
+    start?: (s: NewSession) => Promise<StartResult>;
+    /** Whether a folder exists (default: stat). */
+    folderExists?: (p: string) => Promise<boolean>;
     platform?: NodeJS.Platform;
   };
 }
@@ -152,6 +168,8 @@ export async function createHub(
   const listLive = opts.bg?.listLive ?? (() => queryLiveSessions());
   const resume = opts.bg?.resume ?? ((reg: Registration) => resumeInBackground(reg));
   const type = opts.bg?.type ?? ((id: string, text: string) => typeCommand(id, text));
+  const start = opts.bg?.start ?? ((s: NewSession) => startInBackground(s));
+  const folders = async () => knownFolders(await listRegistrations(), await listLive(), opts.bg?.folderExists);
   const bgPlatform = opts.bg?.platform ?? process.platform;
   /** Sessions with a command being typed: one at a time each. */
   const typing = new Set<string>();
@@ -364,6 +382,32 @@ export async function createHub(
       return sendJson(res, 200, { focus });
     }
     if (p === '/api/sessions' && method === 'GET') return sendJson(res, 200, await provider.listSessions());
+    if (p === '/api/folders' && method === 'GET') return sendJson(res, 200, { folders: await folders() });
+    if (p === '/api/sessions' && method === 'POST') {
+      // A new background session that connects at once (spec 2026-11-25-app-batch). Only in a known folder.
+      const body = (await readJsonBody(req)) as Record<string, unknown> | null;
+      if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'invalid body');
+      const { cwd, name, model, effort } = body;
+      const opt = (v: unknown) => v === undefined || v === null || v === '';
+      if (typeof cwd !== 'string') throw new HttpError(400, 'invalid folder');
+      if (!opt(name) && !isSessionName(name)) throw new HttpError(400, 'invalid name');
+      if (!opt(model) && !isModel(model)) throw new HttpError(400, 'invalid model');
+      if (!opt(effort) && !isEffort(effort)) throw new HttpError(400, 'invalid effort');
+      if (!(await folders()).some((f) => f.cwd === cwd)) throw new HttpError(400, 'unknown folder');
+      const r = await start({
+        cwd,
+        name: opt(name) ? undefined : (name as string),
+        model: opt(model) ? undefined : (model as string),
+        effort: opt(effort) ? undefined : (effort as NewSession['effort']),
+        configDir: configDirOf(await listRegistrations(), cwd),
+      });
+      if (!r.ok) {
+        log(`new session in ${cwd} failed: ${r.error}`);
+        return sendJson(res, 502, { error: r.error });
+      }
+      fanOut({ type: 'sessions' });
+      return sendJson(res, 201, { ok: true, bgId: r.bgId });
+    }
     if (p === '/api/config' && method === 'GET') return sendJson(res, 200, await loadConfig());
     if (p === '/api/config' && method === 'PUT') {
       const body = (await readJsonBody(req)) as { language?: unknown } | null;

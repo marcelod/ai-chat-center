@@ -21,6 +21,8 @@ type Props = {
   notifications?: NotificationsControl;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+  /** Opens the new session dialog (spec 2026-11-25-app-batch). */
+  onNewSession?: () => void;
 };
 
 const dotColor: Record<SessionView['state'], string> = {
@@ -30,7 +32,7 @@ const dotColor: Record<SessionView['state'], string> = {
   disconnected: 'bg-disconnected',
 };
 
-export function SessionList({ connected, others, usage, unread, selectedId, onSelect, onLanguage, error, notifications, collapsed = false, onToggleCollapsed }: Props) {
+export function SessionList({ connected, others, usage, unread, selectedId, onSelect, onLanguage, error, notifications, collapsed = false, onToggleCollapsed, onNewSession }: Props) {
   const t = useT();
   const lang = useLang();
   const [query, setQuery] = useState('');
@@ -49,6 +51,17 @@ export function SessionList({ connected, others, usage, unread, selectedId, onSe
           <>
             <Logo size={34} />
             <h1 className="flex-1 font-display text-xl font-semibold">{t('ui.title')}</h1>
+            {onNewSession && (
+              <button
+                type="button"
+                onClick={onNewSession}
+                aria-label={t('ui.newSession.open')}
+                title={t('ui.newSession.open')}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[10px] text-2xl leading-none text-muted hover:bg-field"
+              >
+                <span aria-hidden="true">+</span>
+              </button>
+            )}
             <SettingsMenu onLanguage={onLanguage} notifications={notifications} usageHint={!usage?.fiveHour} />
           </>
         )}

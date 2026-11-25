@@ -52,6 +52,7 @@
     "you": "You",
     "yesterday": "yesterday",
     "settings": "Settings",
+    "newSession": {"open": "New session", "title": "New session", "body": "Starts Claude Code in the background in one of your folders. It connects to the app at once, with no terminal.", "folder": "Folder", "noFolders": "No folder yet: connect a session with /cc once.", "foldersFailed": "Couldn't list the folders.", "name": "Name (optional)", "namePlaceholder": "e.g. billing fixes", "nameInvalid": "Letters, numbers, spaces and . _ - only.", "model": "Model", "effort": "Effort", "default": "Default", "start": "Start", "starting": "Starting…", "cancel": "Cancel", "failed": "Couldn't start the session.", "failedWith": "Couldn't start the session: {error}", "waiting": "Starting the new session…"},
     "theme": {"label": "Theme", "system": "System", "light": "Light", "dark": "Dark"},
     "language": "Language",
     "back": "Back",

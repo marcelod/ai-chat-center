@@ -65,28 +65,28 @@ export interface BgDeps {
 }
 
 export type ResumeResult = { ok: true } | { ok: false; error: string };
+export type StartResult = { ok: true; bgId?: string } | { ok: false; error: string };
 
 const RESUME_TIMEOUT_MS = 60_000;
 const MAX_ERROR = 500;
 
 /**
- * Runs `claude --bg --resume <sid> "/ai-chat-center:cc"` in the session's folder. `claude --bg` returns as
- * soon as the session runs in the background: exit 0 is success; anything else gives the first lines of its
+ * Runs `claude --bg <args>` in `cwd`. `claude --bg` returns as soon as the session runs in the background:
+ * exit 0 is success, with its output (the short id is in it); anything else gives the first lines of its
  * output as the error ("Workspace not trusted", claude missing...).
  */
-export async function resumeInBackground(reg: Registration, deps: BgDeps = {}): Promise<ResumeResult> {
-  assertSessionId(reg.sessionId);
+function runBg(args: string[], cwd: string, configDir: string | undefined, deps: BgDeps): Promise<{ ok: true; out: string } | { ok: false; error: string }> {
   const platform = deps.platform ?? process.platform;
   const win = platform === 'win32';
   const spawn = deps.spawn ?? (nodeSpawn as Spawn);
-  // Windows: `claude` is a .cmd shim and needs the shell; the line is built from a validated uuid and a
-  // constant only (see runClaudeAgentsJson for why it is one string).
-  const cmd = win ? `claude --bg --resume ${reg.sessionId} ${RESUME_PROMPT}` : 'claude';
-  const args = win ? [] : ['--bg', '--resume', reg.sessionId, RESUME_PROMPT];
+  // Windows: `claude` is a .cmd shim and needs the shell; the line is built from validated values only
+  // (see winQuote, and runClaudeAgentsJson for why it is one string).
+  const cmd = win ? ['claude', '--bg', ...args.map(winQuote)].join(' ') : 'claude';
+  const argv = win ? [] : ['--bg', ...args];
   return new Promise((resolve) => {
     let out = '';
     let done = false;
-    const finish = (r: ResumeResult) => {
+    const finish = (r: { ok: true; out: string } | { ok: false; error: string }) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
@@ -94,9 +94,9 @@ export async function resumeInBackground(reg: Registration, deps: BgDeps = {}): 
     };
     let child: ChildProcess;
     try {
-      child = spawn(cmd, args, {
-        cwd: reg.cwd,
-        env: cleanEnv(deps.env ?? process.env, configDirFor(reg.configDir, deps.home, platform)),
+      child = spawn(cmd, argv, {
+        cwd,
+        env: cleanEnv(deps.env ?? process.env, configDirFor(configDir, deps.home, platform)),
         shell: win,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -115,10 +115,66 @@ export async function resumeInBackground(reg: Registration, deps: BgDeps = {}): 
     child.stderr?.on('data', collect);
     child.on('error', (e) => finish({ ok: false, error: e.message }));
     child.on('close', (code) => {
-      if (code === 0) return finish({ ok: true });
+      if (code === 0) return finish({ ok: true, out: stripAnsi(out) });
       finish({ ok: false, error: stripAnsi(out).trim().slice(0, MAX_ERROR) || `claude exited with code ${code}` });
     });
   });
+}
+
+/** Quotes one argument for the Windows command line. Only ever given values checked by the validators here. */
+function winQuote(a: string): string {
+  return /^[\w:./-]+$/.test(a) ? a : `"${a}"`;
+}
+
+/** Runs `claude --bg --resume <sid> "/ai-chat-center:cc"` in the session's folder. */
+export async function resumeInBackground(reg: Registration, deps: BgDeps = {}): Promise<ResumeResult> {
+  assertSessionId(reg.sessionId);
+  const r = await runBg(['--resume', reg.sessionId, RESUME_PROMPT], reg.cwd, reg.configDir, deps);
+  return r.ok ? { ok: true } : r;
+}
+
+/** Reasoning effort levels `claude --effort` takes. */
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type Effort = (typeof EFFORTS)[number];
+export const isEffort = (v: unknown): v is Effort => typeof v === 'string' && (EFFORTS as readonly string[]).includes(v);
+/** A model alias or id (`opus`, `sonnet`, `claude-opus-5-5`, `opus[1m]`). */
+export const isModel = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(\[1m\])?$/.test(v);
+export const MAX_NAME = 60;
+/** A session name: letters, digits, spaces and . _ - only (it goes on a Windows command line). */
+export const isSessionName = (v: unknown): v is string =>
+  typeof v === 'string' && v.length <= MAX_NAME && /^[\p{L}\p{N}][\p{L}\p{N} ._-]*$/u.test(v) && v.trim() === v;
+
+export interface NewSession {
+  cwd: string;
+  name?: string;
+  model?: string;
+  effort?: Effort;
+  /** The Claude config dir to run with (undefined: the default). */
+  configDir?: string;
+}
+
+/** The short id in the output of `claude --bg` (the last 8-hex word), when it shows one. */
+export function bgIdFromOutput(out: string): string | undefined {
+  const all = out.match(/\b[0-9a-f]{8}\b/g);
+  return all?.[all.length - 1];
+}
+
+/**
+ * Starts a new background session in `cwd` that connects to the app at once: `claude --bg [-n name]
+ * [--model m] [--effort e] "/ai-chat-center:cc"` (spec 2026-11-25-app-batch). Every value is validated.
+ */
+export async function startInBackground(s: NewSession, deps: BgDeps = {}): Promise<StartResult> {
+  if (s.name !== undefined && !isSessionName(s.name)) throw new Error('invalid session name');
+  if (s.model !== undefined && !isModel(s.model)) throw new Error('invalid model');
+  if (s.effort !== undefined && !isEffort(s.effort)) throw new Error('invalid effort');
+  const args = [
+    ...(s.name ? ['-n', s.name] : []),
+    ...(s.model ? ['--model', s.model] : []),
+    ...(s.effort ? ['--effort', s.effort] : []),
+    RESUME_PROMPT,
+  ];
+  const r = await runBg(args, s.cwd, s.configDir, deps);
+  return r.ok ? { ok: true, bgId: bgIdFromOutput(r.out) } : r;
 }
 
 // eslint-disable-next-line no-control-regex

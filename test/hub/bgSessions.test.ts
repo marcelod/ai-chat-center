@@ -7,6 +7,10 @@ import {
   configDirFor,
   CommandUnsupportedError,
   isBgId,
+  isEffort,
+  isModel,
+  isSessionName,
+  startInBackground,
   isValidCommand,
   resumeInBackground,
   scriptArgs,
@@ -170,5 +174,38 @@ describe('typeCommand', () => {
     await expect(typeCommand('5e1b5e9b', 'compact', { spawn: r.spawn, platform: 'linux' })).rejects.toThrow();
     await expect(typeCommand('nope', '/compact', { spawn: r.spawn, platform: 'linux' })).rejects.toThrow();
     expect(r.calls).toEqual([]);
+  });
+});
+
+describe('startInBackground', () => {
+  it('runs claude --bg -n --model --effort /ai-chat-center:cc in the folder and reads the short id', async () => {
+    const r = recorder((c) => {
+      c.stdout.write('Starting background service…\nd7a46a43 proj running\n');
+      setImmediate(() => c.emit('close', 0));
+    });
+    const res = await startInBackground({ cwd: '/home/u/proj', name: 'minha sessão', model: 'opus', effort: 'high' }, { spawn: r.spawn, platform: 'linux', env: {} });
+    expect(res).toEqual({ ok: true, bgId: 'd7a46a43' });
+    expect(r.calls[0].args).toEqual(['--bg', '-n', 'minha sessão', '--model', 'opus', '--effort', 'high', RESUME_PROMPT]);
+    expect(r.calls[0].opts.cwd).toBe('/home/u/proj');
+  });
+
+  it('only the prompt when no option is given; Windows quotes the name', async () => {
+    const r = recorder((c) => c.emit('close', 0));
+    expect(await startInBackground({ cwd: '/p' }, { spawn: r.spawn, platform: 'linux', env: {} })).toEqual({ ok: true, bgId: undefined });
+    expect(r.calls[0].args).toEqual(['--bg', RESUME_PROMPT]);
+    const w = recorder((c) => c.emit('close', 0));
+    await startInBackground({ cwd: 'C:\\p', name: 'meu nome' }, { spawn: w.spawn, platform: 'win32', env: {} });
+    expect(w.calls[0].cmd).toBe(`claude --bg -n "meu nome" ${RESUME_PROMPT}`);
+  });
+
+  it('refuses names, models and efforts that could reach a shell', async () => {
+    const r = recorder();
+    for (const bad of [{ name: 'a"&calc' }, { name: ' x' }, { name: 'a'.repeat(61) }, { model: 'opus --x' }, { model: '-x' }, { effort: 'huge' }]) {
+      await expect(startInBackground({ cwd: '/p', ...(bad as object) }, { spawn: r.spawn, platform: 'win32' })).rejects.toThrow();
+    }
+    expect(r.calls).toEqual([]);
+    for (const ok of ['opus', 'sonnet', 'claude-opus-5-5', 'opus[1m]']) expect(isModel(ok)).toBe(true);
+    expect(isSessionName('ação 2.0_x-y')).toBe(true);
+    expect(isEffort('xhigh')).toBe(true);
   });
 });

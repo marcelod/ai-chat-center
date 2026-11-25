@@ -52,6 +52,7 @@
     "you": "Você",
     "yesterday": "ontem",
     "settings": "Configurações",
+    "newSession": {"open": "Nova sessão", "title": "Nova sessão", "body": "Inicia o Claude Code em segundo plano numa das suas pastas. Ela já entra conectada ao app, sem terminal.", "folder": "Pasta", "noFolders": "Nenhuma pasta ainda: conecte uma sessão com /cc uma vez.", "foldersFailed": "Não foi possível listar as pastas.", "name": "Nome (opcional)", "namePlaceholder": "ex.: correções do faturamento", "nameInvalid": "Só letras, números, espaços e . _ -", "model": "Modelo", "effort": "Esforço", "default": "Padrão", "start": "Iniciar", "starting": "Iniciando…", "cancel": "Cancelar", "failed": "Não foi possível iniciar a sessão.", "failedWith": "Não foi possível iniciar a sessão: {error}", "waiting": "Iniciando a nova sessão…"},
     "theme": {"label": "Tema", "system": "Sistema", "light": "Claro", "dark": "Escuro"},
     "language": "Idioma",
     "back": "Voltar",
