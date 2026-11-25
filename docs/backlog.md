@@ -1,6 +1,6 @@
 # Pendências
 
-Itens combinados e deixados para depois. Estado em 2026-11-25, versão 0.6.3. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
+Itens combinados e deixados para depois. Estado em 2026-11-25, versão 0.6.4. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
 
 ## A fazer
 
@@ -114,6 +114,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## Feito
 
+- 0.6.4: mensagens dos agentes (e do Claude para eles) vêm recolhidas na primeira linha, com "Ver tudo" para abrir.
 - 0.6.3: CI do Windows corrigido (testes de Linux/macOS e marca de pergunta que ficava presa quando o hook era encerrado à força no Windows); diff dos arquivos desligado por padrão, com opção nas configurações; modelo e esforço escolhidos enquanto a sessão trabalha são aplicados quando ela fica parada.
 - 0.6.2: aviso de pergunta esperando numa sessão em segundo plano; "Abrir no terminal" (`claude attach`) pelo menu ⋮ e pelos avisos; nova sessão em qualquer pasta da pasta pessoal; botões de segundo plano visíveis (desativados) nas sessões de terminal; versão do app, do plugin e do Claude Code; título numa linha; recap da conversa; diff dos arquivos editados. Sugestão da próxima mensagem investigada e adiada.
 - 0.6.1: sem Chrome, Chromium ou Edge, o `/cc` abre o app numa aba do navegador padrão (Safari no macOS), com o código de uso único, e no macOS dá a dica "Arquivo > Adicionar ao Dock"; o Chrome também é procurado em `~/Applications`.
