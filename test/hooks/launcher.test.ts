@@ -12,7 +12,9 @@ function fakeDist(): string {
 }
 
 describe('launcher', () => {
-  it('paths follow XDG_DATA_HOME when absolute, else ~/.local/share', () => {
+  // The Linux launcher is never installed on Windows: its paths use the host separators, so these two stay off there.
+  const linuxOnly = it.skipIf(process.platform === 'win32');
+  linuxOnly('paths follow XDG_DATA_HOME when absolute, else ~/.local/share', () => {
     expect(launcherPaths({ XDG_DATA_HOME: '/x/data' }, '/h').desktopFile).toBe('/x/data/applications/ai-chat-center.desktop');
     expect(launcherPaths({ XDG_DATA_HOME: 'rel' }, '/h').iconFile).toBe('/h/.local/share/icons/hicolor/512x512/apps/ai-chat-center.png');
   });
@@ -30,7 +32,7 @@ describe('launcher', () => {
     expect(e.startsWith('[Desktop Entry]\n')).toBe(true);
   });
 
-  it('install writes the entry and the icon, refreshes them, and remove deletes both', () => {
+  linuxOnly('install writes the entry and the icon, refreshes them, and remove deletes both', () => {
     const home = tmpDir();
     const env = {};
     const dist = fakeDist();

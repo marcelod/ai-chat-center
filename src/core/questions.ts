@@ -3,6 +3,7 @@ import { rmSync } from 'node:fs';
 import path from 'node:path';
 import { paths } from './paths.js';
 import { isAlive } from './lock.js';
+import { clearWaiting, getWaiting } from './waiting.js';
 import { ensureDir, FILE_MODE, readJson, removeFile, writeJsonAtomic } from './fsAtomic.js';
 import type { PendingQuestion, Question } from '../shared/types.js';
 
@@ -59,16 +60,20 @@ export async function getPending(sid: string): Promise<PendingQuestion | null> {
     return null;
   }
   let best: PendingQuestion | null = null;
+  let removedStale = false;
   for (const n of names) {
     if (!n.endsWith('.json') || n.endsWith('.answer.json')) continue;
     const p = await readJson<PendingQuestion>(path.join(paths().questionsDir(sid), n));
     if (p && typeof p.pid === 'number' && !isAlive(p.pid)) {
       if (typeof p.toolUseId === 'string' && `${p.toolUseId}.json` === n) await removePending(sid, p.toolUseId);
       else await removeFile(path.join(paths().questionsDir(sid), n));
+      removedStale = true;
       continue;
     }
     if (p && typeof p.createdAt === 'string' && (!best || p.createdAt > best.createdAt)) best = p;
   }
+  // A hook killed without cleanup (Windows has no catchable signal) leaves its 'question' waiting state too.
+  if (removedStale && !best && (await getWaiting(sid))?.kind === 'question') await clearWaiting(sid);
   return best;
 }
 
