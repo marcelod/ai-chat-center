@@ -145,4 +145,16 @@ describe('resolveHomeFolder', () => {
     expect(await resolveHomeFolder(path.join(alias, 'A-proj'), alias)).toBe(path.join(home, 'A-proj'));
     expect((await browseFolder(undefined, { home: alias })).path).toBe(home);
   });
+
+  it('does not tell whether a path beyond a link out of home exists', async () => {
+    const { root, home } = tree();
+    fs.mkdirSync(path.join(root, 'outside', 'real'));
+    // link-out -> root/outside: one path exists out there, the other does not; both answer "outside"
+    expect(await code(resolveHomeFolder(path.join(home, 'link-out', 'real'), home))).toBe('outside');
+    expect(await code(resolveHomeFolder(path.join(home, 'link-out', 'nope'), home))).toBe('outside');
+    expect(await code(resolveHomeFolder(path.join(home, 'link-out', 'nope', 'deeper'), home))).toBe('outside');
+    expect(await code(browseFolder(path.join(home, 'link-out', 'nope'), { home }))).toBe('outside');
+    // a missing path really inside home stays not-found
+    expect(await code(resolveHomeFolder(path.join(home, 'b-proj', 'nope', 'deeper'), home))).toBe('not-found');
+  });
 });
