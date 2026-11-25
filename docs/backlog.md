@@ -26,6 +26,10 @@ Pedido em 2026-11-25. Investigado na rodada 0.6.2 (Claude Code 2.1.332), **adiad
 
 Visto em 2026-11-25 (print do autor): um bloco de código longo (um prompt para colar em outra conversa) fica com rolagem lateral e corta o texto à direita. Ideia: botão "Copiar" no canto do bloco (copia o texto puro); para blocos de texto ou sem linguagem, quebrar as linhas; para código, manter a rolagem, mas talvez com um botão para alternar a quebra.
 
+### Mensagem "Claude → agente" sem balão sobre o fundo
+
+Visto em 2026-11-25 (print do autor, 0.6.4): numa conversa com fundo, a mensagem em que o Claude pede algo a um agente ("Claude → nome", com "Show all") parece solta, sem balão. Causa no código: `ToAgentBubble` (`ui/src/components/MessageBubble.tsx`) só tem borda tracejada e texto apagado (`text-muted`), sem cor de fundo; as outras mensagens têm `bg-surface` ou `bg-field`. Sobre o fundo da conversa, a borda quase some. Ideia: dar um fundo ao balão (por exemplo `bg-field` ou `bg-surface` com um pouco de transparência), mantendo a borda tracejada para diferenciar, e conferir nos dois temas e com e sem fundo. Conferir também o contraste do texto apagado sobre o fundo.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
