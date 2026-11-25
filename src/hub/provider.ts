@@ -23,7 +23,8 @@ export type { LiveSession, SessionView, ProviderChange };
 
 export interface Provider {
   listSessions(): Promise<{ connected: SessionView[]; others: LiveSession[] }>;
-  events(sid: string): Promise<ChatEvent[]>;
+  /** `diffs: false` skips the line diffs (the search only needs text); a live session's cached reader keeps them. */
+  events(sid: string, opts?: { diffs?: boolean }): Promise<ChatEvent[]>;
   poll(): Promise<ProviderChange[]>;
   send(sid: string, text: string): Promise<{ id: string }>;
 }
@@ -374,11 +375,11 @@ export class ClaudeCodeProvider implements Provider {
     return { connected: connected.map(({ _sort, ...v }) => v), others, hubVersion: VERSION, ...(usage ? { usage } : {}) };
   }
 
-  async events(sid: string): Promise<ChatEvent[]> {
+  async events(sid: string, opts: { diffs?: boolean } = {}): Promise<ChatEvent[]> {
     const reg = await getRegistration(sid);
     if (!reg) return [];
     if (!isActive(reg)) {
-      const tmp = new TranscriptReader(reg.transcriptPath, trustedKeys(reg)); // not cached: bounded memory
+      const tmp = new TranscriptReader(reg.transcriptPath, trustedKeys(reg), opts); // not cached: bounded memory
       await tmp.readNew();
       return tmp.all();
     }

@@ -205,7 +205,10 @@ export class TranscriptParser {
   claudeVersion: string | undefined;
 
   /** @param keys trusted marker keys of the session; when given, other app-message blocks are ignored. */
-  constructor(private readonly keys?: string[]) {}
+  constructor(
+    private readonly keys?: string[],
+    private readonly opts: { diffs?: boolean } = {},
+  ) {}
 
   /** Returns new or updated events (same id = replace). */
   push(entry: unknown): ChatEvent[] {
@@ -298,7 +301,7 @@ export class TranscriptParser {
           continue;
         }
         const action: ToolAction = { toolUseId: block.id, name, summary: summarize(name, block.input) };
-        const diff = actionDiff(name, block.input);
+        const diff = this.opts.diffs === false ? undefined : actionDiff(name, block.input);
         if (diff) action.diff = diff;
         if (!this.open) {
           this.open = { kind: 'actions', id: uuid, ts, items: [] };

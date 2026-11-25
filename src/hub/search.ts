@@ -12,7 +12,7 @@ export async function searchAll(provider: Provider, q: string): Promise<SearchHi
   for (const s of connected) {
     let events;
     try {
-      events = await provider.events(s.sessionId);
+      events = await provider.events(s.sessionId, { diffs: false });
     } catch {
       continue; // an unreadable transcript only drops that conversation
     }
