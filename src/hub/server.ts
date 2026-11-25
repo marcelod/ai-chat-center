@@ -36,6 +36,7 @@ import {
   type StartResult,
 } from './bgSessions.js';
 import { configDirOf, knownFolders } from './folders.js';
+import { browseFolder, FolderError, resolveHomeFolder } from './folderBrowse.js';
 import { searchAll } from './search.js';
 import { MAX_QUERY, MIN_QUERY } from '../shared/search.js';
 import { failResume, isResuming, startResume } from './resumeState.js';
@@ -58,6 +59,8 @@ export interface HubOptions {
     /** Whether a folder exists (default: stat). */
     folderExists?: (p: string) => Promise<boolean>;
     platform?: NodeJS.Platform;
+    /** The home folder the folder browser and a new session are limited to (default: os.homedir()). */
+    home?: string;
   };
 }
 
@@ -101,10 +104,17 @@ const FALLBACK_PAGE =
   '<!doctype html><html><head><meta charset="utf-8"><title>AI Chat Center</title></head><body><h1>UI not built</h1><p>Run the build to generate the web UI.</p></body></html>';
 
 class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public code?: string) {
     super(message);
   }
 }
+
+/** A FolderError as an HTTP error (its message never carries a path). */
+const FOLDER_STATUS = { invalid: 400, outside: 403, 'not-found': 404, denied: 403 } as const;
+const folderHttpError = (e: FolderError, status: number = FOLDER_STATUS[e.code]) => new HttpError(status, e.message, `folder-${e.code}`);
+
+/** `claude --bg` refused the folder: it was never trusted in Claude Code ("Workspace not trusted"). */
+export const isUntrustedError = (error: string) => /not trusted|trust (this|the) folder|trust dialog/i.test(error);
 
 function tokenOk(given: string | null | undefined, expected: string): boolean {
   if (!given) return false;
@@ -385,13 +395,24 @@ export async function createHub(
     }
     if (p === '/api/sessions' && method === 'GET') return sendJson(res, 200, await provider.listSessions());
     if (p === '/api/folders' && method === 'GET') return sendJson(res, 200, { folders: await folders() });
+    if (p === '/api/folders/browse' && method === 'GET') {
+      // The folder browser of the "+" dialog (spec 2026-11-25-any-folder): subfolders only, inside the home folder.
+      const at = url.searchParams.get('path');
+      try {
+        return sendJson(res, 200, await browseFolder(at === null || at === '' ? undefined : at, { home: opts.bg?.home, hidden: url.searchParams.get('hidden') === '1' }));
+      } catch (e) {
+        if (e instanceof FolderError) throw folderHttpError(e);
+        throw e;
+      }
+    }
     if (p === '/api/search' && method === 'GET') {
       const q = (url.searchParams.get('q') ?? '').trim();
       if (q.length < MIN_QUERY || q.length > MAX_QUERY) throw new HttpError(400, 'invalid query');
       return sendJson(res, 200, { hits: await searchAll(provider, q) });
     }
     if (p === '/api/sessions' && method === 'POST') {
-      // A new background session that connects at once (spec 2026-11-25-app-batch). Only in a known folder.
+      // A new background session that connects at once (spec 2026-11-25-app-batch): in a known folder, or in
+      // any folder inside the home folder (spec 2026-11-25-any-folder).
       const body = (await readJsonBody(req)) as Record<string, unknown> | null;
       if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'invalid body');
       const { cwd, name, model, effort } = body;
@@ -400,17 +421,27 @@ export async function createHub(
       if (!opt(name) && !isSessionName(name)) throw new HttpError(400, 'invalid name');
       if (!opt(model) && !isModel(model)) throw new HttpError(400, 'invalid model');
       if (!opt(effort) && !isEffort(effort)) throw new HttpError(400, 'invalid effort');
-      if (!(await folders()).some((f) => f.cwd === cwd)) throw new HttpError(400, 'unknown folder');
+      let dir = cwd;
+      if (!(await folders()).some((f) => f.cwd === cwd)) {
+        try {
+          dir = await resolveHomeFolder(cwd, opts.bg?.home);
+        } catch (e) {
+          if (e instanceof FolderError) throw folderHttpError(e, 400);
+          throw e;
+        }
+      }
       const r = await start({
-        cwd,
+        cwd: dir,
         name: opt(name) ? undefined : (name as string),
         model: opt(model) ? undefined : (model as string),
         effort: opt(effort) ? undefined : (effort as NewSession['effort']),
-        configDir: configDirOf(await listRegistrations(), cwd),
+        // A folder with no earlier session gets undefined: the default config dir, never passed explicitly
+        // (see configDirFor, fix 291854c).
+        configDir: configDirOf(await listRegistrations(), dir),
       });
       if (!r.ok) {
-        log(`new session in ${cwd} failed: ${r.error}`);
-        return sendJson(res, 502, { error: r.error });
+        log(`new session in ${dir} failed: ${r.error}`);
+        return sendJson(res, 502, isUntrustedError(r.error) ? { error: r.error, code: 'untrusted' } : { error: r.error });
       }
       fanOut({ type: 'sessions' });
       return sendJson(res, 201, { ok: true, bgId: r.bgId });
@@ -666,7 +697,7 @@ export async function createHub(
       else await serveStatic(req, res, url.pathname);
     } catch (e) {
       if (res.headersSent) return void res.end();
-      if (e instanceof HttpError) return sendJson(res, e.status, { error: e.message });
+      if (e instanceof HttpError) return sendJson(res, e.status, e.code ? { error: e.message, code: e.code } : { error: e.message });
       if (e instanceof SessionDisconnectedError) return sendJson(res, 409, { error: 'session disconnected', code: 'session-disconnected' });
       if (e instanceof SessionProtocolError) {
         return sendJson(res, 409, { error: `session runs ${e.direction === 'older' ? 'an older' : 'a newer'} version`, code: `session-${e.direction}-version` });

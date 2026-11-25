@@ -1132,6 +1132,81 @@ describe('new session endpoint (spec 2026-11-25-app-batch)', () => {
   });
 });
 
+describe('folder browser and any folder (spec 2026-11-25-any-folder)', () => {
+  const post = (u: URL, body: unknown) => req(u, '/api/sessions', { method: 'POST', headers: json, body: JSON.stringify(body) });
+  let me: string;
+  let root: string;
+  beforeEach(() => {
+    root = fs.realpathSync(tmpDir('acc-anyfolder-'));
+    me = path.join(root, 'me');
+    fs.mkdirSync(path.join(me, 'new-proj', 'src'), { recursive: true });
+    fs.mkdirSync(path.join(me, '.secret'));
+    fs.mkdirSync(path.join(root, 'other'));
+  });
+  const q = (p: string) => encodeURIComponent(p);
+
+  it('lists the subfolders of the home folder by default; needs the token', async () => {
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [], home: me } });
+    expect((await req(u, '/api/folders/browse')).status).toBe(401);
+    const r = await req(u, '/api/folders/browse', { headers: auth });
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.body)).toEqual({ path: me, parent: null, entries: [{ name: 'new-proj', path: path.join(me, 'new-proj') }], truncated: false });
+  });
+
+  it('enters a subfolder; hidden=1 shows hidden folders', async () => {
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [], home: me } });
+    const r = JSON.parse((await req(u, `/api/folders/browse?path=${q(path.join(me, 'new-proj'))}`, { headers: auth })).body);
+    expect(r.parent).toBe(me);
+    expect(r.entries.map((e: { name: string }) => e.name)).toEqual(['src']);
+    const h = JSON.parse((await req(u, '/api/folders/browse?hidden=1', { headers: auth })).body);
+    expect(h.entries.map((e: { name: string }) => e.name)).toEqual(['.secret', 'new-proj']);
+  });
+
+  it('403 outside the home folder, 400 for a relative path, 404 for a missing one; no path in the error', async () => {
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [], home: me } });
+    const out = await req(u, `/api/folders/browse?path=${q(path.join(root, 'other'))}`, { headers: auth });
+    expect(out.status).toBe(403);
+    expect(JSON.parse(out.body)).toEqual({ error: 'folder outside the home folder', code: 'folder-outside' });
+    expect(out.body).not.toContain(root);
+    expect((await req(u, `/api/folders/browse?path=${q('me/new-proj')}`, { headers: auth })).status).toBe(400);
+    expect((await req(u, `/api/folders/browse?path=${q(path.join(me, 'nope'))}`, { headers: auth })).status).toBe(404);
+  });
+
+  it('starts a new session in a folder never used, inside the home folder, with no CLAUDE_CONFIG_DIR', async () => {
+    const startFn = vi.fn(async () => ({ ok: true as const, bgId: 'abcd1234' }));
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [], start: startFn, home: me } });
+    const r = await post(u, { cwd: path.join(me, 'new-proj', 'src', '..'), name: 'novo' });
+    expect(r.status).toBe(201);
+    expect(startFn).toHaveBeenCalledWith({ cwd: path.join(me, 'new-proj'), name: 'novo', model: undefined, effort: undefined, configDir: undefined });
+  });
+
+  it('a folder with an earlier session keeps its config dir', async () => {
+    await register({ sessionId: 's9', transcriptPath: '/t9.jsonl', cwd: path.join(me, 'new-proj'), pid: 9, configDir: '/custom/cfg' });
+    const startFn = vi.fn(async () => ({ ok: true as const }));
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [], start: startFn, home: me } });
+    expect((await post(u, { cwd: path.join(me, 'new-proj') })).status).toBe(201);
+    expect(startFn).toHaveBeenCalledWith(expect.objectContaining({ configDir: '/custom/cfg' }));
+  });
+
+  it('400 for a folder outside the home folder or missing; nothing is started', async () => {
+    const startFn = vi.fn(async () => ({ ok: true as const }));
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [], start: startFn, home: me } });
+    for (const cwd of [path.join(root, 'other'), path.join(me, 'nope'), 'me/new-proj', path.join(me + '2')]) {
+      const r = await post(u, { cwd });
+      expect(r.status).toBe(400);
+      expect(r.body).not.toContain(root);
+    }
+    expect(startFn).not.toHaveBeenCalled();
+  });
+
+  it('502 with code "untrusted" when claude --bg refuses the folder as not trusted', async () => {
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [], start: async () => ({ ok: false as const, error: 'Error: Workspace not trusted. Run claude here first.' }), home: me } });
+    const r = await post(u, { cwd: path.join(me, 'new-proj') });
+    expect(r.status).toBe(502);
+    expect(JSON.parse(r.body)).toEqual({ error: 'Error: Workspace not trusted. Run claude here first.', code: 'untrusted' });
+  });
+});
+
 describe('search endpoint (spec 2026-11-25-app-batch)', () => {
   const ev = (id: string, ts: string, text: string, kind: 'user' | 'assistant' = 'assistant') =>
     kind === 'user' ? { kind, id, ts, text, origin: 'app' as const } : { kind, id, ts, text };
