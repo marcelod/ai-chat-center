@@ -112,6 +112,7 @@ export async function openTerminal(t: TerminalTarget, deps: OpenTerminalDeps = {
 
   let cmd: string;
   let args: string[];
+  let procEnv = cleanEnv(env as NodeJS.ProcessEnv, configDir);
   if (platform === 'darwin') {
     // A `.command` file opened by Terminal (`open -a Terminal`): no Automation permission prompt (osascript
     // driving Terminal needs one), and the script text holds only quoted words and the validated id.
@@ -133,6 +134,9 @@ export async function openTerminal(t: TerminalTarget, deps: OpenTerminalDeps = {
     if (!root || !path.win32.isAbsolute(root)) return { ok: false, code: 'no-terminal', error: 'SystemRoot is not set' };
     const cmdExe = path.win32.join(root, 'System32', 'cmd.exe');
     const run = [cmdExe, '/k', 'claude', 'attach', t.bgId];
+    // cmd.exe looks for a bare `claude` in its cwd (the session folder) before the PATH, which would run a
+    // `claude.cmd`/`claude.exe` planted in a project; this makes it search the PATH only.
+    procEnv = { ...procEnv, NoDefaultCurrentDirectoryInExePath: '1' };
     const local = env.LOCALAPPDATA;
     const wt = local && path.win32.isAbsolute(local) ? path.win32.join(local, 'Microsoft', 'WindowsApps', 'wt.exe') : null;
     // wt.exe is an app execution alias (a reparse point): checked for presence, not as a regular file.
@@ -160,7 +164,7 @@ export async function openTerminal(t: TerminalTarget, deps: OpenTerminalDeps = {
     try {
       child = spawn(cmd, args, {
         cwd: t.cwd,
-        env: cleanEnv(env as NodeJS.ProcessEnv, configDir),
+        env: procEnv,
         detached: true,
         stdio: 'ignore',
         shell: false,

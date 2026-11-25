@@ -76,7 +76,7 @@ describe('openTerminal', () => {
     const r = recorder();
     const res = await openTerminal(
       { bgId: ID, cwd: '/home/u/p', configDir: '/home/u/.claude-work' },
-      { spawn: r.spawn, platform: 'linux', env: { PATH: '/usr/bin', CLAUDECODE: '1', HOME: '/home/u' }, home: '/home/u', exists: (p) => p === '/usr/bin/xterm' },
+      { spawn: r.spawn, isDir: () => true, platform: 'linux', env: { PATH: '/usr/bin', CLAUDECODE: '1', HOME: '/home/u' }, home: '/home/u', exists: (p) => p === '/usr/bin/xterm' },
     );
     expect(res).toEqual({ ok: true });
     expect(r.calls).toHaveLength(1);
@@ -90,21 +90,21 @@ describe('openTerminal', () => {
   });
   it('no terminal found, or a spawn error, is a failure (never a throw)', async () => {
     const r = recorder();
-    expect(await openTerminal({ bgId: ID, cwd: '/p' }, { spawn: r.spawn, platform: 'linux', env: { PATH: '/usr/bin' }, exists: () => false })).toMatchObject({
+    expect(await openTerminal({ bgId: ID, cwd: '/p' }, { spawn: r.spawn, isDir: () => true, platform: 'linux', env: { PATH: '/usr/bin' }, exists: () => false })).toMatchObject({
       ok: false,
       code: 'no-terminal',
     });
     expect(r.calls).toHaveLength(0);
     const bad = recorder(new Error('spawn ENOENT'));
-    expect(await openTerminal({ bgId: ID, cwd: '/p' }, { spawn: bad.spawn, platform: 'linux', env: { PATH: '/usr/bin' }, exists: () => true })).toMatchObject({
+    expect(await openTerminal({ bgId: ID, cwd: '/p' }, { spawn: bad.spawn, isDir: () => true, platform: 'linux', env: { PATH: '/usr/bin' }, exists: () => true })).toMatchObject({
       ok: false,
       code: 'spawn-failed',
     });
   });
   it('refuses an invalid id and a relative folder', async () => {
     const r = recorder();
-    await expect(openTerminal({ bgId: '../x', cwd: '/p' }, { spawn: r.spawn, platform: 'linux' })).rejects.toThrow();
-    expect(await openTerminal({ bgId: ID, cwd: 'p' }, { spawn: r.spawn, platform: 'linux', env: { PATH: '/usr/bin' }, exists: () => true })).toMatchObject({ ok: false });
+    await expect(openTerminal({ bgId: '../x', cwd: '/p' }, { spawn: r.spawn, isDir: () => true, platform: 'linux' })).rejects.toThrow();
+    expect(await openTerminal({ bgId: ID, cwd: 'p' }, { spawn: r.spawn, isDir: () => true, platform: 'linux', env: { PATH: '/usr/bin' }, exists: () => true })).toMatchObject({ ok: false });
     expect(r.calls).toHaveLength(0);
   });
   it('macOS: writes a private 0700 .command script and opens it with Terminal', async () => {
@@ -113,7 +113,7 @@ describe('openTerminal', () => {
     const res = await openTerminal(
       { bgId: ID, cwd: '/Users/u/p' },
       {
-        spawn: r.spawn,
+        spawn: r.spawn, isDir: () => true,
         platform: 'darwin',
         env: {},
         home: '/Users/u',
@@ -133,7 +133,7 @@ describe('openTerminal', () => {
     const res = await openTerminal(
       { bgId: ID, cwd: '/p' },
       {
-        spawn: r.spawn,
+        spawn: r.spawn, isDir: () => true,
         platform: 'darwin',
         mkdtemp: () => {
           throw new Error('ENOSPC');
@@ -146,7 +146,7 @@ describe('openTerminal', () => {
   const winEnv = { SystemRoot: 'C:\\Windows', LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local', PATH: 'C:\\bin' };
   it('Windows: wt.exe when present, the folder as its cwd (-d .), cmd.exe /k running claude attach', async () => {
     const r = recorder();
-    const res = await openTerminal({ bgId: ID, cwd: 'C:\\Users\\u\\my %proj% & co' }, { spawn: r.spawn, platform: 'win32', env: winEnv, exists: () => true });
+    const res = await openTerminal({ bgId: ID, cwd: 'C:\\Users\\u\\my %proj% & co' }, { spawn: r.spawn, isDir: () => true, platform: 'win32', env: winEnv, exists: () => true });
     expect(res).toEqual({ ok: true });
     const c = r.calls[0];
     expect(c.cmd).toBe('C:\\Users\\u\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe');
@@ -156,13 +156,29 @@ describe('openTerminal', () => {
   });
   it('Windows: without wt.exe, cmd.exe start opens a console window with cmd.exe /k, the folder never on the command line', async () => {
     const r = recorder();
-    await openTerminal({ bgId: ID, cwd: 'C:\\p & x' }, { spawn: r.spawn, platform: 'win32', env: winEnv, exists: () => false });
+    await openTerminal({ bgId: ID, cwd: 'C:\\p & x' }, { spawn: r.spawn, isDir: () => true, platform: 'win32', env: winEnv, exists: () => false });
     expect(r.calls[0].cmd).toBe('C:\\Windows\\System32\\cmd.exe');
     expect(r.calls[0].args).toEqual(['/d', '/c', 'start', '', 'C:\\Windows\\System32\\cmd.exe', '/k', 'claude', 'attach', ID]);
     expect(r.calls[0].opts).toMatchObject({ cwd: 'C:\\p & x', shell: false, detached: true });
-    expect(await openTerminal({ bgId: ID, cwd: 'C:\\p' }, { spawn: r.spawn, platform: 'win32', env: {}, exists: () => false })).toMatchObject({
+    expect(await openTerminal({ bgId: ID, cwd: 'C:\\p' }, { spawn: r.spawn, isDir: () => true, platform: 'win32', env: {}, exists: () => false })).toMatchObject({
       ok: false,
       code: 'no-terminal',
     });
+  });
+  it('Windows: the process env has NoDefaultCurrentDirectoryInExePath=1 (claude is not looked up in the session folder)', async () => {
+    for (const exists of [() => true, () => false]) {
+      const r = recorder();
+      await openTerminal({ bgId: ID, cwd: 'C:\\p' }, { spawn: r.spawn, isDir: () => true, platform: 'win32', env: winEnv, exists });
+      expect(r.calls[0].opts.env).toMatchObject({ NoDefaultCurrentDirectoryInExePath: '1' });
+    }
+    const l = recorder();
+    await openTerminal({ bgId: ID, cwd: '/p' }, { spawn: l.spawn, isDir: () => true, platform: 'linux', env: { PATH: '/usr/bin' }, exists: () => true });
+    expect(l.calls[0].opts.env).not.toHaveProperty('NoDefaultCurrentDirectoryInExePath');
+  });
+  it('a folder that is missing or not a folder is folder-missing, nothing is spawned', async () => {
+    const r = recorder();
+    const res = await openTerminal({ bgId: ID, cwd: '/gone' }, { spawn: r.spawn, isDir: () => false, platform: 'linux', env: { PATH: '/usr/bin' }, exists: () => true });
+    expect(res).toMatchObject({ ok: false, code: 'folder-missing' });
+    expect(r.calls).toHaveLength(0);
   });
 });
