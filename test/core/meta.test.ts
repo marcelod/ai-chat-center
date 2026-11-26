@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'node:fs';
-import { getEffort, getMode, setEffort, setMode, shortModel } from '../../src/core/meta.js';
+import { contextWindowFromStatusInput, getContextWindow, getEffort, getMode, setContextWindow, setEffort, setMode, shortModel } from '../../src/core/meta.js';
 import { paths } from '../../src/core/paths.js';
 import { tmpDir } from '../helpers/tmp.js';
 
@@ -60,6 +60,42 @@ describe('meta: permission mode', () => {
     expect(await getMode('s1')).toBeNull();
     await setMode('s1', 'plan');
     expect(await getMode('s1')).toBe('plan');
+  });
+});
+
+describe('meta: context window size', () => {
+  it('sets and gets the size, keeping the other fields', async () => {
+    await setEffort('s1', 'high');
+    expect(await getContextWindow('s1')).toBeNull();
+    await setContextWindow('s1', 1_000_000);
+    expect(await getContextWindow('s1')).toBe(1_000_000);
+    expect(await getEffort('s1')).toBe('high');
+  });
+  it('ignores sizes that are not a plausible whole number of tokens', async () => {
+    for (const bad of [0, -5, 1.5, 999, 200_000_000, NaN, '200000', null]) {
+      await setContextWindow('s1', bad as never);
+    }
+    expect(await getContextWindow('s1')).toBeNull();
+    expect(fs.existsSync(paths().metaFile('s1'))).toBe(false);
+  });
+  it('does not trust a tampered file', async () => {
+    fs.mkdirSync(paths().metaFile('s1').replace(/s1\.json$/, ''), { recursive: true });
+    fs.writeFileSync(paths().metaFile('s1'), JSON.stringify({ contextWindow: '1000000' }));
+    expect(await getContextWindow('s1')).toBeNull();
+  });
+});
+
+describe('contextWindowFromStatusInput', () => {
+  it('reads the session id and context_window.context_window_size', () => {
+    expect(contextWindowFromStatusInput({ session_id: 'abc-1', context_window: { context_window_size: 1_000_000, used_percentage: 8 } }))
+      .toEqual({ sessionId: 'abc-1', size: 1_000_000 });
+  });
+  it('is null without a valid session id or size', () => {
+    for (const input of [null, 'x', {}, { session_id: 'abc' }, { session_id: '../x', context_window: { context_window_size: 200_000 } },
+      { session_id: 'abc', context_window: { context_window_size: '200000' } }, { session_id: 'abc', context_window: { context_window_size: 5 } },
+      { context_window: { context_window_size: 200_000 } }]) {
+      expect(contextWindowFromStatusInput(input)).toBeNull();
+    }
   });
 });
 

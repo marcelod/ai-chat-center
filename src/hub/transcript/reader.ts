@@ -46,6 +46,12 @@ export class TranscriptReader {
     return this.parser.claudeVersion;
   }
 
+  /** Tokens in the context now, and the last compaction (see TranscriptParser). */
+  context(): { tokens?: number; lastCompactAt?: string } {
+    const { contextTokens: tokens, lastCompact } = this.parser;
+    return { ...(tokens !== undefined ? { tokens } : {}), ...(lastCompact ? { lastCompactAt: lastCompact.at } : {}) };
+  }
+
   private reset(): void {
     this.offset = 0;
     this.partial = [];

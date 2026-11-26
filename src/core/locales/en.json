@@ -278,6 +278,35 @@
       "idle": "Status: idle",
       "waiting": "Status: waiting for you in the terminal",
       "disconnected": "Status: disconnected"
+    },
+    "context": {
+      "label": "Context",
+      "summary": "{pct}% used",
+      "warn": "near the limit",
+      "danger": "almost full",
+      "tokens": "{used} / {size} tokens",
+      "model": "Model: {model}",
+      "left": "{pct}% left until the limit ({tokens} tokens)",
+      "autoCompact": "Claude Code compacts automatically before the limit; the exact point is not reported.",
+      "estimated": "Window size estimated from the model. With /ai-chat-center:cc usage on, Claude Code reports the exact size.",
+      "lastCompact": "Last compaction: {time}",
+      "noCompact": "No compaction yet"
+    },
+    "quickReplies": {
+      "label": "Quick replies",
+      "use": "Use: {text}",
+      "remove": "Remove: {text}",
+      "edit": "Edit",
+      "done": "Done",
+      "add": "Add",
+      "new": "New quick reply",
+      "empty": "No quick replies. Use Edit to add one.",
+      "hint": "Fills the message field; press Enter to send.",
+      "defaults": {
+        "d1": "Go ahead",
+        "d2": "Commit it",
+        "d3": "Summarize what's left"
+      }
     }
   }
 }

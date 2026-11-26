@@ -114,13 +114,27 @@ export type SessionView = {
   claudeVersion?: string;
   /** Runs as a Claude Code background session: its short id, for `claude attach <id>` and app commands. */
   bgId?: string;
+  /** How full the context window is (active sessions, after the first reply). */
+  context?: ContextUsage;
   /** The app asked to resume this ended session and it has not reconnected yet. */
   resuming?: true;
   /** Why the last resume from the app failed (output of `claude --bg`, or a timeout). */
   resumeError?: string;
 };
 
-export type QuestionOption = { label: string; description?: string };
+/** A session's context use (spec 2026-11-26-context-quick-replies). */
+export type ContextUsage = {
+  /** Tokens in the context at the last main-thread reply (input + cache read + cache creation), or left by the last compaction. */
+  used: number;
+  /** Window size in tokens. */
+  size: number;
+  /** The size came from Claude Code's status line (`/cc usage on`); otherwise deduced (see shared/context.ts). */
+  exact?: true;
+  /** When the last compaction (`/compact` or automatic) ran. */
+  lastCompactAt?: string;
+};
+
+export type QuestionOption ={ label: string; description?: string };
 export type Question = { question: string; header?: string; options: QuestionOption[]; multiSelect?: boolean };
 /** An AskUserQuestion waiting for an answer from the app (see core/questions.ts). */
 /** `pid`: the hook process waiting for the answer; a question whose process is dead is stale (see getPending). */

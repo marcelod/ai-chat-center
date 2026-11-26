@@ -278,6 +278,35 @@
       "idle": "Status: ociosa",
       "waiting": "Status: esperando você no terminal",
       "disconnected": "Status: desconectada"
+    },
+    "context": {
+      "label": "Contexto",
+      "summary": "{pct}% usado",
+      "warn": "perto do limite",
+      "danger": "quase cheio",
+      "tokens": "{used} / {size} tokens",
+      "model": "Modelo: {model}",
+      "left": "faltam {pct}% até o limite ({tokens} tokens)",
+      "autoCompact": "O Claude Code compacta sozinho antes do limite; o ponto exato não é informado.",
+      "estimated": "Tamanho da janela estimado pelo modelo. Com /ai-chat-center:cc usage on, o Claude Code informa o tamanho exato.",
+      "lastCompact": "Última compactação: {time}",
+      "noCompact": "Nenhuma compactação ainda"
+    },
+    "quickReplies": {
+      "label": "Respostas rápidas",
+      "use": "Usar: {text}",
+      "remove": "Remover: {text}",
+      "edit": "Editar",
+      "done": "Pronto",
+      "add": "Adicionar",
+      "new": "Nova resposta rápida",
+      "empty": "Nenhuma resposta rápida. Use Editar para adicionar.",
+      "hint": "Preenche o campo de mensagem; aperte Enter para enviar.",
+      "defaults": {
+        "d1": "Pode seguir",
+        "d2": "Faz o commit",
+        "d3": "Resume o que falta"
+      }
     }
   }
 }

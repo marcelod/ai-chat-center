@@ -759,6 +759,51 @@ describe('provider: queued messages with their text (audit R3-F5)', () => {
       fs.appendFileSync(transcript, modelLine('m2', 'claude-haiku-5-5'));
       expect((await p.poll()).map((c) => c.type)).toContain('sessions');
     });
+
+    describe('context size', () => {
+      const usageLine = (uuid: string, tokens: number) =>
+        JSON.stringify({
+          type: 'assistant', uuid, timestamp: '2026-01-01T00:00:00Z',
+          message: { role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: 'x' }], usage: { input_tokens: 2, cache_read_input_tokens: tokens - 2, output_tokens: 50 } },
+        }) + '\n';
+      const compactLine = (uuid: string, post: number) =>
+        JSON.stringify({ type: 'system', subtype: 'compact_boundary', uuid, timestamp: '2026-01-01T01:00:00Z', compactMetadata: { trigger: 'manual', preTokens: 150_000, postTokens: post } }) + '\n';
+
+      it('none before the first reply', async () => {
+        await reg();
+        expect((await new ClaudeCodeProvider(async () => [live()]).listSessions()).connected[0].context).toBeUndefined();
+      });
+      it('the tokens of the last reply over the size deduced from the model', async () => {
+        await reg();
+        fs.appendFileSync(transcript, usageLine('a1', 124_000));
+        const v = (await new ClaudeCodeProvider(async () => [live()]).listSessions()).connected[0];
+        expect(v.context).toEqual({ used: 124_000, size: 200_000 });
+      });
+      it('the size the status line recorded wins, and is marked exact', async () => {
+        const { setContextWindow } = await import('../../src/core/meta.js');
+        await reg();
+        await setContextWindow('s1', 1_000_000);
+        fs.appendFileSync(transcript, usageLine('a1', 124_000));
+        const v = (await new ClaudeCodeProvider(async () => [live()]).listSessions()).connected[0];
+        expect(v.context).toEqual({ used: 124_000, size: 1_000_000, exact: true });
+      });
+      it('drops after a compaction, with its time; poll reports the change', async () => {
+        await reg();
+        fs.appendFileSync(transcript, usageLine('a1', 150_000));
+        const p = new ClaudeCodeProvider(async () => [live({ status: 'idle' })]);
+        await p.poll();
+        expect((await p.poll()).map((c) => c.type)).toEqual([]);
+        fs.appendFileSync(transcript, compactLine('b1', 20_000));
+        expect((await p.poll()).map((c) => c.type)).toContain('sessions');
+        expect((await p.listSessions()).connected[0].context).toEqual({ used: 20_000, size: 200_000, lastCompactAt: '2026-01-01T01:00:00Z' });
+      });
+      it('not for a disconnected session', async () => {
+        await reg();
+        fs.appendFileSync(transcript, usageLine('a1', 124_000));
+        await markDisconnected('s1', 'off');
+        expect((await new ClaudeCodeProvider(async () => []).listSessions()).connected[0].context).toBeUndefined();
+      });
+    });
   });
 
 });

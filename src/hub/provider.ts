@@ -1,7 +1,8 @@
 import { isPinned } from '../core/pins.js';
 import { getDisplayName } from '../core/names.js';
 import { readGitBranch } from '../core/gitBranch.js';
-import { getEffort, getMode, shortModel } from '../core/meta.js';
+import { getContextWindow, getEffort, getMode, shortModel } from '../core/meta.js';
+import { contextWindowSize } from '../shared/context.js';
 import { readUsage } from '../core/usage.js';
 import { getBackground } from '../core/background.js';
 import fs from 'node:fs/promises';
@@ -357,6 +358,11 @@ export class ClaudeCodeProvider implements Provider {
       const claudeVersion = disconnected ? undefined : this.readers.get(sid)?.reader.claudeVersion();
       if (claudeVersion) view.claudeVersion = claudeVersion;
       if (!disconnected && l?.bgId) view.bgId = l.bgId;
+      const ctx = disconnected ? undefined : this.readers.get(sid)?.reader.context();
+      if (ctx?.tokens !== undefined) {
+        const { size, exact } = contextWindowSize(rawModel, ctx.tokens, await getContextWindow(sid));
+        view.context = { used: ctx.tokens, size, ...(exact ? { exact: true as const } : {}), ...(ctx.lastCompactAt ? { lastCompactAt: ctx.lastCompactAt } : {}) };
+      }
       Object.assign(view, resumeView(sid, disconnected ? null : reg.connectedAt, this.now()));
       connected.push(view);
     }
@@ -441,6 +447,7 @@ export class ClaudeCodeProvider implements Provider {
         s.background ?? null,
         s.pinned ?? false,
         s.bgId ?? null,
+        s.context ?? null,
         s.resuming ?? false,
         s.resumeError ?? null,
       ]),

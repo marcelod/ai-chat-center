@@ -1,9 +1,11 @@
 // Claude Code's status line command while `/cc usage on` is set (see hooks/statusline.ts). It records the
-// account's rate-limit usage for the app, then runs the status line the user had with the same input, so the
+// account's rate-limit usage and the session's context window size for the app, then runs the status line the user had with the same input, so the
 // terminal shows exactly what it showed before. It never fails the status line: any error only skips the record.
 import { spawn } from 'node:child_process';
 import { recordUsage, usageFromStatusInput } from '../core/usage.js';
 import { readStatuslineState } from '../core/statuslineState.js';
+import { contextWindowFromStatusInput, setContextWindow } from '../core/meta.js';
+import { getRegistration } from '../core/registry.js';
 
 async function readStdin(): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -14,8 +16,12 @@ async function readStdin(): Promise<Buffer> {
 async function main(): Promise<void> {
   const input = await readStdin();
   try {
-    const usage = usageFromStatusInput(JSON.parse(input.toString('utf8')));
+    const data: unknown = JSON.parse(input.toString('utf8'));
+    const usage = usageFromStatusInput(data);
     if (usage) await recordUsage(usage);
+    // Only for sessions connected to the app at some point: no meta file for every other session.
+    const cw = contextWindowFromStatusInput(data);
+    if (cw && (await getRegistration(cw.sessionId))) await setContextWindow(cw.sessionId, cw.size);
   } catch {
     /* display only */
   }
