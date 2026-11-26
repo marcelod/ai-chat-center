@@ -245,6 +245,33 @@ describe('api', () => {
     const r = await req(u, '/api/config', { method: 'PUT', headers: json, body: JSON.stringify({ language: 'xx' }) });
     expect(r.status).toBe(400);
   });
+  it('PUT /api/window-size saves a normalized size that GET /api/config returns', async () => {
+    const u = await start(fakeProvider());
+    const put = await req(u, '/api/window-size', { method: 'PUT', headers: json, body: JSON.stringify({ width: 1400.4, height: 900, extra: 'x' }) });
+    expect(put.status).toBe(200);
+    expect(JSON.parse(put.body)).toEqual({ windowSize: { width: 1400, height: 900 } });
+    expect(JSON.parse((await req(u, '/api/config', { headers: auth })).body).windowSize).toEqual({ width: 1400, height: 900 });
+    await req(u, '/api/window-size', { method: 'PUT', headers: json, body: JSON.stringify({ width: 1e9, height: 1 }) });
+    expect((await loadConfig()).windowSize).toEqual({ width: 8192, height: 480 });
+  });
+  it('PUT /api/window-size refuses no token, a bad body or a non-JSON body, and keeps the other settings', async () => {
+    const u = await start(fakeProvider());
+    await saveConfig({ language: 'pt-BR', openWindow: false });
+    const body = JSON.stringify({ width: 1400, height: 900 });
+    expect((await req(u, '/api/window-size', { method: 'PUT', headers: { 'content-type': 'application/json' }, body })).status).toBe(401);
+    expect((await req(u, '/api/window-size', { method: 'PUT', headers: json, body: JSON.stringify({ width: '1400', height: 900 }) })).status).toBe(400);
+    expect((await req(u, '/api/window-size', { method: 'PUT', headers: json, body: '[]' })).status).toBe(400);
+    expect((await req(u, '/api/window-size', { method: 'PUT', headers: { ...auth, 'content-type': 'text/plain' }, body })).status).toBe(415);
+    expect((await loadConfig()).windowSize).toBeUndefined();
+    await req(u, '/api/window-size', { method: 'PUT', headers: json, body });
+    expect(await loadConfig()).toEqual({ language: 'pt-BR', answersFromApp: false, openWindow: false, windowSize: { width: 1400, height: 900 } });
+  });
+  it('PUT /api/config keeps the saved window size', async () => {
+    const u = await start(fakeProvider());
+    await saveConfig({ windowSize: { width: 1400, height: 900 } });
+    await req(u, '/api/config', { method: 'PUT', headers: json, body: JSON.stringify({ language: 'pt-BR', windowSize: { width: 600, height: 600 } }) });
+    expect((await loadConfig()).windowSize).toEqual({ width: 1400, height: 900 });
+  });
   it('unknown api route returns 404', async () => {
     const u = await start(fakeProvider());
     expect((await req(u, '/api/nope', { headers: auth })).status).toBe(404);

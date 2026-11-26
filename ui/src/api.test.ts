@@ -325,3 +325,25 @@ describe('background', () => {
     expect(init.headers).toMatchObject({ Authorization: 'Bearer tok' });
   });
 });
+
+describe('window size', () => {
+  it('openedByPair is true only for a load with #pair=', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ token: 't'.repeat(64) }), { status: 200 })));
+    window.history.replaceState(null, '', `/#pair=${'c'.repeat(64)}`);
+    expect((await load()).openedByPair()).toBe(true);
+    window.history.replaceState(null, '', '/#token=tok');
+    expect((await load()).openedByPair()).toBe(false);
+  });
+  it('saveWindowSize PUTs the size as JSON with the bearer token', async () => {
+    const f = vi.fn(async () => new Response(JSON.stringify({ windowSize: { width: 1300, height: 800 } }), { status: 200 }));
+    vi.stubGlobal('fetch', f);
+    window.history.replaceState(null, '', '/#token=tok');
+    const api = await load();
+    await api.saveWindowSize({ width: 1300, height: 800 });
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/window-size');
+    expect(init.method).toBe('PUT');
+    expect(init.body).toBe(JSON.stringify({ width: 1300, height: 800 }));
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer tok', 'Content-Type': 'application/json' });
+  });
+});

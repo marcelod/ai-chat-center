@@ -110,7 +110,12 @@ export interface OpenDeps {
   onError?: (msg: string) => void;
 }
 
-/** Starts `browser --app=<url> --new-window` detached, without a shell. False when it could not start. */
+/**
+ * Starts `browser --app=<url> --new-window` detached, without a shell. False when it could not start.
+ * No `--window-size`: Chrome ignores it when it is already running, and when this launch starts Chrome it
+ * becomes the size of every new window of that Chrome. The app sizes its own window (ui/src/useWindowSize.ts,
+ * spec 2026-11-26-window-size).
+ */
 export function openAppWindow(browser: string, url: string, deps: OpenDeps = {}): boolean {
   const spawn = deps.spawn ?? nodeSpawn;
   try {

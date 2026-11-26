@@ -35,6 +35,20 @@ describe('config', () => {
   });
 });
 
+describe('config windowSize', () => {
+  it('is absent until saved, then loads normalized', async () => {
+    expect(await loadConfig()).not.toHaveProperty('windowSize');
+    await saveConfig({ windowSize: { width: 1400, height: 900 } });
+    expect((await loadConfig()).windowSize).toEqual({ width: 1400, height: 900 });
+  });
+  it('a hand-edited value is clamped or dropped', async () => {
+    await writeJsonAtomic(path.join(tmp, 'config.json'), { language: 'en', windowSize: { width: 99999, height: 10 } });
+    expect((await loadConfig()).windowSize).toEqual({ width: 8192, height: 480 });
+    await writeJsonAtomic(path.join(tmp, 'config.json'), { language: 'en', windowSize: { width: 'big', height: 900 } });
+    expect(await loadConfig()).not.toHaveProperty('windowSize');
+  });
+});
+
 describe('fsAtomic', () => {
   it('readJson returns null on corrupt or missing file', async () => {
     const f = path.join(tmp, 'bad.json');
