@@ -8,6 +8,7 @@ import { SessionDisconnectedError, SessionProtocolError, assertSameProtocol } fr
 import type { ProviderChange } from '../shared/types.js';
 import { assertSessionId } from '../core/paths.js';
 import { loadConfig, saveConfig, type Lang } from '../core/config.js';
+import { normalizeWindowSize } from '../shared/windowSize.js';
 import { writePresence } from '../core/presence.js';
 import { assertToolUseId, getPending, validAnswers, writeAnswer, type AnswerFile } from '../core/questions.js';
 import { setDisplayName, validDisplayName } from '../core/names.js';
@@ -456,6 +457,13 @@ export async function createHub(
       if (!body || typeof body !== 'object' || !LANGS.includes(body.language as Lang)) throw new HttpError(400, 'invalid language');
       await saveConfig({ language: body.language as Lang });
       return sendJson(res, 200, { language: body.language });
+    }
+    if (p === '/api/window-size' && method === 'PUT') {
+      // The app window reports its size after a resize (spec 2026-11-26-window-size); the next window opens with it.
+      const windowSize = normalizeWindowSize(await readJsonBody(req));
+      if (!windowSize) throw new HttpError(400, 'invalid window size');
+      await saveConfig({ windowSize });
+      return sendJson(res, 200, { windowSize });
     }
     const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|pin|disconnect|remove|resume|command|open-terminal|background|background-image|attachments|questions\/([^/]+))$/.exec(p);
     if (m) {
