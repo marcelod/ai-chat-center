@@ -18,6 +18,7 @@ import { useCommandProgress } from '../useCommandProgress';
 import { SessionControls } from './SessionControls';
 import { SidePanel, type PanelApi, type PanelItem } from './SidePanel';
 import { SubagentList, SubagentTranscript } from './SubagentsPanel';
+import { ScreenView } from './ScreenPanel';
 import { FileLinksProvider, useExistingFiles, type FileLinks } from '../fileLinks';
 import { AgentBubble, RecapCard, AssistantBubble, ToAgentBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
 
@@ -318,6 +319,7 @@ function SessionTitle({
   onUploadBackground,
   onResume,
   onOpenTerminal,
+  onScreen,
 }: {
   session: SessionView;
   name: string;
@@ -330,6 +332,7 @@ function SessionTitle({
   onUploadBackground?: (file: File) => Promise<void>;
   onResume?: () => Promise<void>;
   onOpenTerminal?: () => void;
+  onScreen?: () => void;
 }) {
   const t = useT();
   const [picking, setPicking] = useState(false);
@@ -432,6 +435,7 @@ function SessionTitle({
         onBackground={onSetBackground && onUploadBackground ? () => setPicking(true) : undefined}
         onResume={session.state === 'disconnected' && !session.resuming ? onResume : undefined}
         onOpenTerminal={onOpenTerminal}
+        onScreen={onScreen}
       />
       {picking && onSetBackground && onUploadBackground && (
         <BackgroundPicker
@@ -594,6 +598,7 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
             onUploadBackground={bg.onUploadBackground}
             onResume={onResume}
             onOpenTerminal={openTerminal}
+            onScreen={panel?.screen && session.bgId && state !== 'disconnected' ? () => setPanelStack([{ kind: 'screen' }]) : undefined}
           />
           <div data-testid="session-info" className="flex min-w-0 flex-col overflow-hidden font-mono text-xs text-muted md:flex-row md:items-baseline md:gap-1.5">
             <span className="min-w-0 truncate md:min-w-[6ch]">{session.cwd}</span>
@@ -820,6 +825,7 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
                 const load = panel.subagentEvents;
                 return <SubagentTranscript key={item.id} title={item.title} load={() => load(item.id)} />;
               }
+              if (item.kind === 'screen' && panel.screen) return <ScreenView load={panel.screen} />;
               return null;
             }}
           />

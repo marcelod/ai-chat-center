@@ -403,6 +403,7 @@ export function panelApi(sid: string) {
     filesExist: (paths: string[]) => filesExist(sid, paths),
     subagents: async () => (await request<{ subagents: SubagentInfo[] }>(`/api/sessions/${encodeURIComponent(sid)}/subagents`)).subagents,
     subagentEvents: (id: string) => request<ChatEvent[]>(`/api/sessions/${encodeURIComponent(sid)}/subagents/${encodeURIComponent(id)}/events`),
+    screen: async () => (await request<{ text: string }>(`/api/sessions/${encodeURIComponent(sid)}/screen`)).text,
   };
 }
 export const getConfig = () => request<UiConfig>('/api/config');

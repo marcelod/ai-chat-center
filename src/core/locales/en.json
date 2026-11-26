@@ -48,7 +48,13 @@
         "minutes": "{n} min",
         "hours": "{h} h {m} min"
       },
-      "agentsWorking": "{n} subagents working"
+      "agentsWorking": "{n} subagents working",
+      "screen": "Session screen",
+      "refresh": "Refresh",
+      "updatedAt": "Updated {time}",
+      "screenNotBackground": "Only a background session's screen can be shown.",
+      "screenWindows": "Not available on Windows yet.",
+      "screenFailed": "Couldn't read the session screen."
     },
     "rename": {
       "label": "Rename session",

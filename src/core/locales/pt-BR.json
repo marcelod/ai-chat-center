@@ -48,7 +48,13 @@
         "minutes": "{n} min",
         "hours": "{h} h {m} min"
       },
-      "agentsWorking": "{n} subagentes trabalhando"
+      "agentsWorking": "{n} subagentes trabalhando",
+      "screen": "Tela da sessão",
+      "refresh": "Atualizar",
+      "updatedAt": "Atualizada {time}",
+      "screenNotBackground": "Só dá para ver a tela de uma sessão em segundo plano.",
+      "screenWindows": "Ainda não disponível no Windows.",
+      "screenFailed": "Não foi possível ler a tela da sessão."
     },
     "rename": {
       "label": "Renomear sessão",
