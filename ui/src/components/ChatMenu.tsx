@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { useT } from '../i18n';
+import { useT, type T } from '../i18n';
 import { MoreIcon } from './icons';
 
 type Props = {
@@ -18,17 +18,34 @@ type Props = {
   onResume?: () => Promise<void>;
   /** Opens the system terminal on the background session (absent: no item). Errors are shown by the caller. */
   onOpenTerminal?: () => void;
+  /** `claude stop` on the running background session, after a confirmation (absent: no item). */
+  onStop?: () => Promise<void>;
+  /** `claude respawn` on the background session (absent: no item). */
+  onRespawn?: () => Promise<void>;
+  /** `claude rm` on the background session, after a confirmation; also takes it out of the app (absent: no item). */
+  onRmBackground?: () => Promise<void>;
 };
+
+type Confirmable = 'disconnect' | 'remove' | 'stop' | 'rm';
+
+/** The text of a failure: claude's own words when it refused (code `claude-failed`), else the plain message. */
+function failText(t: T, key: string, e: unknown): string {
+  const { code, detail } = (e ?? {}) as { code?: unknown; detail?: unknown };
+  return code === 'claude-failed' && typeof detail === 'string' && detail ? `${t(key)}: ${detail}` : t(key);
+}
 
 /**
  * The ⋮ menu of a conversation (spec 2026-11-24-chat-menu-remove). Escape closes it and returns focus to
  * the button, a click outside closes it, arrow keys move between items. "Remove from app" asks to confirm
  * in place (a second click), never with window.confirm.
  */
-export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({ onRename, onRemove, onPin, pinned = false, onDisconnect, onBackground, onResume, onOpenTerminal }, button) {
+export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu(
+  { onRename, onRemove, onPin, pinned = false, onDisconnect, onBackground, onResume, onOpenTerminal, onStop, onRespawn, onRmBackground },
+  button,
+) {
   const t = useT();
   const [open, setOpen] = useState(false);
-  const [confirming, setConfirming] = useState<'disconnect' | 'remove' | null>(null);
+  const [confirming, setConfirming] = useState<Confirmable | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -73,7 +90,7 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
     };
   }, [open]);
 
-  if (!onRename && !onRemove && !onPin && !onDisconnect && !onBackground && !onResume && !onOpenTerminal) return null;
+  if (!onRename && !onRemove && !onPin && !onDisconnect && !onBackground && !onResume && !onOpenTerminal && !onStop && !onRespawn && !onRmBackground) return null;
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Tab') {
@@ -90,8 +107,8 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
     list[next].focus();
   };
 
-  // Disconnect and Remove ask for a second click in place; a refusal is said in the menu.
-  const confirmed = async (which: 'disconnect' | 'remove', act: (() => Promise<void>) | undefined, failKey: string) => {
+  // Disconnect, Remove, Stop and Remove from Claude Code ask for a second click in place; a refusal is said in the menu.
+  const confirmed = async (which: Confirmable, act: (() => Promise<void>) | undefined, failKey: string) => {
     if (!act || busy) return;
     if (confirming !== which) {
       setConfirming(which);
@@ -103,8 +120,21 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
       await act();
       setOpen(false);
       setConfirming(null);
-    } catch {
-      setFailed(failKey);
+    } catch (e) {
+      setFailed(failText(t, failKey, e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const respawn = async () => {
+    if (!onRespawn || busy) return;
+    setBusy(true);
+    try {
+      await onRespawn();
+      close(false);
+    } catch (e) {
+      setFailed(failText(t, 'ui.chatMenu.respawnFailed', e));
     } finally {
       setBusy(false);
     }
@@ -117,7 +147,7 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
       await onPin(!pinned);
       close(false);
     } catch {
-      setFailed('ui.chatMenu.pinFailed');
+      setFailed(t('ui.chatMenu.pinFailed'));
     } finally {
       setBusy(false);
     }
@@ -130,7 +160,7 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
       await onResume();
       close(false);
     } catch {
-      setFailed('ui.chat.resume.error');
+      setFailed(t('ui.chat.resume.error'));
     } finally {
       setBusy(false);
     }
@@ -222,6 +252,31 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
               onClick={() => void confirmed('disconnect', onDisconnect, 'ui.chatMenu.disconnectFailed')}
             />
           )}
+          {onRespawn && (
+            <button type="button" role="menuitem" tabIndex={-1} aria-disabled={busy || undefined} className={itemCls} onClick={() => void respawn()}>
+              {t('ui.chatMenu.respawn')}
+            </button>
+          )}
+          {onStop && (
+            <ConfirmItem
+              className={`${itemCls} ${confirming === 'stop' ? 'font-semibold text-waiting-text' : ''}`}
+              confirming={confirming === 'stop'}
+              busy={busy}
+              label="ui.chatMenu.stop"
+              confirmLabel="ui.chatMenu.confirmStop"
+              onClick={() => void confirmed('stop', onStop, 'ui.chatMenu.stopFailed')}
+            />
+          )}
+          {onRmBackground && (
+            <ConfirmItem
+              className={`${itemCls} ${confirming === 'rm' ? 'font-semibold text-waiting-text' : ''}`}
+              confirming={confirming === 'rm'}
+              busy={busy}
+              label="ui.chatMenu.rm"
+              confirmLabel="ui.chatMenu.confirmRm"
+              onClick={() => void confirmed('rm', onRmBackground, 'ui.chatMenu.rmFailed')}
+            />
+          )}
           {onRemove && (
             <ConfirmItem
               className={`${itemCls} ${confirming === 'remove' ? 'font-semibold text-waiting-text' : ''}`}
@@ -233,8 +288,8 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu({
             />
           )}
           {failed && (
-            <p role="alert" className="px-3 py-1 text-xs text-waiting-text">
-              {t(failed)}
+            <p role="alert" className="break-words px-3 py-1 text-xs text-waiting-text">
+              {failed}
             </p>
           )}
         </div>

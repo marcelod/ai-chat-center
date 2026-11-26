@@ -12,8 +12,11 @@ export function SettingsMenu({
   notifications,
   usageHint = false,
   version,
+  onCleanup,
 }: {
   onLanguage: (l: Language) => void;
+  /** Opens the cleanup of stopped background sessions (absent: no button). */
+  onCleanup?: () => void;
   notifications?: NotificationsControl;
   /** No usage recorded: say how to turn it on. */
   usageHint?: boolean;
@@ -97,6 +100,19 @@ export function SettingsMenu({
               />
               {t('ui.notifications.enable')}
             </label>
+          )}
+          {onCleanup && (
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              onClick={() => {
+                setOpen(false);
+                onCleanup();
+              }}
+              className="mt-3 flex min-h-11 w-full items-center rounded-[10px] bg-field px-3 text-left text-sm hover:bg-line"
+            >
+              {t('ui.stopped.open')}
+            </button>
           )}
           {version && (
             <p data-testid="app-version" className="mt-3 text-xs text-muted">

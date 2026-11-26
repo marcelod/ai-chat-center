@@ -4,6 +4,7 @@ import type { Language } from './api';
 import { SessionList } from './components/SessionList';
 import { ChatView } from './components/ChatView';
 import { NewSessionDialog } from './components/NewSessionDialog';
+import { StoppedSessionsDialog } from './components/StoppedSessionsDialog';
 import { notificationsSupported } from './notify';
 import { useLiveSessions } from './useLiveSessions';
 import { useAppWindow } from './useAppWindow';
@@ -31,6 +32,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
   const selected = data.connected.find((s) => s.sessionId === selectedId);
   useAppWindow(select);
   const [newOpen, setNewOpen] = useState(false);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
   /** A message picked in the list search: its conversation opens with the search bar on that text. */
   const [hitSearch, setHitSearch] = useState<{ sid: string; q: string; n: number } | null>(null);
   /** The short id of a session started from the app: selected as soon as it connects. */
@@ -55,6 +57,16 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
 
   return (
     <div className="flex h-full">
+      {cleanupOpen && (
+        <StoppedSessionsDialog
+          load={api.listStoppedBackground}
+          remove={async (bgId) => {
+            await api.rmStoppedBackground(bgId);
+            await live.refresh();
+          }}
+          onClose={() => setCleanupOpen(false)}
+        />
+      )}
       {newOpen && (
         <NewSessionDialog
           loadFolders={api.listFolders}
@@ -87,6 +99,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
           collapsed={collapsed}
           onToggleCollapsed={toggleCollapsed}
           onNewSession={() => setNewOpen(true)}
+          onCleanup={() => setCleanupOpen(true)}
           onSearch={api.searchAll}
           onOpenHit={(hit, q) => {
             setHitSearch((h) => ({ sid: hit.sessionId, q, n: (h?.n ?? 0) + 1 }));
@@ -134,6 +147,15 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
             }}
             onCommand={(text) => api.sendCommand(selected.sessionId, text)}
             onOpenTerminal={() => api.openTerminal(selected.sessionId)}
+            onStop={async () => {
+              await api.stopSession(selected.sessionId);
+              await live.refresh();
+            }}
+            onRespawn={async () => {
+              await api.respawnSession(selected.sessionId);
+              await live.refresh();
+            }}
+            onRmBackground={() => live.remove(selected.sessionId, api.rmSession)}
             onBack={() => select(null)}
           />
         ) : (

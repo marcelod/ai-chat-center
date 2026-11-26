@@ -325,3 +325,36 @@ describe('background', () => {
     expect(init.headers).toMatchObject({ Authorization: 'Bearer tok' });
   });
 });
+
+describe('stop, respawn and rm (spec 2026-11-26-stop-respawn-rm)', () => {
+  const withToken = async () => {
+    window.history.replaceState(null, '', '/#token=tok');
+    return load();
+  };
+  it('POST the per-session routes with the bearer token; a refusal carries claude words in detail', async () => {
+    const f = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', f);
+    const api = await withToken();
+    await api.stopSession('s 1');
+    await api.respawnSession('s1');
+    await api.rmSession('s1');
+    await api.rmStoppedBackground('abcdef01');
+    const calls = f.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([u, i]) => `${i.method} ${u}`)).toEqual([
+      'POST /api/sessions/s%201/stop',
+      'POST /api/sessions/s1/respawn',
+      'POST /api/sessions/s1/rm',
+      'POST /api/background/abcdef01/rm',
+    ]);
+    expect(calls[0][1].headers).toMatchObject({ Authorization: 'Bearer tok' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'Not safe', code: 'claude-failed' }), { status: 502 })));
+    await expect(api.rmSession('s1')).rejects.toMatchObject({ status: 502, code: 'claude-failed', detail: 'Not safe' });
+  });
+  it('listStoppedBackground GETs the list', async () => {
+    const f = vi.fn(async () => new Response(JSON.stringify({ sessions: [{ bgId: 'abcdef01', sessionId: 's', cwd: '/x', name: 'n' }] }), { status: 200 }));
+    vi.stubGlobal('fetch', f);
+    const api = await withToken();
+    expect(await api.listStoppedBackground()).toEqual([{ bgId: 'abcdef01', sessionId: 's', cwd: '/x', name: 'n' }]);
+    expect((f.mock.calls[0] as unknown as [string])[0]).toBe('/api/background/stopped');
+  });
+});

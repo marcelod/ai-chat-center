@@ -23,7 +23,7 @@
       "failed": "Couldn't rename"
     },
     "pinned": "Pinned",
-    "chatMenu": {"label": "Conversation actions", "rename": "Rename", "remove": "Remove from app", "confirmRemove": "Remove? Confirm", "removeFailed": "Couldn't remove", "pin": "Pin to top", "unpin": "Unpin", "disconnect": "Disconnect", "confirmDisconnect": "Disconnect? Confirm", "pinFailed": "Couldn't change the pin", "disconnectFailed": "Couldn't disconnect", "resume": "Resume in the background", "openTerminal": "Open in a terminal"},
+    "chatMenu": {"label": "Conversation actions", "rename": "Rename", "remove": "Remove from app", "confirmRemove": "Remove? Confirm", "removeFailed": "Couldn't remove", "pin": "Pin to top", "unpin": "Unpin", "disconnect": "Disconnect", "confirmDisconnect": "Disconnect? Confirm", "pinFailed": "Couldn't change the pin", "disconnectFailed": "Couldn't disconnect", "resume": "Resume in the background", "openTerminal": "Open in a terminal", "stop": "Stop session", "confirmStop": "Stop? Confirm", "stopFailed": "Couldn't stop", "respawn": "Restart session", "respawnFailed": "Couldn't restart", "rm": "Remove from Claude Code", "confirmRm": "Remove from Claude Code? Confirm", "rmFailed": "Couldn't remove from Claude Code"},
     "background": {
       "menu": "Background",
       "title": "Conversation background",
@@ -88,6 +88,7 @@
         "exit": "Ends the session"
       }
     },
+    "stopped": {"open": "Clean up stopped sessions", "title": "Stopped background sessions", "body": "Background sessions Claude Code still lists that no longer run. Removing one runs claude rm: its worktree is deleted when that is safe, and the conversation can still be opened with claude --resume.", "loading": "Loading…", "empty": "No stopped background sessions.", "loadFailed": "Couldn't list the background sessions.", "selectAll": "Select all", "remove": "Remove ({n})", "confirm": "Remove {n} background sessions? This cannot be undone.", "confirmOne": "Remove this background session? This cannot be undone.", "confirmYes": "Remove", "confirmBack": "Back", "removing": "Removing…", "failed": "Couldn't remove {name}", "close": "Close", "unnamed": "Unnamed"},
     "newSession": {"open": "New session", "title": "New session", "body": "Starts Claude Code in the background in a folder of your computer. It connects to the app at once, with no terminal.", "folder": "Folder", "noFolders": "No recent folder yet: browse to one below.", "foldersFailed": "Couldn't list the folders.", "name": "Name (optional)", "namePlaceholder": "e.g. billing fixes", "nameInvalid": "Letters, numbers, spaces and . _ - only.", "model": "Model", "effort": "Effort", "chosenApply": "Model and effort chosen here apply from the first message.", "default": "Default", "start": "Start", "starting": "Starting…", "cancel": "Cancel", "failed": "Couldn't start the session.", "failedWith": "Couldn't start the session: {error}", "waiting": "Starting the new session…", "recent": "Recent folders", "browse": "Browse folders…", "browseHide": "Hide the folder browser", "browser": "Folder browser", "current": "Current folder", "up": "Up one folder", "showHidden": "Show hidden folders", "use": "Use this folder", "pathField": "Or type or paste a full path", "pathPlaceholder": "/home/you/project", "go": "Go", "empty": "No subfolders here.", "truncated": "Only the first {count} folders are shown.", "loading": "Loading…", "browseFailed": "Couldn't open this folder.", "folderInvalid": "Type a full path (starting with / or a drive letter).", "folderOutside": "Only folders inside your home folder can be used.", "folderNotFound": "This folder doesn't exist.", "folderDenied": "No permission to open this folder.", "untrusted": "Claude Code doesn't trust this folder yet. Open a terminal in {folder}, run claude once and accept \"Yes, I trust this folder\", then try again."},
     "theme": {"label": "Theme", "system": "System", "light": "Light", "dark": "Dark"},
     "language": "Language",
@@ -128,6 +129,7 @@
       "disconnected": "disconnected — type /cc again"
     },
     "chat": {
+      "respawned": "Restarting with the current Claude Code version. The conversation reconnects by itself; if it doesn't within a minute, open it in a terminal and type /cc.",
       "origin": {
         "terminal": "Sent from the terminal",
         "app": "Sent from the app"

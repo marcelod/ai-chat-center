@@ -28,6 +28,8 @@ type Props = {
   onToggleCollapsed?: () => void;
   /** Opens the new session dialog (spec 2026-11-25-app-batch). */
   onNewSession?: () => void;
+  /** Opens the cleanup of stopped background sessions (spec 2026-11-26-stop-respawn-rm). */
+  onCleanup?: () => void;
   /** Searches the messages of every conversation (same spec); without it the box filters names only. */
   onSearch?: (q: string) => Promise<SearchHit[]>;
   onOpenHit?: (hit: SearchHit, q: string) => void;
@@ -43,7 +45,7 @@ const dotColor: Record<SessionView['state'], string> = {
   disconnected: 'bg-disconnected',
 };
 
-export function SessionList({ connected, others, usage, hubVersion, unread, selectedId, onSelect, onLanguage, error, notifications, collapsed = false, onToggleCollapsed, onNewSession, onSearch, onOpenHit }: Props) {
+export function SessionList({ connected, others, usage, hubVersion, unread, selectedId, onSelect, onLanguage, error, notifications, collapsed = false, onToggleCollapsed, onNewSession, onCleanup, onSearch, onOpenHit }: Props) {
   const t = useT();
   const lang = useLang();
   const [query, setQuery] = useState('');
@@ -92,7 +94,7 @@ export function SessionList({ connected, others, usage, hubVersion, unread, sele
                 <span aria-hidden="true">+</span>
               </button>
             )}
-            <SettingsMenu onLanguage={onLanguage} notifications={notifications} usageHint={!usage?.fiveHour} version={hubVersion} />
+            <SettingsMenu onLanguage={onLanguage} notifications={notifications} usageHint={!usage?.fiveHour} version={hubVersion} onCleanup={onCleanup} />
           </>
         )}
         {onToggleCollapsed && (

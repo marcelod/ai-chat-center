@@ -1,4 +1,4 @@
-import type { ChatEvent, ProviderChange, SessionsResponse } from '@shared/types';
+import type { ChatEvent, ProviderChange, SessionsResponse, StoppedBackground } from '@shared/types';
 import type { BackgroundPreset } from '@shared/background';
 import type { SearchHit } from '@shared/search';
 
@@ -333,6 +333,31 @@ export async function resumeSession(sid: string): Promise<void> {
  */
 export async function openTerminal(sid: string): Promise<void> {
   await request<unknown>(`/api/sessions/${encodeURIComponent(sid)}/open-terminal`, { method: 'POST' });
+}
+// Stop, restart and remove a background session (spec 2026-11-26-stop-respawn-rm). Each rejects with ApiError:
+// 409 (code `not-background`, `session-disconnected` or `busy`), 503 (lookup failed), 502 (code `claude-failed`,
+// with claude's own words in `detail`).
+const sessionAction = (sid: string, action: 'stop' | 'respawn' | 'rm') =>
+  request<unknown>(`/api/sessions/${encodeURIComponent(sid)}/${action}`, { method: 'POST' });
+/** `claude stop`: the session ends (it can be resumed later). */
+export async function stopSession(sid: string): Promise<void> {
+  await sessionAction(sid, 'stop');
+}
+/** `claude respawn`: restarts the session on the current Claude Code version. */
+export async function respawnSession(sid: string): Promise<void> {
+  await sessionAction(sid, 'respawn');
+}
+/** `claude rm`: removes the background session (and its worktree when safe) and takes it out of the app. */
+export async function rmSession(sid: string): Promise<void> {
+  await sessionAction(sid, 'rm');
+}
+/** Background sessions Claude Code lists that no longer run. */
+export async function listStoppedBackground(): Promise<StoppedBackground[]> {
+  return (await request<{ sessions: StoppedBackground[] }>('/api/background/stopped')).sessions;
+}
+/** `claude rm` on a stopped background session, by its short id. */
+export async function rmStoppedBackground(bgId: string): Promise<void> {
+  await request<unknown>(`/api/background/${encodeURIComponent(bgId)}/rm`, { method: 'POST' });
 }
 /**
  * Types a slash command into a background session. Rejects with ApiError: 409 busy, 501 Windows, 404 not a

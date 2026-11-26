@@ -434,13 +434,16 @@ export function useLiveSessions() {
     };
   }, []);
 
-  /** Removes the session from the app (hub first), drops it from the list now and selects a neighbour if it was open. */
+  /**
+   * Removes the session from the app (hub first), drops it from the list now and selects a neighbour if it was
+   * open. `how`: the hub call (default: remove from the app; `api.rmSession` also runs `claude rm`).
+   */
   const remove = useCallback(
-    async (sid: string) => {
+    async (sid: string, how: (sid: string) => Promise<void> = api.removeSession) => {
       // The neighbour comes from the list as it is now: a refresh landing during the hub call (the SSE
       // "sessions" change) may already lack the session, and its position with it.
       const before = dataRef.current.connected;
-      await api.removeSession(sid);
+      await how(sid);
       const rest = dataRef.current.connected.filter((s) => s.sessionId !== sid);
       const next = { ...dataRef.current, connected: rest };
       dataRef.current = next;
