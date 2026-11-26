@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatEvent, ProviderChange, SessionsResponse } from '@shared/types';
 import * as api from './api';
-import { notificationsEnabled, setNotificationsEnabled, showNotification } from './notify';
+import { notificationsEnabled } from './notify';
 import { applyEvents, baseline, loadUnread, markSeen, saveUnread, type UnreadState } from './unread';
 
 export type PendingMessage = {
@@ -69,7 +69,6 @@ export function useLiveSessions() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [notify, setNotify] = useState(notificationsEnabled);
 
   const unreadRef = useRef(unread);
   const selectedRef = useRef<string | null>(null);
@@ -78,10 +77,6 @@ export function useLiveSessions() {
   const pendingRef = useRef(pending);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const fetched = useRef(new Set<string>());
-  const notified = useRef(new Set<string>());
-  /** Notifications only for replies newer than both the moment this page connected and the moment a session was first seen. */
-  const mountedAt = useRef(Date.now());
-  const firstSeen = useRef(new Map<string, number>());
   const seq = useRef(0);
   /** `select`, for the refresh defined before it. */
   const selectRef = useRef<(id: string | null) => void>(() => {});
@@ -210,7 +205,6 @@ export function useLiveSessions() {
       if (mine === seq.current) {
         const before = dataRef.current.connected;
         dataRef.current = res;
-        for (const s of res.connected) if (!firstSeen.current.has(s.sessionId)) firstSeen.current.set(s.sessionId, Date.now());
         setData(res);
         setError(false);
         adoptQueued(res);
@@ -251,22 +245,6 @@ export function useLiveSessions() {
     [putEvents],
   );
 
-  const maybeNotify = useCallback((sid: string, events: ChatEvent[]) => {
-    if (typeof document === 'undefined' || !notificationsEnabled()) return;
-    if (sid === selectedRef.current && !document.hidden) return;
-    const seen = firstSeen.current.get(sid);
-    if (seen === undefined) return; // not in a sessions list yet: whatever arrives is its backlog
-    const since = Math.max(mountedAt.current, seen);
-    const name = dataRef.current.connected.find((s) => s.sessionId === sid)?.name ?? sid;
-    for (const e of events) {
-      if (e.kind !== 'assistant' || notified.current.has(e.id)) continue;
-      // History replayed by the hub (page load, hub restart, /cc again) is older than `since`.
-      if (!(Date.parse(e.ts) > since)) continue;
-      notified.current.add(e.id);
-      showNotification(name, e.text);
-    }
-  }, []);
-
   const onChange = useCallback(
     (c: ProviderChange) => {
       if (c.type === 'sessions') {
@@ -275,7 +253,6 @@ export function useLiveSessions() {
       }
       commit(applyEvents(unreadRef.current, c.sessionId, c.events, selectedRef.current, new Date()));
       putEvents(c.sessionId, c.events);
-      maybeNotify(c.sessionId, c.events);
       const last = c.events[c.events.length - 1];
       if (last) {
         setData((d) => {
@@ -288,7 +265,7 @@ export function useLiveSessions() {
         });
       }
     },
-    [refresh, commit, putEvents, maybeNotify],
+    [refresh, commit, putEvents],
   );
 
   useEffect(() => {
@@ -454,9 +431,5 @@ export function useLiveSessions() {
     [refresh, select],
   );
 
-  const setNotifications = useCallback(async (on: boolean) => {
-    setNotify(await setNotificationsEnabled(on));
-  }, []);
-
-  return { data, eventsById, pending, unread, selectedId, select, send, retry, remove, refresh, error, loading, notify, setNotifications };
+  return { data, eventsById, pending, unread, selectedId, select, send, retry, remove, refresh, error, loading };
 }

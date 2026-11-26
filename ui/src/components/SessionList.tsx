@@ -7,7 +7,7 @@ import { useLang, useT } from '../i18n';
 import { Logo } from './Logo';
 import { avatarStyle } from './backgrounds';
 import { ChevronIcon, PanelIcon, PinIcon, SearchIcon } from './icons';
-import { SettingsMenu, type NotificationsControl } from './SettingsMenu';
+import { SettingsMenu } from './SettingsMenu';
 import { UsageMeter } from './UsageMeter';
 import type { Language } from '../api';
 
@@ -23,7 +23,6 @@ type Props = {
   onSelect: (id: string) => void;
   onLanguage: (l: Language) => void;
   error?: boolean;
-  notifications?: NotificationsControl;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   /** Opens the new session dialog (spec 2026-11-25-app-batch). */
@@ -43,7 +42,7 @@ const dotColor: Record<SessionView['state'], string> = {
   disconnected: 'bg-disconnected',
 };
 
-export function SessionList({ connected, others, usage, hubVersion, unread, selectedId, onSelect, onLanguage, error, notifications, collapsed = false, onToggleCollapsed, onNewSession, onSearch, onOpenHit }: Props) {
+export function SessionList({ connected, others, usage, hubVersion, unread, selectedId, onSelect, onLanguage, error, collapsed = false, onToggleCollapsed, onNewSession, onSearch, onOpenHit }: Props) {
   const t = useT();
   const lang = useLang();
   const [query, setQuery] = useState('');
@@ -92,7 +91,7 @@ export function SessionList({ connected, others, usage, hubVersion, unread, sele
                 <span aria-hidden="true">+</span>
               </button>
             )}
-            <SettingsMenu onLanguage={onLanguage} notifications={notifications} usageHint={!usage?.fiveHour} version={hubVersion} />
+            <SettingsMenu onLanguage={onLanguage} usageHint={!usage?.fiveHour} version={hubVersion} />
           </>
         )}
         {onToggleCollapsed && (
