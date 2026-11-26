@@ -18,6 +18,18 @@
     "usageFailed": "AI Chat Center: could not change the status line in settings.json. See {log}"
   },
   "ui": {
+    "panel": {
+      "label": "Side panel",
+      "close": "Close panel",
+      "loading": "Loading…",
+      "notFound": "File not found.",
+      "tooLarge": "This file is too large to show.",
+      "notAllowed": "This file can't be shown here.",
+      "loadFailed": "Couldn't load this.",
+      "image": "image",
+      "imageBlocked": "Images in files are not loaded",
+      "openFile": "Open {name}"
+    },
     "rename": {
       "label": "Rename session",
       "failed": "Couldn't rename"

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import * as api from './api';
 import type { Language } from './api';
 import { SessionList } from './components/SessionList';
@@ -28,6 +28,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
   const [collapsed, toggleCollapsed] = useCollapsedList();
   const live = useLiveSessions();
   const { data, eventsById, pending, unread, selectedId, select, send, retry, error, loading } = live;
+  const panel = useMemo(() => (selectedId ? api.panelApi(selectedId) : undefined), [selectedId]);
   const selected = data.connected.find((s) => s.sessionId === selectedId);
   useAppWindow(select);
   const [newOpen, setNewOpen] = useState(false);
@@ -134,6 +135,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
             }}
             onCommand={(text) => api.sendCommand(selected.sessionId, text)}
             onOpenTerminal={() => api.openTerminal(selected.sessionId)}
+            panel={panel}
             onBack={() => select(null)}
           />
         ) : (

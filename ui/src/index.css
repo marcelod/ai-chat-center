@@ -157,6 +157,9 @@ body {
 .md ul { list-style: disc; padding-left: 1.4em; }
 .md ol { list-style: decimal; padding-left: 1.4em; }
 .md a { color: var(--c-accent); text-decoration: underline; }
+.md .file-link { color: var(--c-accent); text-decoration: underline; font: inherit; background: none; padding: 0; cursor: pointer; text-align: inherit; overflow-wrap: anywhere; }
+.md .file-link code { text-decoration: underline; }
+.md .blocked-image { color: var(--c-muted); font-size: 0.9em; }
 .md code { font-family: var(--font-mono); font-size: 12.5px; background: var(--c-field); border-radius: 5px; padding: 1px 5px; }
 .md pre { overflow-x: auto; background: var(--c-field); border-radius: 8px; padding: 10px 12px; }
 .md pre code { background: none; padding: 0; white-space: pre; }

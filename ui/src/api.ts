@@ -379,6 +379,30 @@ export async function getBackgroundImage(sid: string): Promise<Blob> {
   if (!res.ok) throw new ApiError(res.status);
   return res.blob();
 }
+/**
+ * A Markdown file or an image of the session, for the side panel (fetched with the token: show an image
+ * from a blob: URL). Rejects with ApiError (`code`: file-not-found, file-outside, file-type, file-too-large…).
+ */
+export async function getSessionFile(sid: string, path: string): Promise<Blob> {
+  if (pairing) await pairing;
+  const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/file?path=${encodeURIComponent(path)}`, {
+    headers: { Authorization: `Bearer ${token ?? ''}` },
+  });
+  if (res.status === 401) dropToken();
+  if (!res.ok) throw new ApiError(res.status, await errorCode(res));
+  return res.blob();
+}
+/** Which of the paths (cited in the conversation) the side panel can open. */
+export async function filesExist(sid: string, paths: string[]): Promise<string[]> {
+  return (await request<{ exists: string[] }>(`/api/sessions/${encodeURIComponent(sid)}/files/exists`, { method: 'POST', body: JSON.stringify({ paths }) })).exists;
+}
+/** The side panel's loaders bound to one session (see components/SidePanel). */
+export function panelApi(sid: string) {
+  return {
+    file: (path: string) => getSessionFile(sid, path),
+    filesExist: (paths: string[]) => filesExist(sid, paths),
+  };
+}
 export const getConfig = () => request<UiConfig>('/api/config');
 export const setConfig = (c: Pick<UiConfig, 'language'>) =>
   request<UiConfig>('/api/config', { method: 'PUT', body: JSON.stringify(c) });

@@ -1,13 +1,11 @@
 import { useState } from 'react';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import type { ChatEvent } from '@shared/types';
 import { formatTime } from '../format';
 import { useLang, useT } from '../i18n';
 import { splitAttachments } from '@shared/attachments';
 import { ClockIcon, KeyboardIcon, PhoneIcon } from './icons';
 import { SentAttachments } from './Attachments';
-import { CodeBlock } from './CodeBlock';
+import { MarkdownText } from './Markdown';
 
 type User = Extract<ChatEvent, { kind: 'user' }>;
 
@@ -31,7 +29,7 @@ export function UserBubble({ event }: { event: User }) {
           {event.images === 1 ? t('ui.chat.image') : t('ui.chat.images', { n: event.images })}
         </span>
       ) : null}
-      {event.attachments?.length ? <SentAttachments names={event.attachments} /> : null}
+      {event.attachments?.length ? <SentAttachments names={event.attachments} paths={event.attachmentPaths} /> : null}
       <p className="mt-1 flex items-center justify-end gap-1 text-[11px] text-bubble-meta">
         <span role="img" aria-label={label} title={label} className="flex">
           <Icon width={13} height={13} />
@@ -86,15 +84,7 @@ export function AssistantBubble({ text }: { text: string }) {
       data-bubble="assistant"
       className="md max-w-[min(100%,720px)] self-start break-words rounded-[14px_14px_14px_4px] border border-line bg-surface px-3.5 py-2.5 text-[15px] leading-relaxed"
     >
-      <Markdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
-          pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-        }}
-      >
-        {text}
-      </Markdown>
+      <MarkdownText text={text} />
     </div>
   );
 }
@@ -122,20 +112,6 @@ function AgentAvatar({ name }: { name: string }) {
     >
       {initials}
     </span>
-  );
-}
-
-function MarkdownText({ text }: { text: string }) {
-  return (
-    <Markdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
-        pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-      }}
-    >
-      {text}
-    </Markdown>
   );
 }
 

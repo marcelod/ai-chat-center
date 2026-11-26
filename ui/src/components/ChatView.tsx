@@ -16,6 +16,8 @@ import { BackgroundPicker } from './BackgroundPicker';
 import { ChatBackground } from './ChatBackground';
 import { useCommandProgress } from '../useCommandProgress';
 import { SessionControls } from './SessionControls';
+import { SidePanel, type PanelApi, type PanelItem } from './SidePanel';
+import { FileLinksProvider, useExistingFiles, type FileLinks } from '../fileLinks';
 import { AgentBubble, RecapCard, AssistantBubble, ToAgentBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
 
 type Props = {
@@ -52,6 +54,8 @@ type Props = {
   onCommand?: (text: string) => Promise<void>;
   /** Opens the system terminal on a background session (`claude attach`); rejects with ApiError. */
   onOpenTerminal?: () => Promise<void>;
+  /** The side panel's loaders for this session (spec 2026-11-26-side-panel); absent: no panel, no file links. */
+  panel?: PanelApi;
   onBack: () => void;
 };
 
@@ -420,7 +424,7 @@ function SessionTitle({
   );
 }
 
-export function ChatView({ hubVersion, initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, onOpenTerminal, ...bg }: Props) {
+export function ChatView({ hubVersion, initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, onOpenTerminal, panel, ...bg }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -434,6 +438,26 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
   }, [session.name]);
 
   const progress = useCommandProgress(session, events);
+  // The side panel: a stack of what was opened in it (Back pops, X and Esc close it all).
+  const [panelStack, setPanelStack] = useState<PanelItem[]>([]);
+  const openPanel = (item: PanelItem) => setPanelStack((st) => [...st, item]);
+  const closePanel = () => setPanelStack([]);
+  useEffect(() => setPanelStack([]), [session.sessionId]);
+  const panelOpen = panelStack.length > 0 && !!panel;
+  useEffect(() => {
+    if (!panelOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (e.key !== 'Escape' || e.defaultPrevented || el?.closest?.('input, textarea, [role="menu"], [role="dialog"]')) return;
+      setPanelStack([]);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [panelOpen]);
+  const existing = useExistingFiles(session.sessionId, events, panel?.filesExist);
+  const fileLinks: FileLinks | null = panel
+    ? { isLinkable: (p) => existing.has(p), open: (p) => openPanel({ kind: 'file', path: p }) }
+    : null;
   // Search in this conversation (spec 2026-11-25-app-batch): null while the search bar is closed.
   const [search, setSearch] = useState<string | null>(initialSearch ?? null);
   const sq = (search ?? '').trim();
@@ -515,8 +539,8 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
     }
   };
 
-  return (
-    <section className="flex h-full min-h-0 flex-col" aria-label={shownName}>
+  const view = (
+    <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col" aria-label={shownName}>
       <header className="flex items-center gap-3 border-b border-line bg-surface px-3 py-3 md:px-5">
         <button
           type="button"
@@ -746,5 +770,16 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
         onCommand={session.bgId && state !== 'disconnected' ? runCommand : undefined} attachId={session.bgId} terminalHint={!session.bgId && state !== 'disconnected'}
         controls={<SessionBar session={session} hubVersion={hubVersion} runCommand={runCommand} />} />
     </section>
+  );
+  if (!panel || !fileLinks) return view;
+  return (
+    <FileLinksProvider value={fileLinks}>
+      <div className="flex h-full min-h-0">
+        {view}
+        {panelOpen && (
+          <SidePanel stack={panelStack} api={panel} onBack={() => setPanelStack((st) => st.slice(0, -1))} onClose={closePanel} />
+        )}
+      </div>
+    </FileLinksProvider>
   );
 }
