@@ -45,6 +45,12 @@ Pedido em 2026-11-26 (parte da ideia 18). Mostrar quanto do contexto a conversa 
 
 Pedido em 2026-11-26 (a pensar). Quando a conversa está "trabalhando", mostrar quais subagentes estão rodando. Ao clicar no "trabalhando", abre o painel lateral direito (ver "Painel lateral para ver imagens, Markdown e outros arquivos") com a lista. Dá para fazer: cada subagente tem uma transcrição em `<sessão>/subagents/agent-<id>.jsonl` e um `agent-<id>.meta.json` com a descrição da tarefa, o tipo, o modelo, se roda em segundo plano e `finished`. No painel: a descrição, o tipo, o modelo, há quanto tempo roda, a última ação (a última ferramenta usada na transcrição dele) e, ao clicar, a transcrição do subagente. A conversa em grupo com os agentes (0.4.7) já mostra as mensagens deles; aqui é o estado ao vivo.
 
+### "idle" com subagentes em segundo plano rodando
+
+Visto em 2026-11-26 (print do autor): a conversa de desenvolvimento lançou 5 subagentes em segundo plano (as frentes A a E), respondeu "aviso quando terminar" e encerrou o turno. O app mostra "idle", mas os agentes seguem trabalhando (o terminal lista os 5 `general-purpose` com tokens subindo). Causa provável: o estado vem do fim do turno (Stop); subagentes em segundo plano não contam. Isso é de propósito desde a 0.4.4 (o "trabalhando" preso com tarefa em segundo plano), então a correção não pode voltar a prender o "trabalhando".
+
+Ideia: um terceiro estado, por exemplo "agentes trabalhando (5)", diferente de "trabalhando" (o Claude no turno) e de "idle". A contagem vem dos `<sessão>/subagents/agent-<id>.meta.json` com `finished: false` (conferir que o campo vira `true` ao terminar, e o que acontece se a sessão morrer no meio: um agente órfão não pode deixar o estado preso; usar também a hora da última linha da transcrição dele). Ao clicar, abre o painel de "Subagentes trabalhando". A lista à esquerda também pode mostrar um sinal discreto.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
