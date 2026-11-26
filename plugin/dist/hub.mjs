@@ -745,7 +745,7 @@ async function cleanupAttachments(alive, now = Date.now(), maxAgeMs = ATTACHMENT
 }
 
 // src/core/version.ts
-var VERSION = "0.6.5";
+var VERSION = "0.6.6";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -2009,7 +2009,7 @@ var ClaudeCodeProvider = class {
       const l = byId.get(sid);
       if ((Date.parse(reg.connectedAt) || 0) > this.liveCache.at) return LIVE_TTL_MS;
       if (l) {
-        if (l.status !== "idle" || reg.pid !== null && !this.alive(reg.pid)) return LIVE_TTL_MS;
+        if (l.status === "waiting" || reg.pid !== null && !this.alive(reg.pid)) return LIVE_TTL_MS;
       } else if (sameConfigDir(reg) && !(reg.pid !== null && this.alive(reg.pid) && !last.some((x) => x.pid === reg.pid))) {
         return LIVE_TTL_MS;
       }

@@ -1,11 +1,10 @@
 import { createRequire as __acc_createRequire } from 'node:module';
 const require = __acc_createRequire(import.meta.url);
 
-// src/hooks/hook.ts
-import fs12 from "node:fs";
-import { fileURLToPath as fileURLToPath3 } from "node:url";
-import path13 from "node:path";
-import crypto5 from "node:crypto";
+// src/hooks/delegate.ts
+import fs from "node:fs";
+import path2 from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // src/core/paths.ts
 import os from "node:os";
@@ -47,14 +46,106 @@ function paths() {
   };
 }
 
+// src/core/version.ts
+var VERSION = "0.6.6";
+var PROTOCOL = 2;
+
+// src/hooks/delegate.ts
+var FLAG = /* @__PURE__ */ Symbol.for("ai-chat-center.delegated");
+var flags = globalThis;
+var VERSION_RE = /^\d+\.\d+\.\d+$/;
+function compareVersions(a, b) {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] < pb[i] ? -1 : 1;
+  return 0;
+}
+var recordFile = () => path2.join(paths().home, "plugin.json");
+function readRecord() {
+  try {
+    const r = JSON.parse(fs.readFileSync(recordFile(), "utf8"));
+    if (typeof r?.version !== "string" || !VERSION_RE.test(r.version) || typeof r.dist !== "string") return null;
+    return { version: r.version, dist: r.dist };
+  } catch {
+    return null;
+  }
+}
+function writeRecord(rec) {
+  try {
+    fs.mkdirSync(paths().home, { recursive: true, mode: 448 });
+    const tmp = `${recordFile()}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(rec), { mode: 384 });
+    fs.renameSync(tmp, recordFile());
+  } catch {
+  }
+}
+function pluginVersionOf(dist) {
+  try {
+    const v = JSON.parse(fs.readFileSync(path2.join(dist, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
+    return typeof v === "string" && VERSION_RE.test(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+function newerScript(entry, ownDist, version = VERSION) {
+  if (flags[FLAG]) return null;
+  let own;
+  try {
+    own = fs.realpathSync(ownDist);
+  } catch {
+    return null;
+  }
+  const rec = readRecord();
+  let target = null;
+  if (rec && compareVersions(rec.version, version) > 0) {
+    try {
+      const dist = fs.realpathSync(rec.dist);
+      const versionDir = path2.dirname(dist);
+      const siblings = path2.dirname(path2.dirname(own)) === path2.dirname(versionDir) && dist !== own;
+      if (siblings && path2.basename(dist) === "dist" && path2.basename(versionDir) === rec.version && pluginVersionOf(dist) === rec.version && fs.statSync(path2.join(dist, entry)).isFile()) {
+        target = path2.join(dist, entry);
+      }
+    } catch {
+      target = null;
+    }
+  }
+  if (target) return target;
+  const same = rec && rec.version === version && rec.dist === own;
+  if (!same && path2.basename(path2.dirname(own)) === version && pluginVersionOf(own) === version) writeRecord({ version, dist: own });
+  return null;
+}
+async function delegateToNewer(entry, moduleUrl) {
+  let target = null;
+  try {
+    target = newerScript(entry, path2.dirname(fileURLToPath(moduleUrl)));
+  } catch {
+    return false;
+  }
+  if (!target) return false;
+  flags[FLAG] = VERSION;
+  try {
+    await import(pathToFileURL(target).href);
+    return true;
+  } catch {
+    flags[FLAG] = void 0;
+    return false;
+  }
+}
+
+// src/hooks/hook.ts
+import fs13 from "node:fs";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
+import path14 from "node:path";
+import crypto5 from "node:crypto";
+
 // src/core/fsAtomic.ts
-import fs from "node:fs/promises";
-import path2 from "node:path";
+import fs2 from "node:fs/promises";
+import path3 from "node:path";
 import crypto from "node:crypto";
 var DIR_MODE = 448;
 var FILE_MODE = 384;
 async function ensureDir(dir) {
-  await fs.mkdir(dir, { recursive: true, mode: DIR_MODE });
+  await fs2.mkdir(dir, { recursive: true, mode: DIR_MODE });
 }
 var TRANSIENT = /* @__PURE__ */ new Set(["EPERM", "EBUSY", "EACCES"]);
 var RETRIES = 5;
@@ -69,22 +160,22 @@ async function withFsRetry(op) {
   }
 }
 function removeFile(file) {
-  return withFsRetry(() => fs.rm(file, { force: true }));
+  return withFsRetry(() => fs2.rm(file, { force: true }));
 }
 async function writeJsonAtomic(file, data) {
-  await ensureDir(path2.dirname(file));
+  await ensureDir(path3.dirname(file));
   const tmp = `${file}.${crypto.randomUUID()}.tmp`;
   try {
-    await fs.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: "utf8", mode: FILE_MODE });
-    await withFsRetry(() => fs.rename(tmp, file));
+    await fs2.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: "utf8", mode: FILE_MODE });
+    await withFsRetry(() => fs2.rename(tmp, file));
   } catch (e) {
-    await fs.rm(tmp, { force: true });
+    await fs2.rm(tmp, { force: true });
     throw e;
   }
 }
 async function readJson(file) {
   try {
-    return JSON.parse(await fs.readFile(file, "utf8"));
+    return JSON.parse(await fs2.readFile(file, "utf8"));
   } catch {
     return null;
   }
@@ -92,15 +183,15 @@ async function readJson(file) {
 
 // src/core/registry.ts
 import os2 from "node:os";
-import path5 from "node:path";
+import path6 from "node:path";
 
 // src/core/inbox.ts
-import fs3 from "node:fs/promises";
-import path4 from "node:path";
+import fs4 from "node:fs/promises";
+import path5 from "node:path";
 
 // src/core/lock.ts
-import fs2 from "node:fs/promises";
-import path3 from "node:path";
+import fs3 from "node:fs/promises";
+import path4 from "node:path";
 import crypto2 from "node:crypto";
 var EMPTY_GRACE_MS = 1e4;
 var LOCK_STALE_MS = 9e4;
@@ -130,27 +221,27 @@ async function publish(file) {
   const tmp = `${file}.${crypto2.randomUUID()}.tmp`;
   const content = JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() });
   try {
-    await fs2.writeFile(tmp, content, { flag: "wx" });
-    await fs2.link(tmp, file);
+    await fs3.writeFile(tmp, content, { flag: "wx" });
+    await fs3.link(tmp, file);
     return content;
   } catch (e) {
     if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return null;
     throw e;
   } finally {
-    await fs2.rm(tmp, { force: true });
+    await fs3.rm(tmp, { force: true });
   }
 }
 async function staleContent(file) {
   let content;
   let mtimeMs;
   try {
-    content = await fs2.readFile(file, "utf8");
+    content = await fs3.readFile(file, "utf8");
   } catch (e) {
     if (code(e) === "ENOENT") return null;
     content = "";
   }
   try {
-    mtimeMs = (await fs2.stat(file)).mtimeMs;
+    mtimeMs = (await fs3.stat(file)).mtimeMs;
   } catch {
     return null;
   }
@@ -165,8 +256,8 @@ async function reclaim(file, seen) {
   const guard = `${file}.reclaim`;
   if (await publish(guard) === null) {
     try {
-      const st = await fs2.stat(guard);
-      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs2.rm(guard, { force: true });
+      const st = await fs3.stat(guard);
+      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs3.rm(guard, { force: true });
     } catch {
     }
     return null;
@@ -174,7 +265,7 @@ async function reclaim(file, seen) {
   try {
     if (await staleContent(file) !== seen) return null;
     try {
-      await fs2.unlink(file);
+      await fs3.unlink(file);
     } catch (e) {
       if (code(e) !== "ENOENT") {
         if (contention(e)) return null;
@@ -184,7 +275,7 @@ async function reclaim(file, seen) {
     return await publish(file);
   } finally {
     try {
-      if (lockPid(await fs2.readFile(guard, "utf8")) === process.pid) await fs2.rm(guard, { force: true });
+      if (lockPid(await fs3.readFile(guard, "utf8")) === process.pid) await fs3.rm(guard, { force: true });
     } catch {
     }
   }
@@ -193,7 +284,7 @@ async function acquireLock(file) {
   return await acquireLockContent(file) !== null;
 }
 async function acquireLockContent(file) {
-  await ensureDir(path3.dirname(file));
+  await ensureDir(path4.dirname(file));
   const mine = await publish(file);
   if (mine !== null) return mine;
   const seen = await staleContent(file);
@@ -202,11 +293,11 @@ async function acquireLockContent(file) {
 }
 async function releaseLock(file) {
   try {
-    if (lockPid(await fs2.readFile(file, "utf8")) !== process.pid) return;
+    if (lockPid(await fs3.readFile(file, "utf8")) !== process.pid) return;
   } catch {
     return;
   }
-  await fs2.rm(file, { force: true });
+  await fs3.rm(file, { force: true });
 }
 async function withLock(file, waitMs, fn) {
   const deadline = Date.now() + waitMs;
@@ -234,7 +325,7 @@ async function clearInbox(sid) {
   const dir = paths().inboxDir(sid);
   let names;
   try {
-    names = await fs3.readdir(dir);
+    names = await fs4.readdir(dir);
   } catch (e) {
     if (e.code === "ENOENT") return;
     throw e;
@@ -242,7 +333,7 @@ async function clearInbox(sid) {
   for (const n of names) {
     if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`) && !n.endsWith(`.msg${UNSIGNED}`)) continue;
     try {
-      await withFsRetry(() => fs3.rm(path4.join(dir, n), { force: true }));
+      await withFsRetry(() => fs4.rm(path5.join(dir, n), { force: true }));
     } catch (e) {
       if (!isRace(e)) throw e;
     }
@@ -271,21 +362,17 @@ var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
 // src/core/attachments.ts
 var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
 
-// src/core/version.ts
-var VERSION = "0.6.5";
-var PROTOCOL = 2;
-
 // src/core/registry.ts
 var SESSION_LOCK_WAIT_MS = 2e3;
 var locked = (sid, fn) => withLock(paths().sessionLock(sid), SESSION_LOCK_WAIT_MS, fn);
 function regFile(sid) {
   assertSessionId(sid);
-  return path5.join(paths().sessionsDir, `${sid}.json`);
+  return path6.join(paths().sessionsDir, `${sid}.json`);
 }
 var isActive = (r) => !r.disconnectedAt;
 function claudeConfigDir() {
   const raw = process.env.CLAUDE_CONFIG_DIR;
-  return path5.resolve(raw && raw.trim() ? raw : path5.join(os2.homedir(), ".claude"));
+  return path6.resolve(raw && raw.trim() ? raw : path6.join(os2.homedir(), ".claude"));
 }
 var codeStamp = () => ({ version: VERSION, protocol: PROTOCOL });
 var stampedByThisCode = (r) => r.version === VERSION && r.protocol === PROTOCOL;
@@ -346,8 +433,8 @@ async function setMode(sid, mode) {
 }
 
 // src/hooks/statusline.ts
-import fs4 from "node:fs";
-import path6 from "node:path";
+import fs5 from "node:fs";
+import path7 from "node:path";
 
 // src/core/statuslineState.ts
 async function readStatuslineState() {
@@ -358,7 +445,7 @@ async function readStatuslineState() {
 }
 
 // src/hooks/statusline.ts
-var settingsPath = (o) => o.settingsFile ?? path6.join(claudeConfigDir(), "settings.json");
+var settingsPath = (o) => o.settingsFile ?? path7.join(claudeConfigDir(), "settings.json");
 var quote = (a) => `"${a.replace(/\\/g, "/").replace(/(["`$])/g, "\\$1")}"`;
 function wrapperCommand(o) {
   return `${quote(o.nodePath ?? process.execPath)} ${quote(paths().statuslineScript)}`;
@@ -369,7 +456,7 @@ function isOurs(sl) {
 async function readSettings(file) {
   let text;
   try {
-    text = await fs4.promises.readFile(file, "utf8");
+    text = await fs5.promises.readFile(file, "utf8");
   } catch (e) {
     if (e.code === "ENOENT") return {};
     throw e;
@@ -381,22 +468,22 @@ async function readSettings(file) {
 async function writeSettings(file, data) {
   let mode = null;
   try {
-    mode = (await fs4.promises.stat(file)).mode & 511;
+    mode = (await fs5.promises.stat(file)).mode & 511;
   } catch {
   }
   await writeJsonAtomic(file, data);
-  if (mode !== null) await fs4.promises.chmod(file, mode).catch(() => {
+  if (mode !== null) await fs5.promises.chmod(file, mode).catch(() => {
   });
 }
 async function refreshWrapper(o) {
   const dest = paths().statuslineScript;
-  const src = await fs4.promises.readFile(o.source);
-  const cur = await fs4.promises.readFile(dest).catch(() => null);
+  const src = await fs5.promises.readFile(o.source);
+  const cur = await fs5.promises.readFile(dest).catch(() => null);
   if (cur && cur.equals(src)) return;
-  await fs4.promises.mkdir(path6.dirname(dest), { recursive: true, mode: 448 });
+  await fs5.promises.mkdir(path7.dirname(dest), { recursive: true, mode: 448 });
   const tmp = `${dest}.${process.pid}.tmp`;
-  await fs4.promises.writeFile(tmp, src, { mode: 384 });
-  await fs4.promises.rename(tmp, dest);
+  await fs5.promises.writeFile(tmp, src, { mode: 384 });
+  await fs5.promises.rename(tmp, dest);
 }
 async function installStatusline(o) {
   const file = settingsPath(o);
@@ -422,12 +509,12 @@ async function removeStatusline(o) {
   const state = await readStatuslineState();
   const current = settings?.statusLine;
   if (!isOurs(current)) {
-    await fs4.promises.rm(paths().statuslineFile, { force: true });
+    await fs5.promises.rm(paths().statuslineFile, { force: true });
     return state ? "changed-since" : "not-installed";
   }
   const { statusLine: _ours, ...rest } = settings;
   await writeSettings(file, state?.original ? { ...rest, statusLine: state.original } : rest);
-  await fs4.promises.rm(paths().statuslineFile, { force: true });
+  await fs5.promises.rm(paths().statuslineFile, { force: true });
   return "restored";
 }
 
@@ -458,12 +545,12 @@ function promptOrigin(prompt, key) {
 
 // src/hooks/ensureHub.ts
 import crypto4 from "node:crypto";
-import fs5 from "node:fs";
+import fs6 from "node:fs";
 import http from "node:http";
 import os3 from "node:os";
-import path7 from "node:path";
+import path8 from "node:path";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // src/core/healthProof.ts
 import crypto3 from "node:crypto";
@@ -525,13 +612,13 @@ function hubSpawnOptions() {
   return { detached: true, stdio: "ignore", windowsHide: true, cwd: os3.homedir() };
 }
 function defaultSpawnHub() {
-  const hubPath = path7.join(path7.dirname(fileURLToPath(import.meta.url)), "hub.mjs");
+  const hubPath = path8.join(path8.dirname(fileURLToPath2(import.meta.url)), "hub.mjs");
   spawn(process.execPath, [hubPath], hubSpawnOptions()).unref();
 }
 function readHub() {
   try {
-    const { port, pid } = JSON.parse(fs5.readFileSync(paths().hubJson, "utf8"));
-    const token = fs5.readFileSync(paths().token, "utf8").trim();
+    const { port, pid } = JSON.parse(fs6.readFileSync(paths().hubJson, "utf8"));
+    const token = fs6.readFileSync(paths().token, "utf8").trim();
     if (typeof port !== "number" || !token) return null;
     return { port, token, pid: typeof pid === "number" ? pid : null };
   } catch {
@@ -539,7 +626,7 @@ function readHub() {
   }
 }
 var urlOf = (h) => `http://127.0.0.1:${h.port}/#token=${h.token}`;
-function compareVersions(a, b) {
+function compareVersions2(a, b) {
   const parse2 = (v) => /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(v.trim());
   const x = parse2(a);
   const y = parse2(b);
@@ -599,13 +686,13 @@ async function ensureHub(opts = {}) {
       `AI Chat Center: an older AI Chat Center hub (version ${version.slice(0, 32)}) seems to still run on port ${hub.port}, but it could not be verified, so it was not stopped. Restart the computer (or stop that process) so that app messages are not sent through it: they would not be delivered.`
     );
     if (typeof r !== "string") {
-      if (!(compareVersions(r.version, VERSION) < 0)) return urlOf(hub);
+      if (!(compareVersions2(r.version, VERSION) < 0)) return urlOf(hub);
       if (hub.pid !== null && r.pid === hub.pid) await stop(hub.pid);
       else unverified(r.version);
     } else if ((r === "unproven" || r === "foreign") && hub.pid !== null && isAlive2(hub.pid)) {
       const challengedPid = r === "foreign" ? foreignPid : void 0;
       const id = await identify(hub.port);
-      if (id && compareVersions(id.version, VERSION) < 0) {
+      if (id && compareVersions2(id.version, VERSION) < 0) {
         const reported = id.pid ?? challengedPid;
         const ours = reported !== void 0 && reported === hub.pid && !await tokenAccepted(hub.port, crypto4.randomBytes(32).toString("hex")) && await tokenAccepted(hub.port, hub.token);
         if (ours) await stop(hub.pid);
@@ -620,7 +707,7 @@ async function ensureHub(opts = {}) {
     const cur = readHub();
     if (!cur) continue;
     const h = await proven(cur);
-    if (h && compareVersions(h.version, VERSION) >= 0) return urlOf(cur);
+    if (h && compareVersions2(h.version, VERSION) >= 0) return urlOf(cur);
   }
   throw new Error("AI Chat Center hub did not start in time");
 }
@@ -790,6 +877,7 @@ var en_default = {
       agent: "Agent",
       agentFrom: "Agent {name}",
       toAgent: "Claude \u2192",
+      code: { copy: "Copy", copied: "Copied", copyFailed: "Could not copy", wrap: "Wrap lines", noWrap: "Don't wrap lines" },
       showAll: "Show all",
       recap: "Recap",
       diffShow: "Show changes (+{added} -{removed})",
@@ -1064,6 +1152,7 @@ var pt_BR_default = {
       agent: "Agente",
       agentFrom: "Agente {name}",
       toAgent: "Claude \u2192",
+      code: { copy: "Copiar", copied: "Copiado", copyFailed: "N\xE3o deu para copiar", wrap: "Quebrar linhas", noWrap: "N\xE3o quebrar linhas" },
       showAll: "Ver tudo",
       recap: "Resumo",
       diffShow: "Ver altera\xE7\xF5es (+{added} -{removed})",
@@ -1253,7 +1342,7 @@ async function resolveClaudePid(sessionId, opts = {}) {
 }
 
 // src/hooks/parentClaude.ts
-import fs6 from "node:fs";
+import fs7 from "node:fs";
 import { execFileSync } from "node:child_process";
 function isClaudeArgv(argv) {
   const base = (s) => s.split(/[\\/]/).pop() ?? "";
@@ -1268,7 +1357,7 @@ function parentClaudePid(ppid = process.ppid, platform = process.platform, readA
 function readProcessArgv(pid, platform) {
   try {
     if (platform === "linux") {
-      return fs6.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
+      return fs7.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
     }
     const out = execFileSync("ps", ["-o", "args=", "-p", String(pid)], { encoding: "utf8", timeout: 2e3, stdio: ["ignore", "pipe", "ignore"] });
     return out.trim().split(/\s+/).filter(Boolean);
@@ -1278,8 +1367,8 @@ function readProcessArgv(pid, platform) {
 }
 
 // src/hooks/openWindow.ts
-import fs7 from "node:fs";
-import path8 from "node:path";
+import fs8 from "node:fs";
+import path9 from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 var LINUX_NAMES = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge", "microsoft-edge-stable"];
 var MAC_APPS = [
@@ -1293,11 +1382,11 @@ var WIN_EXES = [
 ];
 var WIN_BASES = ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"];
 function isExecutableFile(p, platform = process.platform, checks = {}) {
-  const stat = checks.stat ?? fs7.statSync;
-  const access = checks.access ?? fs7.accessSync;
+  const stat = checks.stat ?? fs8.statSync;
+  const access = checks.access ?? fs8.accessSync;
   try {
     if (!stat(p).isFile()) return false;
-    if (platform !== "win32") access(p, fs7.constants.X_OK);
+    if (platform !== "win32") access(p, fs8.constants.X_OK);
     return true;
   } catch {
     return false;
@@ -1313,14 +1402,14 @@ function findBrowser(env = process.env, platform = process.platform, exists = (p
   };
   let candidates;
   if (platform === "darwin") {
-    const roots = ["/Applications", ...env.HOME && path8.posix.isAbsolute(env.HOME) ? [path8.posix.join(env.HOME, "Applications")] : []];
-    candidates = MAC_APPS.flatMap((app) => roots.map((r) => path8.posix.join(r, app)));
+    const roots = ["/Applications", ...env.HOME && path9.posix.isAbsolute(env.HOME) ? [path9.posix.join(env.HOME, "Applications")] : []];
+    candidates = MAC_APPS.flatMap((app) => roots.map((r) => path9.posix.join(r, app)));
   } else if (platform === "win32") {
-    const bases = WIN_BASES.map((k) => env[k]).filter((b) => !!b && path8.win32.isAbsolute(b));
-    candidates = WIN_EXES.flatMap((exe) => bases.map((b) => path8.win32.join(b, ...exe)));
+    const bases = WIN_BASES.map((k) => env[k]).filter((b) => !!b && path9.win32.isAbsolute(b));
+    candidates = WIN_EXES.flatMap((exe) => bases.map((b) => path9.win32.join(b, ...exe)));
   } else {
-    const dirs = (env.PATH ?? "").split(path8.posix.delimiter).filter((d) => path8.posix.isAbsolute(d));
-    candidates = LINUX_NAMES.flatMap((n) => dirs.map((d) => path8.posix.join(d, n)));
+    const dirs = (env.PATH ?? "").split(path9.posix.delimiter).filter((d) => path9.posix.isAbsolute(d));
+    candidates = LINUX_NAMES.flatMap((n) => dirs.map((d) => path9.posix.join(d, n)));
   }
   return candidates.find(ok) ?? null;
 }
@@ -1335,12 +1424,12 @@ function findDefaultOpener(env = process.env, platform = process.platform, exist
   if (platform === "darwin") return ok("/usr/bin/open") ? { cmd: "/usr/bin/open", args: [] } : null;
   if (platform === "win32") {
     const root = env.SystemRoot ?? env.SYSTEMROOT ?? env.windir;
-    if (!root || !path8.win32.isAbsolute(root)) return null;
-    const exe2 = path8.win32.join(root, "System32", "rundll32.exe");
+    if (!root || !path9.win32.isAbsolute(root)) return null;
+    const exe2 = path9.win32.join(root, "System32", "rundll32.exe");
     return ok(exe2) ? { cmd: exe2, args: ["url.dll,FileProtocolHandler"] } : null;
   }
-  const dirs = (env.PATH ?? "").split(path8.posix.delimiter).filter((d) => path8.posix.isAbsolute(d));
-  const exe = dirs.map((d) => path8.posix.join(d, "xdg-open")).find(ok);
+  const dirs = (env.PATH ?? "").split(path9.posix.delimiter).filter((d) => path9.posix.isAbsolute(d));
+  const exe = dirs.map((d) => path9.posix.join(d, "xdg-open")).find(ok);
   return exe ? { cmd: exe, args: [] } : null;
 }
 function openAppWindow(browser, url, deps = {}) {
@@ -1410,28 +1499,28 @@ async function launchAppWindow(hubUrl, deps = {}, sessionId) {
 }
 
 // src/hooks/launcher.ts
-import fs11 from "node:fs";
+import fs12 from "node:fs";
 import os5 from "node:os";
-import path12 from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
+import path13 from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
 
 // src/hooks/launcherFiles.ts
-import fs8 from "node:fs";
-import path9 from "node:path";
+import fs9 from "node:fs";
+import path10 from "node:path";
 var PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 function writeIfChanged(file, data, mode = 420) {
   try {
-    if (fs8.readFileSync(file).equals(data)) {
-      if (process.platform !== "win32" && (fs8.statSync(file).mode & 511) !== mode) fs8.chmodSync(file, mode);
+    if (fs9.readFileSync(file).equals(data)) {
+      if (process.platform !== "win32" && (fs9.statSync(file).mode & 511) !== mode) fs9.chmodSync(file, mode);
       return;
     }
   } catch {
   }
-  fs8.mkdirSync(path9.dirname(file), { recursive: true });
+  fs9.mkdirSync(path10.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs8.writeFileSync(tmp, data, { mode });
-  if (process.platform !== "win32") fs8.chmodSync(tmp, mode);
-  fs8.renameSync(tmp, file);
+  fs9.writeFileSync(tmp, data, { mode });
+  if (process.platform !== "win32") fs9.chmodSync(tmp, mode);
+  fs9.renameSync(tmp, file);
 }
 function pngSize(png) {
   if (png.length < 24 || !png.subarray(0, 8).equals(PNG_SIGNATURE) || png.toString("latin1", 12, 16) !== "IHDR") {
@@ -1468,17 +1557,17 @@ function pngToIcns(png) {
 }
 
 // src/hooks/launcherMac.ts
-import fs9 from "node:fs";
-import path10 from "node:path";
+import fs10 from "node:fs";
+import path11 from "node:path";
 var BUNDLE_ID = "com.ai-chat-center.launcher";
 var EXECUTABLE = "ai-chat-center";
 function macLauncherPaths(home) {
-  const app = path10.join(home, "Applications", "AI Chat Center.app");
+  const app = path11.join(home, "Applications", "AI Chat Center.app");
   return {
     app,
-    plist: path10.join(app, "Contents", "Info.plist"),
-    exec: path10.join(app, "Contents", "MacOS", EXECUTABLE),
-    icon: path10.join(app, "Contents", "Resources", "icon.icns")
+    plist: path11.join(app, "Contents", "Info.plist"),
+    exec: path11.join(app, "Contents", "MacOS", EXECUTABLE),
+    icon: path11.join(app, "Contents", "Resources", "icon.icns")
   };
 }
 var shQuote = (s) => `'${s.replace(/'/g, "'\\''")}'`;
@@ -1509,20 +1598,20 @@ function infoPlist() {
     ""
   ].join("\n");
 }
-var OUR_DIRS = /* @__PURE__ */ new Set(["Contents", path10.join("Contents", "MacOS"), path10.join("Contents", "Resources")]);
-var OUR_EXEC = path10.join("Contents", "MacOS", EXECUTABLE);
-var OUR_ICON = path10.join("Contents", "Resources", "icon.icns");
+var OUR_DIRS = /* @__PURE__ */ new Set(["Contents", path11.join("Contents", "MacOS"), path11.join("Contents", "Resources")]);
+var OUR_EXEC = path11.join("Contents", "MacOS", EXECUTABLE);
+var OUR_ICON = path11.join("Contents", "Resources", "icon.icns");
 function onlyOurFiles(app) {
   const walk = (rel) => {
-    for (const e of fs9.readdirSync(path10.join(app, rel), { withFileTypes: true })) {
-      const r = rel ? path10.join(rel, e.name) : e.name;
+    for (const e of fs10.readdirSync(path11.join(app, rel), { withFileTypes: true })) {
+      const r = rel ? path11.join(rel, e.name) : e.name;
       if (e.isDirectory()) {
         if (!OUR_DIRS.has(r) || !walk(r)) return false;
       } else if (!e.isFile()) {
         return false;
       } else if (r === OUR_EXEC) {
-        const st = fs9.statSync(path10.join(app, r));
-        if (st.size > 64 * 1024 || !fs9.readFileSync(path10.join(app, r), "utf8").startsWith("#!/bin/sh\nexec ")) return false;
+        const st = fs10.statSync(path11.join(app, r));
+        if (st.size > 64 * 1024 || !fs10.readFileSync(path11.join(app, r), "utf8").startsWith("#!/bin/sh\nexec ")) return false;
       } else if (r !== OUR_ICON) {
         return false;
       }
@@ -1530,16 +1619,16 @@ function onlyOurFiles(app) {
     return true;
   };
   try {
-    return fs9.lstatSync(app).isDirectory() && walk("");
+    return fs10.lstatSync(app).isDirectory() && walk("");
   } catch {
     return false;
   }
 }
 function ownership(p) {
-  if (!fs9.existsSync(p.app)) return "none";
+  if (!fs10.existsSync(p.app)) return "none";
   let plist;
   try {
-    plist = fs9.readFileSync(p.plist, "utf8");
+    plist = fs10.readFileSync(p.plist, "utf8");
   } catch (e) {
     const missing = e.code === "ENOENT" && !lexists(p.plist);
     return missing && onlyOurFiles(p.app) ? "partial" : "foreign";
@@ -1548,7 +1637,7 @@ function ownership(p) {
 }
 function lexists(f) {
   try {
-    fs9.lstatSync(f);
+    fs10.lstatSync(f);
     return true;
   } catch {
     return false;
@@ -1558,30 +1647,30 @@ function installMacLauncher(o) {
   const p = macLauncherPaths(o.home);
   if (ownership(p) === "foreign") throw new Error(`launcher: ${p.app} exists and is not ours; left alone`);
   writeIfChanged(p.plist, Buffer.from(infoPlist(), "utf8"));
-  writeIfChanged(p.exec, Buffer.from(launchScript(o.node, path10.join(o.distDir, "open.mjs")), "utf8"), 493);
-  writeIfChanged(p.icon, pngToIcns(fs9.readFileSync(path10.join(o.distDir, "ui", "icons", "icon-512.png"))));
+  writeIfChanged(p.exec, Buffer.from(launchScript(o.node, path11.join(o.distDir, "open.mjs")), "utf8"), 493);
+  writeIfChanged(p.icon, pngToIcns(fs10.readFileSync(path11.join(o.distDir, "ui", "icons", "icon-512.png"))));
   return true;
 }
 function removeMacLauncher(home) {
   const p = macLauncherPaths(home);
   const owner = ownership(p);
-  if (owner === "ours" || owner === "partial") fs9.rmSync(p.app, { recursive: true, force: true });
+  if (owner === "ours" || owner === "partial") fs10.rmSync(p.app, { recursive: true, force: true });
 }
 
 // src/hooks/launcherWin.ts
 import { spawnSync } from "node:child_process";
-import fs10 from "node:fs";
-import path11 from "node:path";
+import fs11 from "node:fs";
+import path12 from "node:path";
 function winLauncherPaths(env, home) {
-  const roaming = env.APPDATA && path11.isAbsolute(env.APPDATA) ? env.APPDATA : path11.join(home, "AppData", "Roaming");
-  const local = env.LOCALAPPDATA && path11.isAbsolute(env.LOCALAPPDATA) ? env.LOCALAPPDATA : path11.join(home, "AppData", "Local");
-  const dir = path11.join(local, "ai-chat-center");
+  const roaming = env.APPDATA && path12.isAbsolute(env.APPDATA) ? env.APPDATA : path12.join(home, "AppData", "Roaming");
+  const local = env.LOCALAPPDATA && path12.isAbsolute(env.LOCALAPPDATA) ? env.LOCALAPPDATA : path12.join(home, "AppData", "Local");
+  const dir = path12.join(local, "ai-chat-center");
   return {
-    shortcut: path11.join(roaming, "Microsoft", "Windows", "Start Menu", "Programs", "AI Chat Center.lnk"),
+    shortcut: path12.join(roaming, "Microsoft", "Windows", "Start Menu", "Programs", "AI Chat Center.lnk"),
     dir,
-    icon: path11.join(dir, "ai-chat-center.ico"),
-    stamp: path11.join(dir, "launcher.json"),
-    failStamp: path11.join(dir, "launcher-failed.json")
+    icon: path12.join(dir, "ai-chat-center.ico"),
+    stamp: path12.join(dir, "launcher.json"),
+    failStamp: path12.join(dir, "launcher-failed.json")
   };
 }
 var SHORTCUT_SCRIPT = [
@@ -1598,7 +1687,7 @@ var SHORTCUT_SCRIPT = [
 var RETRY_AFTER_FAILURE_MS = 24 * 36e5;
 function lastFailure(file, stamp) {
   try {
-    const f = JSON.parse(fs10.readFileSync(file, "utf8"));
+    const f = JSON.parse(fs11.readFileSync(file, "utf8"));
     return f.stamp === stamp && typeof f.at === "number" ? f.at : null;
   } catch {
     return null;
@@ -1607,16 +1696,16 @@ function lastFailure(file, stamp) {
 var defaultSpawn = (cmd, args, opts) => spawnSync(cmd, args, opts);
 function powershell(env) {
   const root = env.SystemRoot ?? env.SYSTEMROOT;
-  return root ? path11.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe";
+  return root ? path12.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe";
 }
 function installWinLauncher(o) {
   const p = winLauncherPaths(o.env, o.home);
-  writeIfChanged(p.icon, pngToIco(fs10.readFileSync(path11.join(o.distDir, "ui", "icons", "icon-256.png"))));
-  const openScript = path11.join(o.distDir, "open.mjs");
+  writeIfChanged(p.icon, pngToIco(fs11.readFileSync(path12.join(o.distDir, "ui", "icons", "icon-256.png"))));
+  const openScript = path12.join(o.distDir, "open.mjs");
   const stamp = JSON.stringify({ node: o.node, openScript, icon: p.icon, comment: o.comment });
   let same = false;
   try {
-    same = fs10.existsSync(p.shortcut) && fs10.readFileSync(p.stamp, "utf8") === stamp;
+    same = fs11.existsSync(p.shortcut) && fs11.readFileSync(p.stamp, "utf8") === stamp;
   } catch {
   }
   if (same) return true;
@@ -1625,7 +1714,7 @@ function installWinLauncher(o) {
   if (failedAt !== null && now - failedAt >= 0 && now - failedAt < RETRY_AFTER_FAILURE_MS) {
     throw new Error(`launcher: Start menu shortcut skipped: PowerShell failed at ${new Date(failedAt).toISOString()}; next try 24 h later or when the plugin or Node path changes`);
   }
-  fs10.mkdirSync(path11.dirname(p.shortcut), { recursive: true });
+  fs11.mkdirSync(path12.dirname(p.shortcut), { recursive: true });
   const r = (o.spawn ?? defaultSpawn)(
     powershell(o.env),
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", SHORTCUT_SCRIPT],
@@ -1650,14 +1739,14 @@ function installWinLauncher(o) {
     throw new Error(`launcher: PowerShell could not create the Start menu shortcut (${r.error?.message ?? `exit ${r.status}`})`);
   }
   writeIfChanged(p.stamp, Buffer.from(stamp, "utf8"));
-  fs10.rmSync(p.failStamp, { force: true });
+  fs11.rmSync(p.failStamp, { force: true });
   return true;
 }
 function removeWinLauncher(env, home) {
   const p = winLauncherPaths(env, home);
-  for (const f of [p.shortcut, p.icon, p.stamp, p.failStamp]) fs10.rmSync(f, { force: true });
+  for (const f of [p.shortcut, p.icon, p.stamp, p.failStamp]) fs11.rmSync(f, { force: true });
   try {
-    fs10.rmdirSync(p.dir);
+    fs11.rmdirSync(p.dir);
   } catch {
   }
 }
@@ -1666,10 +1755,10 @@ function removeWinLauncher(env, home) {
 var DESKTOP_ID = "ai-chat-center";
 var APP_WM_CLASS = "chrome-127.0.0.1__-Default";
 function launcherPaths(env = process.env, home = os5.homedir()) {
-  const data = env.XDG_DATA_HOME && path12.isAbsolute(env.XDG_DATA_HOME) ? env.XDG_DATA_HOME : path12.join(home, ".local", "share");
+  const data = env.XDG_DATA_HOME && path13.isAbsolute(env.XDG_DATA_HOME) ? env.XDG_DATA_HOME : path13.join(home, ".local", "share");
   return {
-    desktopFile: path12.join(data, "applications", `${DESKTOP_ID}.desktop`),
-    iconFile: path12.join(data, "icons", "hicolor", "512x512", "apps", `${DESKTOP_ID}.png`)
+    desktopFile: path13.join(data, "applications", `${DESKTOP_ID}.desktop`),
+    iconFile: path13.join(data, "icons", "hicolor", "512x512", "apps", `${DESKTOP_ID}.png`)
   };
 }
 function quoteExecArg(a) {
@@ -1692,7 +1781,7 @@ function desktopEntry(o) {
     ""
   ].join("\n");
 }
-var defaultDist = () => path12.dirname(fileURLToPath2(import.meta.url));
+var defaultDist = () => path13.dirname(fileURLToPath3(import.meta.url));
 var DEFAULT_COMMENT = "Follow and answer your Claude Code sessions";
 function installLauncher(o = {}) {
   const platform = o.platform ?? process.platform;
@@ -1705,8 +1794,8 @@ function installLauncher(o = {}) {
   if (platform === "darwin") return installMacLauncher({ home, node, distDir });
   if (platform !== "linux") return false;
   const p = launcherPaths(env, home);
-  writeIfChanged(p.iconFile, fs11.readFileSync(path12.join(distDir, "ui", "icons", "icon-512.png")));
-  const entry = desktopEntry({ node, openScript: path12.join(distDir, "open.mjs"), icon: p.iconFile, comment });
+  writeIfChanged(p.iconFile, fs12.readFileSync(path13.join(distDir, "ui", "icons", "icon-512.png")));
+  const entry = desktopEntry({ node, openScript: path13.join(distDir, "open.mjs"), icon: p.iconFile, comment });
   writeIfChanged(p.desktopFile, Buffer.from(entry, "utf8"));
   return true;
 }
@@ -1718,7 +1807,7 @@ function removeLauncher(o = {}) {
   if (platform === "darwin") return removeMacLauncher(home);
   if (platform !== "linux") return;
   const p = launcherPaths(env, home);
-  for (const f of [p.desktopFile, p.iconFile]) fs11.rmSync(f, { force: true });
+  for (const f of [p.desktopFile, p.iconFile]) fs12.rmSync(f, { force: true });
 }
 
 // src/hooks/hook.ts
@@ -1743,7 +1832,7 @@ var output = (context, systemMessage) => ({
 async function tightenHome() {
   try {
     await ensureDir(paths().home);
-    await fs12.promises.chmod(paths().home, DIR_MODE);
+    await fs13.promises.chmod(paths().home, DIR_MODE);
   } catch {
   }
 }
@@ -1770,7 +1859,7 @@ async function connect(input, resolve, ctx) {
   await setBusy(sid);
   await clearWaiting(sid);
   await clearTurnOrigin(sid);
-  await fs12.promises.rm(paths().questionsDir(sid), { recursive: true, force: true });
+  await fs13.promises.rm(paths().questionsDir(sid), { recursive: true, force: true });
   const { language, openWindow } = await loadConfig();
   await refreshStatusline(ctx);
   let status;
@@ -1792,7 +1881,7 @@ ${t(language, "hook.tabMacTip")}`;
     }
   } catch (e) {
     logError(e);
-    const log = path13.join(paths().logDir, "hook.log");
+    const log = path14.join(paths().logDir, "hook.log");
     status = `AI Chat Center: the hub failed to start. See ${log}`;
     shown = t(language, "hook.hubFailed", { log });
   }
@@ -1812,7 +1901,7 @@ async function usageCommand(on, ctx) {
     return output(USAGE_OFF, t(language, r === "changed-since" ? "hook.usageOffChanged" : "hook.usageOff"));
   } catch (e) {
     logError(e);
-    const log = path13.join(paths().logDir, "hook.log");
+    const log = path14.join(paths().logDir, "hook.log");
     return output(`${USAGE_FAILED}. See ${log}`, t(language, "hook.usageFailed", { log }));
   }
 }
@@ -1932,16 +2021,16 @@ async function readStdin() {
 function logError(e) {
   try {
     const dir = paths().logDir;
-    fs12.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
-    fs12.appendFileSync(
-      path13.join(dir, "hook.log"),
+    fs13.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+    fs13.appendFileSync(
+      path14.join(dir, "hook.log"),
       `${(/* @__PURE__ */ new Date()).toISOString()} ${e instanceof Error ? e.stack ?? e.message : String(e)}
 `
     );
   } catch {
   }
 }
-var wrapperSource = () => path13.join(path13.dirname(fileURLToPath3(import.meta.url)), "statusline.mjs");
+var wrapperSource = () => path14.join(path14.dirname(fileURLToPath4(import.meta.url)), "statusline.mjs");
 async function main() {
   let result = { exitCode: 0 };
   try {
@@ -1966,4 +2055,4 @@ async function main() {
 
 // src/bin/hook.ts
 process.noDeprecation = true;
-void main();
+if (!await delegateToNewer("hook.mjs", import.meta.url)) void main();

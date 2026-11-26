@@ -1,9 +1,10 @@
 import { createRequire as __acc_createRequire } from 'node:module';
 const require = __acc_createRequire(import.meta.url);
 
-// src/hooks/waiter.ts
-import fs7 from "node:fs";
-import path6 from "node:path";
+// src/hooks/delegate.ts
+import fs from "node:fs";
+import path2 from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // src/core/paths.ts
 import os from "node:os";
@@ -45,19 +46,109 @@ function paths() {
   };
 }
 
+// src/core/version.ts
+var VERSION = "0.6.6";
+var PROTOCOL = 2;
+
+// src/hooks/delegate.ts
+var FLAG = /* @__PURE__ */ Symbol.for("ai-chat-center.delegated");
+var flags = globalThis;
+var VERSION_RE = /^\d+\.\d+\.\d+$/;
+function compareVersions(a, b) {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] < pb[i] ? -1 : 1;
+  return 0;
+}
+var recordFile = () => path2.join(paths().home, "plugin.json");
+function readRecord() {
+  try {
+    const r = JSON.parse(fs.readFileSync(recordFile(), "utf8"));
+    if (typeof r?.version !== "string" || !VERSION_RE.test(r.version) || typeof r.dist !== "string") return null;
+    return { version: r.version, dist: r.dist };
+  } catch {
+    return null;
+  }
+}
+function writeRecord(rec) {
+  try {
+    fs.mkdirSync(paths().home, { recursive: true, mode: 448 });
+    const tmp = `${recordFile()}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(rec), { mode: 384 });
+    fs.renameSync(tmp, recordFile());
+  } catch {
+  }
+}
+function pluginVersionOf(dist) {
+  try {
+    const v = JSON.parse(fs.readFileSync(path2.join(dist, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
+    return typeof v === "string" && VERSION_RE.test(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+function newerScript(entry, ownDist, version = VERSION) {
+  if (flags[FLAG]) return null;
+  let own;
+  try {
+    own = fs.realpathSync(ownDist);
+  } catch {
+    return null;
+  }
+  const rec = readRecord();
+  let target = null;
+  if (rec && compareVersions(rec.version, version) > 0) {
+    try {
+      const dist = fs.realpathSync(rec.dist);
+      const versionDir = path2.dirname(dist);
+      const siblings = path2.dirname(path2.dirname(own)) === path2.dirname(versionDir) && dist !== own;
+      if (siblings && path2.basename(dist) === "dist" && path2.basename(versionDir) === rec.version && pluginVersionOf(dist) === rec.version && fs.statSync(path2.join(dist, entry)).isFile()) {
+        target = path2.join(dist, entry);
+      }
+    } catch {
+      target = null;
+    }
+  }
+  if (target) return target;
+  const same = rec && rec.version === version && rec.dist === own;
+  if (!same && path2.basename(path2.dirname(own)) === version && pluginVersionOf(own) === version) writeRecord({ version, dist: own });
+  return null;
+}
+async function delegateToNewer(entry, moduleUrl) {
+  let target = null;
+  try {
+    target = newerScript(entry, path2.dirname(fileURLToPath(moduleUrl)));
+  } catch {
+    return false;
+  }
+  if (!target) return false;
+  flags[FLAG] = VERSION;
+  try {
+    await import(pathToFileURL(target).href);
+    return true;
+  } catch {
+    flags[FLAG] = void 0;
+    return false;
+  }
+}
+
+// src/hooks/waiter.ts
+import fs8 from "node:fs";
+import path7 from "node:path";
+
 // src/core/registry.ts
-import fs6 from "node:fs/promises";
+import fs7 from "node:fs/promises";
 import os2 from "node:os";
-import path5 from "node:path";
+import path6 from "node:path";
 
 // src/core/fsAtomic.ts
-import fs from "node:fs/promises";
-import path2 from "node:path";
+import fs2 from "node:fs/promises";
+import path3 from "node:path";
 import crypto from "node:crypto";
 var DIR_MODE = 448;
 var FILE_MODE = 384;
 async function ensureDir(dir) {
-  await fs.mkdir(dir, { recursive: true, mode: DIR_MODE });
+  await fs2.mkdir(dir, { recursive: true, mode: DIR_MODE });
 }
 var TRANSIENT = /* @__PURE__ */ new Set(["EPERM", "EBUSY", "EACCES"]);
 var RETRIES = 5;
@@ -72,40 +163,40 @@ async function withFsRetry(op) {
   }
 }
 function removeFile(file) {
-  return withFsRetry(() => fs.rm(file, { force: true }));
+  return withFsRetry(() => fs2.rm(file, { force: true }));
 }
 async function writeJsonAtomic(file, data) {
-  await ensureDir(path2.dirname(file));
+  await ensureDir(path3.dirname(file));
   const tmp = `${file}.${crypto.randomUUID()}.tmp`;
   try {
-    await fs.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: "utf8", mode: FILE_MODE });
-    await withFsRetry(() => fs.rename(tmp, file));
+    await fs2.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: "utf8", mode: FILE_MODE });
+    await withFsRetry(() => fs2.rename(tmp, file));
   } catch (e) {
-    await fs.rm(tmp, { force: true });
+    await fs2.rm(tmp, { force: true });
     throw e;
   }
 }
 async function readJson(file) {
   try {
-    return JSON.parse(await fs.readFile(file, "utf8"));
+    return JSON.parse(await fs2.readFile(file, "utf8"));
   } catch {
     return null;
   }
 }
 
 // src/core/inbox.ts
-import fs4 from "node:fs/promises";
-import path4 from "node:path";
+import fs5 from "node:fs/promises";
+import path5 from "node:path";
 import crypto4 from "node:crypto";
 
 // src/core/secret.ts
-import fs2 from "node:fs/promises";
+import fs3 from "node:fs/promises";
 import crypto2 from "node:crypto";
 var SECRET_RE = /^[0-9a-f]{64}$/;
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function readOnce() {
   try {
-    const s = (await fs2.readFile(paths().secret, "utf8")).trim();
+    const s = (await fs3.readFile(paths().secret, "utf8")).trim();
     return SECRET_RE.test(s) ? { ok: true, secret: s } : { ok: false, reason: "malformed" };
   } catch (e) {
     return { ok: false, reason: e.code === "ENOENT" ? "missing" : "unreadable" };
@@ -132,8 +223,8 @@ function verifyMessage(m, sid, secret) {
 }
 
 // src/core/lock.ts
-import fs3 from "node:fs/promises";
-import path3 from "node:path";
+import fs4 from "node:fs/promises";
+import path4 from "node:path";
 import crypto3 from "node:crypto";
 var EMPTY_GRACE_MS = 1e4;
 var LOCK_STALE_MS = 9e4;
@@ -163,27 +254,27 @@ async function publish(file) {
   const tmp = `${file}.${crypto3.randomUUID()}.tmp`;
   const content = JSON.stringify({ pid: process.pid, ts: (/* @__PURE__ */ new Date()).toISOString() });
   try {
-    await fs3.writeFile(tmp, content, { flag: "wx" });
-    await fs3.link(tmp, file);
+    await fs4.writeFile(tmp, content, { flag: "wx" });
+    await fs4.link(tmp, file);
     return content;
   } catch (e) {
     if (["EEXIST", "EPERM", "EBUSY"].includes(code(e) ?? "")) return null;
     throw e;
   } finally {
-    await fs3.rm(tmp, { force: true });
+    await fs4.rm(tmp, { force: true });
   }
 }
 async function staleContent(file) {
   let content;
   let mtimeMs;
   try {
-    content = await fs3.readFile(file, "utf8");
+    content = await fs4.readFile(file, "utf8");
   } catch (e) {
     if (code(e) === "ENOENT") return null;
     content = "";
   }
   try {
-    mtimeMs = (await fs3.stat(file)).mtimeMs;
+    mtimeMs = (await fs4.stat(file)).mtimeMs;
   } catch {
     return null;
   }
@@ -198,8 +289,8 @@ async function reclaim(file, seen) {
   const guard = `${file}.reclaim`;
   if (await publish(guard) === null) {
     try {
-      const st = await fs3.stat(guard);
-      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs3.rm(guard, { force: true });
+      const st = await fs4.stat(guard);
+      if (Date.now() - st.mtimeMs > GUARD_STALE_MS) await fs4.rm(guard, { force: true });
     } catch {
     }
     return null;
@@ -207,7 +298,7 @@ async function reclaim(file, seen) {
   try {
     if (await staleContent(file) !== seen) return null;
     try {
-      await fs3.unlink(file);
+      await fs4.unlink(file);
     } catch (e) {
       if (code(e) !== "ENOENT") {
         if (contention(e)) return null;
@@ -217,7 +308,7 @@ async function reclaim(file, seen) {
     return await publish(file);
   } finally {
     try {
-      if (lockPid(await fs3.readFile(guard, "utf8")) === process.pid) await fs3.rm(guard, { force: true });
+      if (lockPid(await fs4.readFile(guard, "utf8")) === process.pid) await fs4.rm(guard, { force: true });
     } catch {
     }
   }
@@ -226,7 +317,7 @@ async function acquireLock(file) {
   return await acquireLockContent(file) !== null;
 }
 async function acquireLockContent(file) {
-  await ensureDir(path3.dirname(file));
+  await ensureDir(path4.dirname(file));
   const mine = await publish(file);
   if (mine !== null) return mine;
   const seen = await staleContent(file);
@@ -235,19 +326,19 @@ async function acquireLockContent(file) {
 }
 async function touchLock(file) {
   try {
-    if (lockPid(await fs3.readFile(file, "utf8")) !== process.pid) return;
+    if (lockPid(await fs4.readFile(file, "utf8")) !== process.pid) return;
     const now = /* @__PURE__ */ new Date();
-    await fs3.utimes(file, now, now);
+    await fs4.utimes(file, now, now);
   } catch {
   }
 }
 async function releaseLock(file) {
   try {
-    if (lockPid(await fs3.readFile(file, "utf8")) !== process.pid) return;
+    if (lockPid(await fs4.readFile(file, "utf8")) !== process.pid) return;
   } catch {
     return;
   }
-  await fs3.rm(file, { force: true });
+  await fs4.rm(file, { force: true });
 }
 async function withLock(file, waitMs, fn) {
   const deadline = Date.now() + waitMs;
@@ -272,7 +363,7 @@ var isRace = (e) => ["ENOENT", "EPERM", "EBUSY"].includes(e.code ?? "");
 async function list(sid) {
   const dir = paths().inboxDir(sid);
   try {
-    return (await fs4.readdir(dir)).filter((n) => n.endsWith(".msg")).sort().map((n) => path4.join(dir, n));
+    return (await fs5.readdir(dir)).filter((n) => n.endsWith(".msg")).sort().map((n) => path5.join(dir, n));
   } catch (e) {
     if (e.code === "ENOENT") return [];
     throw e;
@@ -284,7 +375,7 @@ var CLAIMED_RE = /\.msg\.claimed-(?:(\d{13,})-)?/;
 async function readClaimed(file) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return JSON.parse(await fs4.readFile(file, "utf8"));
+      return JSON.parse(await fs5.readFile(file, "utf8"));
     } catch (e) {
       if (e instanceof SyntaxError) return "malformed";
       if (attempt >= READ_RETRIES) return "unreadable";
@@ -296,7 +387,7 @@ var CLAIM_MARK = ".claim";
 var MARKER_STALE_MS = 6e4;
 async function removeMarker(marker) {
   try {
-    await withFsRetry(() => fs4.rm(marker, { force: true }));
+    await withFsRetry(() => fs5.rm(marker, { force: true }));
   } catch {
   }
 }
@@ -308,7 +399,7 @@ async function drain(sid, judge = () => "deliver", record) {
     const claimed = `${f}.claimed-${Date.now()}-${crypto4.randomUUID()}`;
     const marker = `${f}${CLAIM_MARK}`;
     try {
-      await fs4.writeFile(marker, String(process.pid), { flag: "wx", mode: FILE_MODE });
+      await fs5.writeFile(marker, String(process.pid), { flag: "wx", mode: FILE_MODE });
     } catch (e) {
       if (e.code === "EEXIST") {
         if (!await markerOwnerAlive(marker)) await removeMarker(marker);
@@ -319,7 +410,7 @@ async function drain(sid, judge = () => "deliver", record) {
       throw e;
     }
     try {
-      await withFsRetry(() => fs4.rename(f, claimed));
+      await withFsRetry(() => fs5.rename(f, claimed));
     } catch (e) {
       await removeMarker(marker);
       if (isRace(e)) continue;
@@ -330,7 +421,7 @@ async function drain(sid, judge = () => "deliver", record) {
     const m = await readClaimed(claimed);
     if (m === "unreadable") {
       try {
-        await withFsRetry(() => fs4.rename(claimed, f));
+        await withFsRetry(() => fs5.rename(claimed, f));
       } catch {
       }
       continue;
@@ -338,7 +429,7 @@ async function drain(sid, judge = () => "deliver", record) {
     const verdict = m === "malformed" ? "drop" : await judge(m);
     if (verdict === "unsigned") {
       try {
-        await withFsRetry(() => fs4.rename(claimed, `${f}${UNSIGNED}`));
+        await withFsRetry(() => fs5.rename(claimed, `${f}${UNSIGNED}`));
       } catch {
       }
       continue;
@@ -350,7 +441,7 @@ async function drain(sid, judge = () => "deliver", record) {
   });
   for (const claimed of toDelete) {
     try {
-      await withFsRetry(() => fs4.rm(claimed, { force: true }));
+      await withFsRetry(() => fs5.rm(claimed, { force: true }));
     } catch {
     }
   }
@@ -358,7 +449,7 @@ async function drain(sid, judge = () => "deliver", record) {
 }
 async function markerOwnerAlive(marker) {
   try {
-    const t = (await fs4.readFile(marker, "utf8")).trim();
+    const t = (await fs5.readFile(marker, "utf8")).trim();
     return !/^\d+$/.test(t) || isAlive(Number(t));
   } catch {
     return true;
@@ -368,7 +459,7 @@ async function sweepClaimed(sid, maxAgeMs, delivered = /* @__PURE__ */ new Set()
   const dir = paths().inboxDir(sid);
   let names;
   try {
-    names = await fs4.readdir(dir);
+    names = await fs5.readdir(dir);
   } catch {
     return 0;
   }
@@ -377,11 +468,11 @@ async function sweepClaimed(sid, maxAgeMs, delivered = /* @__PURE__ */ new Set()
   let judge;
   for (const n of names) {
     if (n.endsWith(`.msg${CLAIM_MARK}`)) {
-      const marker = path4.join(dir, n);
+      const marker = path5.join(dir, n);
       try {
-        const stale = !await markerOwnerAlive(marker) || now - (await fs4.stat(marker)).mtimeMs > Math.min(maxAgeMs, MARKER_STALE_MS);
+        const stale = !await markerOwnerAlive(marker) || now - (await fs5.stat(marker)).mtimeMs > Math.min(maxAgeMs, MARKER_STALE_MS);
         if (!stale) continue;
-        await withFsRetry(() => fs4.rm(marker, { force: true }));
+        await withFsRetry(() => fs5.rm(marker, { force: true }));
         swept++;
       } catch {
       }
@@ -389,22 +480,22 @@ async function sweepClaimed(sid, maxAgeMs, delivered = /* @__PURE__ */ new Set()
     }
     const m = CLAIMED_RE.exec(n);
     if (!m) continue;
-    const file = path4.join(dir, n);
+    const file = path5.join(dir, n);
     try {
-      const at = m[1] ? Number(m[1]) : (await fs4.stat(file)).mtimeMs;
+      const at = m[1] ? Number(m[1]) : (await fs5.stat(file)).mtimeMs;
       if (now - at <= maxAgeMs) continue;
       if (judge === void 0) judge = await current().catch(() => null);
       if (judge === null) continue;
       let msg;
       try {
-        msg = JSON.parse(await fs4.readFile(file, "utf8"));
+        msg = JSON.parse(await fs5.readFile(file, "utf8"));
       } catch (e) {
         if (!(e instanceof SyntaxError)) continue;
         msg = null;
       }
       const putBack = m[1] !== void 0 && msg !== null && typeof msg === "object" && typeof msg.id === "string" && !delivered.has(msg.id) && judge(msg);
-      if (putBack) await withFsRetry(() => fs4.rename(file, path4.join(dir, n.slice(0, m.index + ".msg".length))));
-      else await withFsRetry(() => fs4.rm(file, { force: true }));
+      if (putBack) await withFsRetry(() => fs5.rename(file, path5.join(dir, n.slice(0, m.index + ".msg".length))));
+      else await withFsRetry(() => fs5.rm(file, { force: true }));
       swept++;
     } catch {
     }
@@ -415,7 +506,7 @@ async function clearInbox(sid) {
   const dir = paths().inboxDir(sid);
   let names;
   try {
-    names = await fs4.readdir(dir);
+    names = await fs5.readdir(dir);
   } catch (e) {
     if (e.code === "ENOENT") return;
     throw e;
@@ -423,7 +514,7 @@ async function clearInbox(sid) {
   for (const n of names) {
     if (!n.endsWith(".msg") && !n.endsWith(".tmp") && !n.includes(".msg.claimed-") && !n.endsWith(`.msg${CLAIM_MARK}`) && !n.endsWith(`.msg${UNSIGNED}`)) continue;
     try {
-      await withFsRetry(() => fs4.rm(path4.join(dir, n), { force: true }));
+      await withFsRetry(() => fs5.rm(path5.join(dir, n), { force: true }));
     } catch (e) {
       if (!isRace(e)) throw e;
     }
@@ -431,14 +522,14 @@ async function clearInbox(sid) {
 }
 
 // src/core/busy.ts
-import fs5 from "node:fs/promises";
+import fs6 from "node:fs/promises";
 async function clearBusy(sid) {
   await removeFile(paths().busyFile(sid));
 }
 async function clearBusyIfOlder(sid, before) {
   let mtimeMs;
   try {
-    mtimeMs = (await fs5.stat(paths().busyFile(sid))).mtimeMs;
+    mtimeMs = (await fs6.stat(paths().busyFile(sid))).mtimeMs;
   } catch {
     return true;
   }
@@ -448,7 +539,7 @@ async function clearBusyIfOlder(sid, before) {
 }
 async function isBusy(sid) {
   try {
-    await fs5.access(paths().busyFile(sid));
+    await fs6.access(paths().busyFile(sid));
     return true;
   } catch {
     return false;
@@ -456,7 +547,7 @@ async function isBusy(sid) {
 }
 async function busyAge(sid, now = Date.now()) {
   try {
-    return now - (await fs5.stat(paths().busyFile(sid))).mtimeMs;
+    return now - (await fs6.stat(paths().busyFile(sid))).mtimeMs;
   } catch {
     return null;
   }
@@ -485,25 +576,21 @@ var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
 // src/core/attachments.ts
 var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
 
-// src/core/version.ts
-var VERSION = "0.6.5";
-var PROTOCOL = 2;
-
 // src/core/registry.ts
 var SESSION_LOCK_WAIT_MS = 2e3;
 var locked = (sid, fn) => withLock(paths().sessionLock(sid), SESSION_LOCK_WAIT_MS, fn);
 function regFile(sid) {
   assertSessionId(sid);
-  return path5.join(paths().sessionsDir, `${sid}.json`);
+  return path6.join(paths().sessionsDir, `${sid}.json`);
 }
 var isActive = (r) => !r.disconnectedAt;
 function claudeConfigDir() {
   const raw = process.env.CLAUDE_CONFIG_DIR;
-  return path5.resolve(raw && raw.trim() ? raw : path5.join(os2.homedir(), ".claude"));
+  return path6.resolve(raw && raw.trim() ? raw : path6.join(os2.homedir(), ".claude"));
 }
 function sameConfigDir(r, mine = claudeConfigDir()) {
   if (!r.configDir) return true;
-  const a = path5.resolve(r.configDir);
+  const a = path6.resolve(r.configDir);
   return process.platform === "win32" ? a.toLowerCase() === mine.toLowerCase() : a === mine;
 }
 var codeStamp = () => ({ version: VERSION, protocol: PROTOCOL });
@@ -525,7 +612,7 @@ async function getRegistration(sid) {
 async function listRegistrations() {
   let names;
   try {
-    names = await fs6.readdir(paths().sessionsDir);
+    names = await fs7.readdir(paths().sessionsDir);
   } catch (e) {
     if (e.code === "ENOENT") return [];
     throw e;
@@ -533,7 +620,7 @@ async function listRegistrations() {
   const out = [];
   for (const n of names) {
     if (!n.endsWith(".json")) continue;
-    const r = await readJson(path5.join(paths().sessionsDir, n));
+    const r = await readJson(path6.join(paths().sessionsDir, n));
     if (r) out.push(r);
   }
   return out;
@@ -684,14 +771,14 @@ async function liveStatus(sid) {
 }
 async function hasQueued(sid) {
   try {
-    return (await fs7.promises.readdir(paths().inboxDir(sid))).some((n) => n.endsWith(".msg"));
+    return (await fs8.promises.readdir(paths().inboxDir(sid))).some((n) => n.endsWith(".msg"));
   } catch {
     return false;
   }
 }
 async function inboxHasMessages(sid) {
   try {
-    return (await fs7.promises.readdir(paths().inboxDir(sid))).some((n) => n.endsWith(".msg"));
+    return (await fs8.promises.readdir(paths().inboxDir(sid))).some((n) => n.endsWith(".msg"));
   } catch (e) {
     if (e.code === "ENOENT") return false;
     throw e;
@@ -975,7 +1062,7 @@ async function runWaiter(event, input, opts = {}) {
 }
 async function readLock(file) {
   try {
-    return await fs7.promises.readFile(file, "utf8");
+    return await fs8.promises.readFile(file, "utf8");
   } catch {
     return null;
   }
@@ -988,9 +1075,9 @@ async function readStdin() {
 function logError(e) {
   try {
     const dir = paths().logDir;
-    fs7.mkdirSync(dir, { recursive: true, mode: 448 });
-    fs7.appendFileSync(
-      path6.join(dir, "waiter.log"),
+    fs8.mkdirSync(dir, { recursive: true, mode: 448 });
+    fs8.appendFileSync(
+      path7.join(dir, "waiter.log"),
       `${(/* @__PURE__ */ new Date()).toISOString()} ${e instanceof Error ? e.stack ?? e.message : String(e)}
 `
     );
@@ -1001,7 +1088,7 @@ function releaseOwnLockSync(sid) {
   try {
     assertSessionId(sid);
     const lock = paths().waiterLock(sid);
-    if (lockPid(fs7.readFileSync(lock, "utf8")) === process.pid) fs7.rmSync(lock, { force: true });
+    if (lockPid(fs8.readFileSync(lock, "utf8")) === process.pid) fs8.rmSync(lock, { force: true });
   } catch {
   }
 }
@@ -1034,4 +1121,4 @@ async function main() {
 
 // src/bin/waiter.ts
 process.noDeprecation = true;
-void main();
+if (!await delegateToNewer("waiter.mjs", import.meta.url)) void main();

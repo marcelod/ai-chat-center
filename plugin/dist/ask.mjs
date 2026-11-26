@@ -1,9 +1,10 @@
 import { createRequire as __acc_createRequire } from 'node:module';
 const require = __acc_createRequire(import.meta.url);
 
-// src/hooks/ask.ts
-import fs2 from "node:fs";
-import path5 from "node:path";
+// src/hooks/delegate.ts
+import fs from "node:fs";
+import path2 from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // src/core/paths.ts
 import os from "node:os";
@@ -45,14 +46,103 @@ function paths() {
   };
 }
 
+// src/core/version.ts
+var VERSION = "0.6.6";
+
+// src/hooks/delegate.ts
+var FLAG = /* @__PURE__ */ Symbol.for("ai-chat-center.delegated");
+var flags = globalThis;
+var VERSION_RE = /^\d+\.\d+\.\d+$/;
+function compareVersions(a, b) {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] < pb[i] ? -1 : 1;
+  return 0;
+}
+var recordFile = () => path2.join(paths().home, "plugin.json");
+function readRecord() {
+  try {
+    const r = JSON.parse(fs.readFileSync(recordFile(), "utf8"));
+    if (typeof r?.version !== "string" || !VERSION_RE.test(r.version) || typeof r.dist !== "string") return null;
+    return { version: r.version, dist: r.dist };
+  } catch {
+    return null;
+  }
+}
+function writeRecord(rec) {
+  try {
+    fs.mkdirSync(paths().home, { recursive: true, mode: 448 });
+    const tmp = `${recordFile()}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(rec), { mode: 384 });
+    fs.renameSync(tmp, recordFile());
+  } catch {
+  }
+}
+function pluginVersionOf(dist) {
+  try {
+    const v = JSON.parse(fs.readFileSync(path2.join(dist, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
+    return typeof v === "string" && VERSION_RE.test(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+function newerScript(entry, ownDist, version = VERSION) {
+  if (flags[FLAG]) return null;
+  let own;
+  try {
+    own = fs.realpathSync(ownDist);
+  } catch {
+    return null;
+  }
+  const rec = readRecord();
+  let target = null;
+  if (rec && compareVersions(rec.version, version) > 0) {
+    try {
+      const dist = fs.realpathSync(rec.dist);
+      const versionDir = path2.dirname(dist);
+      const siblings = path2.dirname(path2.dirname(own)) === path2.dirname(versionDir) && dist !== own;
+      if (siblings && path2.basename(dist) === "dist" && path2.basename(versionDir) === rec.version && pluginVersionOf(dist) === rec.version && fs.statSync(path2.join(dist, entry)).isFile()) {
+        target = path2.join(dist, entry);
+      }
+    } catch {
+      target = null;
+    }
+  }
+  if (target) return target;
+  const same = rec && rec.version === version && rec.dist === own;
+  if (!same && path2.basename(path2.dirname(own)) === version && pluginVersionOf(own) === version) writeRecord({ version, dist: own });
+  return null;
+}
+async function delegateToNewer(entry, moduleUrl) {
+  let target = null;
+  try {
+    target = newerScript(entry, path2.dirname(fileURLToPath(moduleUrl)));
+  } catch {
+    return false;
+  }
+  if (!target) return false;
+  flags[FLAG] = VERSION;
+  try {
+    await import(pathToFileURL(target).href);
+    return true;
+  } catch {
+    flags[FLAG] = void 0;
+    return false;
+  }
+}
+
+// src/hooks/ask.ts
+import fs3 from "node:fs";
+import path6 from "node:path";
+
 // src/core/fsAtomic.ts
-import fs from "node:fs/promises";
-import path2 from "node:path";
+import fs2 from "node:fs/promises";
+import path3 from "node:path";
 import crypto from "node:crypto";
 var DIR_MODE = 448;
 var FILE_MODE = 384;
 async function ensureDir(dir) {
-  await fs.mkdir(dir, { recursive: true, mode: DIR_MODE });
+  await fs2.mkdir(dir, { recursive: true, mode: DIR_MODE });
 }
 var TRANSIENT = /* @__PURE__ */ new Set(["EPERM", "EBUSY", "EACCES"]);
 var RETRIES = 5;
@@ -67,29 +157,29 @@ async function withFsRetry(op) {
   }
 }
 function removeFile(file) {
-  return withFsRetry(() => fs.rm(file, { force: true }));
+  return withFsRetry(() => fs2.rm(file, { force: true }));
 }
 async function writeJsonAtomic(file, data) {
-  await ensureDir(path2.dirname(file));
+  await ensureDir(path3.dirname(file));
   const tmp = `${file}.${crypto.randomUUID()}.tmp`;
   try {
-    await fs.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: "utf8", mode: FILE_MODE });
-    await withFsRetry(() => fs.rename(tmp, file));
+    await fs2.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: "utf8", mode: FILE_MODE });
+    await withFsRetry(() => fs2.rename(tmp, file));
   } catch (e) {
-    await fs.rm(tmp, { force: true });
+    await fs2.rm(tmp, { force: true });
     throw e;
   }
 }
 async function readJson(file) {
   try {
-    return JSON.parse(await fs.readFile(file, "utf8"));
+    return JSON.parse(await fs2.readFile(file, "utf8"));
   } catch {
     return null;
   }
 }
 
 // src/core/registry.ts
-import path3 from "node:path";
+import path4 from "node:path";
 
 // src/core/lock.ts
 function isAlive(pid) {
@@ -119,7 +209,7 @@ var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
 // src/core/registry.ts
 function regFile(sid) {
   assertSessionId(sid);
-  return path3.join(paths().sessionsDir, `${sid}.json`);
+  return path4.join(paths().sessionsDir, `${sid}.json`);
 }
 var isActive = (r) => !r.disconnectedAt;
 async function getRegistration(sid) {
@@ -150,7 +240,7 @@ async function appPresent(now = Date.now()) {
 
 // src/core/questions.ts
 import { rmSync } from "node:fs";
-import path4 from "node:path";
+import path5 from "node:path";
 var TOOL_USE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 function assertToolUseId(id) {
   if (typeof id !== "string" || !TOOL_USE_ID_RE.test(id)) {
@@ -179,8 +269,8 @@ function parseQuestions(input) {
   }
   return out;
 }
-var pendingFile = (sid, id) => (assertToolUseId(id), path4.join(paths().questionsDir(sid), `${id}.json`));
-var answerFile = (sid, id) => (assertToolUseId(id), path4.join(paths().questionsDir(sid), `${id}.answer.json`));
+var pendingFile = (sid, id) => (assertToolUseId(id), path5.join(paths().questionsDir(sid), `${id}.json`));
+var answerFile = (sid, id) => (assertToolUseId(id), path5.join(paths().questionsDir(sid), `${id}.answer.json`));
 async function putPending(sid, q) {
   await writeJsonAtomic(pendingFile(sid, q.toolUseId), q);
 }
@@ -233,7 +323,7 @@ function abortActiveSync() {
   }
   if (!a.waiting) return;
   try {
-    fs2.rmSync(paths().waitingFile(a.sid), { force: true });
+    fs3.rmSync(paths().waitingFile(a.sid), { force: true });
   } catch (e) {
     logError(e);
   }
@@ -320,8 +410,8 @@ async function cleanup(sid, id, released) {
 function logError(e) {
   try {
     const dir = paths().logDir;
-    fs2.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
-    fs2.appendFileSync(path5.join(dir, "ask.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${e instanceof Error ? e.stack ?? e.message : String(e)}
+    fs3.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+    fs3.appendFileSync(path6.join(dir, "ask.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${e instanceof Error ? e.stack ?? e.message : String(e)}
 `);
   } catch {
   }
@@ -354,4 +444,4 @@ async function main() {
 
 // src/bin/ask.ts
 process.noDeprecation = true;
-void main();
+if (!await delegateToNewer("ask.mjs", import.meta.url)) void main();

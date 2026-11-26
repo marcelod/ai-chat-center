@@ -1,12 +1,8 @@
 # Pendências
 
-Itens combinados e deixados para depois. Estado em 2026-11-25, versão 0.6.4. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
+Itens combinados e deixados para depois. Estado em 2026-11-25, versão 0.6.6. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
 
 ## A fazer
-
-### Atualização do plugin valer para todas as sessões
-
-Pedido em 2026-11-25. O hub e o app já são globais (o hub mais novo substitui o antigo). Os hooks e o waiter de cada sessão rodam da pasta da versão carregada quando a sessão abriu, até um `/reload-plugins` (comportamento do Claude Code). Caminho possível: hooks finos que executam o código de um lugar fixo (como a status line em `~/.ai-chat-center/bin`), atualizado pelo `/cc` mais novo; delicado (código não carregado pela sessão, compatibilidade de protocolo). Já existe o aviso simples: a versão do plugin fica amarela com ↻ na barra sob o campo de mensagem quando difere da do hub (0.6.5).
 
 ### Instalação mais fácil no Windows
 
@@ -18,22 +14,6 @@ No primeiro teste no Windows (2026-11-24), o atalho funcionou, mas a pessoa teve
 
 Pedido em 2026-11-25. Investigado na rodada 0.6.2 (Claude Code 2.1.332), **adiado**: a sugestão não fica na transcrição (só `promptSource: "suggestion_accepted"` quando aceita), não fica em `~/.claude` e nenhum hook a entrega. `--prompt-suggestions` só entrega a sugestão no modo `-p`/SDK (`stream-json`), o que exigiria outro modo de sessão (sem `--bg`, `/cc` e attach). Caminho possível depois da ideia 2 (ver a tela da sessão): ler a linha cinza do `claude logs <id>`, com o filtro de token; frágil a cada versão. Bônus barato, se o autor quiser: marcar no app as mensagens com `suggestion_accepted`. Cuidado registrado: `claude --bg --help` cria uma sessão de verdade; para ver a ajuda, use `claude --help`.
 
-### Blocos de código: quebrar linha e botão Copiar
-
-Visto em 2026-11-25 (print do autor): um bloco de código longo (um prompt para colar em outra conversa) fica com rolagem lateral e corta o texto à direita. Ideia: botão "Copiar" no canto do bloco (copia o texto puro); para blocos de texto ou sem linguagem, quebrar as linhas; para código, manter a rolagem, mas talvez com um botão para alternar a quebra.
-
-### Mensagem "Claude → agente" sem balão sobre o fundo
-
-Visto em 2026-11-25 (print do autor, 0.6.4): numa conversa com fundo, a mensagem em que o Claude pede algo a um agente ("Claude → nome", com "Show all") parece solta, sem balão. Causa no código: `ToAgentBubble` (`ui/src/components/MessageBubble.tsx`) só tem borda tracejada e texto apagado (`text-muted`), sem cor de fundo; as outras mensagens têm `bg-surface` ou `bg-field`. Sobre o fundo da conversa, a borda quase some. Ideia: dar um fundo ao balão (por exemplo `bg-field` ou `bg-surface` com um pouco de transparência), mantendo a borda tracejada para diferenciar, e conferir nos dois temas e com e sem fundo. Conferir também o contraste do texto apagado sobre o fundo.
-
-### Cor do fundo também no nome da conversa
-
-Ideia de colegas do autor (2026-11-25). Quando a pessoa escolhe um fundo para a conversa, a cor dele aparece também na identificação da conversa: no cabeçalho (o círculo com as iniciais e/ou o nome) e na lista à esquerda (o círculo das iniciais). Ajuda a achar a conversa na lista pela cor. Detalhes:
-
-- Cor sólida: usar a cor (`COLOR_CSS` em `ui/src/components/backgrounds.ts`). Gradiente: usar o próprio gradiente no círculo, ou a primeira cor. Imagem: tirar a cor média da imagem, ou manter o círculo padrão.
-- Preferir pintar o círculo das iniciais, ou uma barrinha ao lado do nome, em vez do texto do nome: texto colorido perde contraste em alguns tons (o `sand` e o `mint` no tema claro). Conferir o contraste das iniciais brancas sobre cada cor, nos dois temas.
-- Sem fundo escolhido, fica como hoje.
-
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
@@ -43,10 +23,6 @@ Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
 Medido de novo em 2026-11-25 com 4 sessões: um waiter por sessão, nenhum sobrando, cerca de 51 MB privados no total (o monitor mostra ~60 MB por processo porque conta o binário do Node, compartilhado). Caminhos: enxugar o waiter em Node (3 a 7 MB por sessão a menos, risco baixo) ou um waiter `sh` + `curl` no Linux e no macOS (1 a 2 MB, rodada grande, muda o modelo de segurança).
 
 O que incomodou o autor foi outra coisa: nas duas primeiras execuções, uma em cada notebook, a máquina ficou um pouco lenta. Suspeitos a medir: o primeiro `/cc` (o hub sobe, abre a janela do Chrome, cria o atalho) e as consultas ao `claude agents`. **Verificar com calma mais pra frente**, a pedido do autor.
-
-### CPU do hub com tudo parado
-
-Medido em 2026-11-25: com uma sessão trabalhando, 11 consultas ao `claude agents` por minuto e 2,6% de CPU (esperado). Com tudo parado, 6 por minuto (esperado: 2) e 1,9% de CPU. Causa provável, a confirmar: a regra do intervalo (`liveTtl` em `src/hub/provider.ts`) lê o `busy` cru do `claude agents`, enquanto a tela usa a marca de turno do hub; uma sessão em segundo plano parada pode aparecer como `busy`. Correção pequena, **aguarda o OK do autor**.
 
 ## Ideias
 
@@ -88,6 +64,11 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## A testar no uso
 
+- 0.6.6:
+  - Atualização para todas as sessões: só vale a partir da 0.6.6 (as sessões abertas numa versão anterior não têm o código novo e ainda precisam de `/reload-plugins` uma vez). Na próxima atualização instalada pelo marketplace (0.6.7 ou maior), conferir que uma sessão aberta antes passa a mostrar a versão nova na barra sob o campo de mensagem depois do próximo turno, sem `/reload-plugins`. Um waiter já esperando continua no código antigo até o próximo evento. Com o plugin carregado da pasta do repositório (`plugin/`) nada muda: todas as sessões já leem os mesmos arquivos. Voltar para uma versão mais antiga não vale enquanto a pasta da mais nova existir no cache: apagar `~/.ai-chat-center/plugin.json` e a pasta da versão mais nova.
+  - CPU do hub: com tudo parado (inclusive uma sessão em segundo plano com tarefa rodando depois do turno), conferir que o hub consulta o `claude agents` cerca de 2 vezes por minuto. A causa não foi confirmada ao vivo: se continuar em 6, medir de novo quem consulta (os waiters também consultam em alguns casos).
+  - Blocos de código com Copiar e Quebrar linhas; balão da mensagem "Claude → agente" sobre o fundo; cor do fundo no círculo das iniciais (lista e cabeçalho): conferir nos dois temas.
+
 - 0.6.5: barra sob o campo de mensagem (chip de modelo · esforço com lista e submenu de esforço, modo, versão do plugin) em tela larga e no celular; o menu abre para cima sem sair da tela; sessão de terminal mostra o chip apagado com a dica ao passar o mouse.
 
 - 0.6.3: diff escondido por padrão ("Mostrar alterações dos arquivos" nas configurações liga); numa sessão criada pelo "+", escolher modelo e esforço logo de cara e conferir que são aplicados quando o primeiro `/cc` termina (sem erro 409 entre `/model` e `/effort`); CI do Windows deve passar depois do push.
@@ -128,6 +109,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## Feito
 
+- 0.6.6: sessões abertas antes de uma atualização passam a rodar a versão mais nova instalada (a partir da próxima); o hub não encurta o intervalo do `claude agents` por um "trabalhando" que a tela mostra como parado; blocos de código com Copiar e Quebrar linhas (texto sem linguagem já quebra); balão com fundo na mensagem "Claude → agente"; a cor ou o degradê do fundo pinta o círculo das iniciais, com iniciais claras ou escuras conforme o contraste.
 - 0.6.5: cabeçalho da conversa enxuto (nome, pasta, attach e branch); modelo, esforço, modo e versão do plugin foram para a direita da dica do teclado, sob o campo de mensagem; o chip do modelo abre a lista de modelos e, no último item, os níveis de esforço; a versão do Claude Code fica no texto ao passar o mouse sobre a do plugin. Desenho aprovado em 2026-11-25.
 - 0.6.4: mensagens dos agentes (e do Claude para eles) vêm recolhidas na primeira linha, com "Ver tudo" para abrir.
 - 0.6.3: CI do Windows corrigido (testes de Linux/macOS e marca de pergunta que ficava presa quando o hook era encerrado à força no Windows); diff dos arquivos desligado por padrão, com opção nas configurações; modelo e esforço escolhidos enquanto a sessão trabalha são aplicados quando ela fica parada.
