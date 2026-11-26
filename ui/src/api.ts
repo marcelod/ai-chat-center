@@ -1,4 +1,4 @@
-import type { ChatEvent, ProviderChange, SessionsResponse, StoppedBackground } from '@shared/types';
+import type { ChatEvent, ProviderChange, SessionsResponse, StoppedBackground, SubagentInfo } from '@shared/types';
 import type { BackgroundPreset } from '@shared/background';
 import type { SearchHit } from '@shared/search';
 import type { WindowSize } from '@shared/windowSize';
@@ -409,6 +409,33 @@ export async function getBackgroundImage(sid: string): Promise<Blob> {
   if (res.status === 401) dropToken();
   if (!res.ok) throw new ApiError(res.status);
   return res.blob();
+}
+/**
+ * A Markdown file or an image of the session, for the side panel (fetched with the token: show an image
+ * from a blob: URL). Rejects with ApiError (`code`: file-not-found, file-outside, file-type, file-too-large…).
+ */
+export async function getSessionFile(sid: string, path: string): Promise<Blob> {
+  if (pairing) await pairing;
+  const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/file?path=${encodeURIComponent(path)}`, {
+    headers: { Authorization: `Bearer ${token ?? ''}` },
+  });
+  if (res.status === 401) dropToken();
+  if (!res.ok) throw new ApiError(res.status, await errorCode(res));
+  return res.blob();
+}
+/** Which of the paths (cited in the conversation) the side panel can open. */
+export async function filesExist(sid: string, paths: string[]): Promise<string[]> {
+  return (await request<{ exists: string[] }>(`/api/sessions/${encodeURIComponent(sid)}/files/exists`, { method: 'POST', body: JSON.stringify({ paths }) })).exists;
+}
+/** The side panel's loaders bound to one session (see components/SidePanel). */
+export function panelApi(sid: string) {
+  return {
+    file: (path: string) => getSessionFile(sid, path),
+    filesExist: (paths: string[]) => filesExist(sid, paths),
+    subagents: async () => (await request<{ subagents: SubagentInfo[] }>(`/api/sessions/${encodeURIComponent(sid)}/subagents`)).subagents,
+    subagentEvents: (id: string) => request<ChatEvent[]>(`/api/sessions/${encodeURIComponent(sid)}/subagents/${encodeURIComponent(id)}/events`),
+    screen: async () => (await request<{ text: string }>(`/api/sessions/${encodeURIComponent(sid)}/screen`)).text,
+  };
 }
 export const getConfig = () => request<UiConfig>('/api/config');
 export const setConfig = (c: Pick<UiConfig, 'language'>) =>

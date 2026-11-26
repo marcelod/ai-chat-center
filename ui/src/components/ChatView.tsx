@@ -17,6 +17,10 @@ import { ChatBackground } from './ChatBackground';
 import { useCommandProgress } from '../useCommandProgress';
 import { SessionControls } from './SessionControls';
 import { ContextMeter } from './ContextMeter';
+import { SidePanel, type PanelApi, type PanelItem } from './SidePanel';
+import { SubagentList, SubagentTranscript } from './SubagentsPanel';
+import { ScreenView } from './ScreenPanel';
+import { FileLinksProvider, useExistingFiles, type FileLinks } from '../fileLinks';
 import { AgentBubble, RecapCard, AssistantBubble, ToAgentBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
 
 type Props = {
@@ -59,6 +63,10 @@ type Props = {
   onRespawn?: () => Promise<void>;
   /** `claude rm` on a running background session, also out of the app (⋮ menu, after a confirmation). */
   onRmBackground?: () => Promise<void>;
+  /** The side panel's loaders for this session (spec 2026-11-26-side-panel); absent: no panel, no file links. */
+  panel?: PanelApi;
+  /** For tests: the clock of the subagent times. */
+  now?: () => number;
   onBack: () => void;
 };
 
@@ -139,23 +147,44 @@ function SessionBar({ session, hubVersion, runCommand }: { session: SessionView;
   );
 }
 
-function StatusPill({ state, asking }: { state: SessionView['state']; asking: boolean }) {
+/** The session state; a button that opens the subagents in the side panel when `onOpen` is given. */
+function StatusPill({ state, asking, agents = 0, onOpen }: { state: SessionView['state']; asking: boolean; agents?: number; onOpen?: () => void }) {
   const t = useT();
-  const label = asking ? t('ui.question.waiting') : t(`ui.status.${state}`);
+  // The turn ended but subagents still work: a state of its own, never "working" (spec 2026-11-26-side-panel).
+  const agentsOnly = state === 'idle' && agents > 0;
+  const label = asking ? t('ui.question.waiting') : agentsOnly ? t('ui.status.agents', { n: agents }) : t(`ui.status.${state}`);
   const style: Record<SessionView['state'], string> = {
     busy: 'bg-busy-bg text-busy-text',
     waiting: 'bg-warn-bg text-waiting-text',
     idle: 'bg-field text-muted',
     disconnected: 'bg-field text-muted',
   };
-  return (
-    <span
-      data-state={state}
-      className={`ml-auto flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${style[state]}`}
-    >
+  const cls = `ml-auto flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${agentsOnly ? 'bg-busy-bg text-busy-text' : style[state]}`;
+  const inner = (
+    <>
       {state === 'busy' && <span className="h-2 w-2 rounded-full bg-busy" />}
+      {agentsOnly && <span aria-hidden="true" className="h-2 w-2 rounded-full border-2 border-busy" />}
       {state === 'waiting' && <WarningIcon width={14} height={14} />}
       {label}
+    </>
+  );
+  if (onOpen) {
+    return (
+      <button
+        type="button"
+        data-state={agentsOnly ? 'agents' : state}
+        onClick={onOpen}
+        aria-label={t('ui.panel.showSubagents')}
+        title={t('ui.panel.showSubagents')}
+        className={`${cls} min-h-9 hover:brightness-95`}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <span data-state={agentsOnly ? 'agents' : state} className={cls}>
+      {inner}
     </span>
   );
 }
@@ -301,6 +330,7 @@ function SessionTitle({
   onStop,
   onRespawn,
   onRmBackground,
+  onScreen,
 }: {
   session: SessionView;
   name: string;
@@ -316,6 +346,7 @@ function SessionTitle({
   onStop?: () => Promise<void>;
   onRespawn?: () => Promise<void>;
   onRmBackground?: () => Promise<void>;
+  onScreen?: () => void;
 }) {
   const t = useT();
   const [picking, setPicking] = useState(false);
@@ -421,6 +452,7 @@ function SessionTitle({
         onStop={onStop}
         onRespawn={onRespawn}
         onRmBackground={onRmBackground}
+        onScreen={onScreen}
       />
       {picking && onSetBackground && onUploadBackground && (
         <BackgroundPicker
@@ -437,7 +469,7 @@ function SessionTitle({
   );
 }
 
-export function ChatView({ hubVersion, initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, onOpenTerminal, onStop, onRespawn, onRmBackground, ...bg }: Props) {
+export function ChatView({ hubVersion, initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, onOpenTerminal, onStop, onRespawn, onRmBackground, panel, now = Date.now, ...bg }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -451,6 +483,26 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
   }, [session.name]);
 
   const progress = useCommandProgress(session, events);
+  // The side panel: a stack of what was opened in it (Back pops, X and Esc close it all).
+  const [panelStack, setPanelStack] = useState<PanelItem[]>([]);
+  const openPanel = (item: PanelItem) => setPanelStack((st) => [...st, item]);
+  const closePanel = () => setPanelStack([]);
+  useEffect(() => setPanelStack([]), [session.sessionId]);
+  const panelOpen = panelStack.length > 0 && !!panel;
+  useEffect(() => {
+    if (!panelOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (e.key !== 'Escape' || e.defaultPrevented || el?.closest?.('input, textarea, [role="menu"], [role="dialog"]')) return;
+      setPanelStack([]);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [panelOpen]);
+  const existing = useExistingFiles(session.sessionId, events, panel?.filesExist);
+  const fileLinks: FileLinks | null = panel
+    ? { isLinkable: (p) => existing.has(p), open: (p) => openPanel({ kind: 'file', path: p }) }
+    : null;
   // Search in this conversation (spec 2026-11-25-app-batch): null while the search bar is closed.
   const [search, setSearch] = useState<string | null>(initialSearch ?? null);
   const sq = (search ?? '').trim();
@@ -546,8 +598,8 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
     }
   };
 
-  return (
-    <section className="flex h-full min-h-0 flex-col" aria-label={shownName}>
+  const view = (
+    <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col" aria-label={shownName}>
       <header className="flex items-center gap-3 border-b border-line bg-surface px-3 py-3 md:px-5">
         <button
           type="button"
@@ -580,6 +632,7 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
             onStop={liveBg ? onStop : undefined}
             onRespawn={liveBg ? respawn : undefined}
             onRmBackground={liveBg ? onRmBackground : undefined}
+            onScreen={panel?.screen && session.bgId && state !== 'disconnected' ? () => setPanelStack([{ kind: 'screen' }]) : undefined}
           />
           <div data-testid="session-info" className="flex min-w-0 flex-col overflow-hidden font-mono text-xs text-muted md:flex-row md:items-baseline md:gap-1.5">
             <span className="min-w-0 truncate md:min-w-[6ch]">{session.cwd}</span>
@@ -601,7 +654,12 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
         >
           <SearchIcon width={18} height={18} />
         </button>
-        <StatusPill state={state} asking={session.waitingKind === 'question'} />
+        <StatusPill
+          state={state}
+          asking={session.waitingKind === 'question'}
+          agents={session.agentsWorking}
+          onOpen={panel?.subagents ? () => setPanelStack([{ kind: 'subagents' }]) : undefined}
+        />
       </header>
       {search !== null && (
         <div className="flex items-center gap-2 border-b border-line bg-surface px-3 py-2 md:px-5">
@@ -785,5 +843,33 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
         onCommand={session.bgId && state !== 'disconnected' ? runCommand : undefined} attachId={session.bgId} terminalHint={!session.bgId && state !== 'disconnected'}
         controls={<SessionBar session={session} hubVersion={hubVersion} runCommand={runCommand} />} />
     </section>
+  );
+  if (!panel || !fileLinks) return view;
+  return (
+    <FileLinksProvider value={fileLinks}>
+      <div className="flex h-full min-h-0">
+        {view}
+        {panelOpen && (
+          <SidePanel
+            stack={panelStack}
+            api={panel}
+            onBack={() => setPanelStack((st) => st.slice(0, -1))}
+            onClose={closePanel}
+            renderOther={(item) => {
+              if (item.kind === 'subagents' && panel.subagents) {
+                const load = panel.subagents;
+                return <SubagentList load={load} now={now} onOpen={(a) => openPanel({ kind: 'subagent', id: a.id, title: a.description || a.agentType || a.id })} />;
+              }
+              if (item.kind === 'subagent' && panel.subagentEvents) {
+                const load = panel.subagentEvents;
+                return <SubagentTranscript key={item.id} title={item.title} load={() => load(item.id)} />;
+              }
+              if (item.kind === 'screen' && panel.screen) return <ScreenView load={panel.screen} />;
+              return null;
+            }}
+          />
+        )}
+      </div>
+    </FileLinksProvider>
   );
 }

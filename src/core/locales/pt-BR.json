@@ -18,6 +18,44 @@
     "usageFailed": "AI Chat Center: não foi possível alterar a status line no settings.json. Veja {log}"
   },
   "ui": {
+    "panel": {
+      "label": "Painel lateral",
+      "close": "Fechar painel",
+      "loading": "Carregando…",
+      "notFound": "Arquivo não encontrado.",
+      "tooLarge": "Este arquivo é grande demais para mostrar.",
+      "notAllowed": "Este arquivo não pode ser mostrado aqui.",
+      "loadFailed": "Não foi possível carregar.",
+      "image": "imagem",
+      "imageBlocked": "Imagens dentro de arquivos não são carregadas",
+      "openFile": "Abrir {name}",
+      "subagents": "Subagentes",
+      "showSubagents": "Ver subagentes",
+      "noSubagents": "Nenhum subagente nesta conversa.",
+      "noMessages": "Nada ainda.",
+      "background": "segundo plano",
+      "workingFor": "Trabalhando há {d}",
+      "ran": "Rodou {d}",
+      "noNewsFor": "Sem novidade há {d}",
+      "lastTool": "Última: {tool}",
+      "status": {
+        "running": "Trabalhando",
+        "finished": "Terminado",
+        "stale": "Sem novidade"
+      },
+      "duration": {
+        "lessThanMinute": "menos de um minuto",
+        "minutes": "{n} min",
+        "hours": "{h} h {m} min"
+      },
+      "agentsWorking": "{n} subagentes trabalhando",
+      "screen": "Tela da sessão",
+      "refresh": "Atualizar",
+      "updatedAt": "Atualizada {time}",
+      "screenNotBackground": "Só dá para ver a tela de uma sessão em segundo plano.",
+      "screenWindows": "Ainda não disponível no Windows.",
+      "screenFailed": "Não foi possível ler a tela da sessão."
+    },
     "rename": {
       "label": "Renomear sessão",
       "failed": "Não foi possível renomear"
@@ -124,6 +162,7 @@
     },
     "status": {
       "busy": "trabalhando…",
+      "agents": "agentes trabalhando ({n})",
       "idle": "parada",
       "waiting": "aguardando você no terminal",
       "disconnected": "desconectada — digite /cc de novo"

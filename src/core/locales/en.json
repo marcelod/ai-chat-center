@@ -18,6 +18,44 @@
     "usageFailed": "AI Chat Center: could not change the status line in settings.json. See {log}"
   },
   "ui": {
+    "panel": {
+      "label": "Side panel",
+      "close": "Close panel",
+      "loading": "Loading…",
+      "notFound": "File not found.",
+      "tooLarge": "This file is too large to show.",
+      "notAllowed": "This file can't be shown here.",
+      "loadFailed": "Couldn't load this.",
+      "image": "image",
+      "imageBlocked": "Images in files are not loaded",
+      "openFile": "Open {name}",
+      "subagents": "Subagents",
+      "showSubagents": "Show subagents",
+      "noSubagents": "No subagents in this conversation.",
+      "noMessages": "Nothing yet.",
+      "background": "background",
+      "workingFor": "Working for {d}",
+      "ran": "Ran {d}",
+      "noNewsFor": "No news for {d}",
+      "lastTool": "Last: {tool}",
+      "status": {
+        "running": "Working",
+        "finished": "Finished",
+        "stale": "No news"
+      },
+      "duration": {
+        "lessThanMinute": "less than a minute",
+        "minutes": "{n} min",
+        "hours": "{h} h {m} min"
+      },
+      "agentsWorking": "{n} subagents working",
+      "screen": "Session screen",
+      "refresh": "Refresh",
+      "updatedAt": "Updated {time}",
+      "screenNotBackground": "Only a background session's screen can be shown.",
+      "screenWindows": "Not available on Windows yet.",
+      "screenFailed": "Couldn't read the session screen."
+    },
     "rename": {
       "label": "Rename session",
       "failed": "Couldn't rename"
@@ -124,6 +162,7 @@
     },
     "status": {
       "busy": "working…",
+      "agents": "agents working ({n})",
       "idle": "idle",
       "waiting": "waiting for you in the terminal",
       "disconnected": "disconnected — type /cc again"

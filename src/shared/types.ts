@@ -35,6 +35,8 @@ export type ChatEvent =
       images?: number;
       /** Names of the files attached in the app (`[Attachment: <path>]` lines, taken out of `text`). */
       attachments?: string[];
+      /** The full paths of those files, in the same order (the side panel opens images by path). */
+      attachmentPaths?: string[];
       /** A `!` shell-mode command typed in the terminal (its output follows as an actions item). */
       shell?: true;
     }
@@ -131,6 +133,11 @@ export type SessionView = {
   bgId?: string;
   /** How full the context window is (active sessions, after the first reply). */
   context?: ContextUsage;
+  /**
+   * Subagents of this active session still working (not finished, wrote lately), e.g. launched in the
+   * background after the turn ended; absent when none.
+   */
+  agentsWorking?: number;
   /** The app asked to resume this ended session and it has not reconnected yet. */
   resuming?: true;
   /** Why the last resume from the app failed (output of `claude --bg`, or a timeout). */
@@ -166,3 +173,21 @@ export type Usage = { fiveHour?: UsageWindow; sevenDay?: UsageWindow; updatedAt:
 
 /** `hubVersion`: the AI Chat Center version the hub (and so the app) runs. */
 export type SessionsResponse = { connected: SessionView[]; others: LiveSession[]; usage?: Usage; hubVersion?: string };
+
+/** A subagent of a session, for the side panel (spec 2026-11-26-side-panel). */
+export type SubagentInfo = {
+  /** The id in `agent-<id>.jsonl`. */
+  id: string;
+  description: string;
+  agentType: string;
+  /** Short model name ("Opus 5.5"), when the meta names one. */
+  model?: string;
+  /** Launched in the background (the session's turn may end while it works). */
+  background: boolean;
+  /** finished: the meta says so; stale: not finished but no news for a while (never counted as working). */
+  status: 'running' | 'finished' | 'stale';
+  startedAt?: string;
+  lastActivityAt?: string;
+  /** The name of the last tool it called. */
+  lastTool?: string;
+};

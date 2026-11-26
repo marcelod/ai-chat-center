@@ -37,3 +37,13 @@ export function splitAttachments(text: string): { text: string; attachments: str
   if (attachments.length === 0) return { text, attachments };
   return { text: kept.join('\n').trim(), attachments };
 }
+
+/** The full paths of the attachment lines of a message, in order (the side panel opens images by path). */
+export function attachmentPaths(text: string): string[] {
+  const out: string[] = [];
+  for (const line of text.split('\n')) {
+    const m = LINE_RE.exec(line.replace(/\r$/, ''));
+    if (m) out.push(m[1]);
+  }
+  return out;
+}

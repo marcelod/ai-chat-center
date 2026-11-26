@@ -24,6 +24,8 @@ type Props = {
   onRespawn?: () => Promise<void>;
   /** `claude rm` on the background session, after a confirmation; also takes it out of the app (absent: no item). */
   onRmBackground?: () => Promise<void>;
+  /** Shows the session's terminal screen in the side panel (background sessions). */
+  onScreen?: () => void;
 };
 
 type Confirmable = 'disconnect' | 'remove' | 'stop' | 'rm';
@@ -40,7 +42,7 @@ function failText(t: T, key: string, e: unknown): string {
  * in place (a second click), never with window.confirm.
  */
 export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu(
-  { onRename, onRemove, onPin, pinned = false, onDisconnect, onBackground, onResume, onOpenTerminal, onStop, onRespawn, onRmBackground },
+  { onRename, onRemove, onPin, pinned = false, onDisconnect, onBackground, onResume, onOpenTerminal, onStop, onRespawn, onRmBackground, onScreen },
   button,
 ) {
   const t = useT();
@@ -90,7 +92,7 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu(
     };
   }, [open]);
 
-  if (!onRename && !onRemove && !onPin && !onDisconnect && !onBackground && !onResume && !onOpenTerminal && !onStop && !onRespawn && !onRmBackground) return null;
+  if (!onRename && !onRemove && !onPin && !onDisconnect && !onBackground && !onResume && !onOpenTerminal && !onStop && !onRespawn && !onRmBackground && !onScreen) return null;
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Tab') {
@@ -206,6 +208,20 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu(
               }}
             >
               {t('ui.chatMenu.openTerminal')}
+            </button>
+          )}
+          {onScreen && (
+            <button
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              className={itemCls}
+              onClick={() => {
+                close(false);
+                onScreen();
+              }}
+            >
+              {t('ui.panel.screen')}
             </button>
           )}
           {onRename && (

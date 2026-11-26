@@ -19,7 +19,7 @@ export class TranscriptReader {
   constructor(
     readonly path: string,
     readonly keys?: string[],
-    private readonly opts: { diffs?: boolean } = {},
+    private readonly opts: { diffs?: boolean; sidechain?: boolean } = {},
   ) {
     this.parser = new TranscriptParser(keys, opts);
   }
