@@ -10,8 +10,11 @@ export function SettingsMenu({
   onLanguage,
   usageHint = false,
   version,
+  onCleanup,
 }: {
   onLanguage: (l: Language) => void;
+  /** Opens the cleanup of stopped background sessions (absent: no button). */
+  onCleanup?: () => void;
   /** No usage recorded: say how to turn it on. */
   usageHint?: boolean;
   /** Version of AI Chat Center running (the hub's). */
@@ -105,6 +108,19 @@ export function SettingsMenu({
           <p id="acc-notify-status" className="text-xs text-muted">
             {t(`ui.notifications.status.${notifyStatus}`)}
           </p>
+          {onCleanup && (
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              onClick={() => {
+                setOpen(false);
+                onCleanup();
+              }}
+              className="mt-3 flex min-h-11 w-full items-center rounded-[10px] bg-field px-3 text-left text-sm hover:bg-line"
+            >
+              {t('ui.stopped.open')}
+            </button>
+          )}
           {version && (
             <p data-testid="app-version" className="mt-3 text-xs text-muted">
               {t('ui.version', { v: version })}

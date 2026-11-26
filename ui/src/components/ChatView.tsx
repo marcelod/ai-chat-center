@@ -53,6 +53,12 @@ type Props = {
   onCommand?: (text: string) => Promise<void>;
   /** Opens the system terminal on a background session (`claude attach`); rejects with ApiError. */
   onOpenTerminal?: () => Promise<void>;
+  /** `claude stop` on a running background session (⋮ menu, after a confirmation); rejects with ApiError. */
+  onStop?: () => Promise<void>;
+  /** `claude respawn` on a running background session (⋮ menu); rejects with ApiError. */
+  onRespawn?: () => Promise<void>;
+  /** `claude rm` on a running background session, also out of the app (⋮ menu, after a confirmation). */
+  onRmBackground?: () => Promise<void>;
   onBack: () => void;
 };
 
@@ -292,6 +298,9 @@ function SessionTitle({
   onUploadBackground,
   onResume,
   onOpenTerminal,
+  onStop,
+  onRespawn,
+  onRmBackground,
 }: {
   session: SessionView;
   name: string;
@@ -304,6 +313,9 @@ function SessionTitle({
   onUploadBackground?: (file: File) => Promise<void>;
   onResume?: () => Promise<void>;
   onOpenTerminal?: () => void;
+  onStop?: () => Promise<void>;
+  onRespawn?: () => Promise<void>;
+  onRmBackground?: () => Promise<void>;
 }) {
   const t = useT();
   const [picking, setPicking] = useState(false);
@@ -406,6 +418,9 @@ function SessionTitle({
         onBackground={onSetBackground && onUploadBackground ? () => setPicking(true) : undefined}
         onResume={session.state === 'disconnected' && !session.resuming ? onResume : undefined}
         onOpenTerminal={onOpenTerminal}
+        onStop={onStop}
+        onRespawn={onRespawn}
+        onRmBackground={onRmBackground}
       />
       {picking && onSetBackground && onUploadBackground && (
         <BackgroundPicker
@@ -422,7 +437,7 @@ function SessionTitle({
   );
 }
 
-export function ChatView({ hubVersion, initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, onOpenTerminal, ...bg }: Props) {
+export function ChatView({ hubVersion, initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, onOpenTerminal, onStop, onRespawn, onRmBackground, ...bg }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -465,6 +480,20 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
           );
         }
       : undefined;
+  // Stop, restart and remove (spec 2026-11-26-stop-respawn-rm): only for a background session that still runs.
+  const liveBg = Boolean(session.bgId) && state !== 'disconnected';
+  const [respawned, setRespawned] = useState(false);
+  useEffect(() => {
+    if (!respawned) return;
+    const timer = setTimeout(() => setRespawned(false), 60_000);
+    return () => clearTimeout(timer);
+  }, [respawned]);
+  const respawn = onRespawn
+    ? async () => {
+        await onRespawn();
+        setRespawned(true);
+      }
+    : undefined;
   // A question Claude Code shows in its own dialog (answers from the app off, or a turn from the terminal).
   const terminalQuestion = state === 'waiting' && session.waitingKind === 'question' && !session.pendingQuestion;
 
@@ -474,7 +503,7 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [events, queued.length, state, loading, progress.run, terminal]);
+  }, [events, queued.length, state, loading, progress.run, terminal, respawned]);
 
   const onScroll = () => {
     const el = scroller.current;
@@ -548,6 +577,9 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
             onUploadBackground={bg.onUploadBackground}
             onResume={onResume}
             onOpenTerminal={openTerminal}
+            onStop={liveBg ? onStop : undefined}
+            onRespawn={liveBg ? respawn : undefined}
+            onRmBackground={liveBg ? onRmBackground : undefined}
           />
           <div data-testid="session-info" className="flex min-w-0 flex-col overflow-hidden font-mono text-xs text-muted md:flex-row md:items-baseline md:gap-1.5">
             <span className="min-w-0 truncate md:min-w-[6ch]">{session.cwd}</span>
@@ -730,6 +762,11 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
               )}
             </div>
           </div>
+        )}
+        {respawned && (
+          <p data-testid="respawn-notice" role="status" className="self-center rounded-2xl bg-field px-3 py-1 text-center text-xs text-muted">
+            {t('ui.chat.respawned')}
+          </p>
         )}
         {terminal && session.bgId && (
           <p

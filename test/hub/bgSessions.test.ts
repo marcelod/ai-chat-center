@@ -6,8 +6,10 @@ import {
   cleanEnv,
   configDirFor,
   CommandUnsupportedError,
+  isBgAction,
   isBgId,
   isEffort,
+  manageBackground,
   isModel,
   isSessionName,
   startInBackground,
@@ -130,6 +132,56 @@ describe('resumeInBackground', () => {
 
   it('refuses an invalid session id', async () => {
     await expect(resumeInBackground(reg({ sessionId: '../x' }), { spawn: recorder().spawn })).rejects.toThrow();
+  });
+});
+
+describe('manageBackground', () => {
+  it('runs claude stop|respawn|rm <id> from the home folder, without the shell, with a clean environment', async () => {
+    for (const action of ['stop', 'respawn', 'rm'] as const) {
+      const r = recorder((c) => c.emit('close', 0));
+      expect(await manageBackground(action, '5e1b5e9b', '/home/u/.claude', { spawn: r.spawn, platform: 'linux', env: { PATH: '/bin', CLAUDECODE: '1' }, home: '/home/u' })).toEqual({ ok: true });
+      const [call] = r.calls;
+      expect(call.cmd).toBe('claude');
+      expect(call.args).toEqual([action, '5e1b5e9b']);
+      expect(call.opts.cwd).toBe('/home/u');
+      expect(call.opts.shell).toBe(false);
+      expect(call.opts.env).toEqual({ PATH: '/bin' });
+    }
+  });
+
+  it('passes a custom CLAUDE_CONFIG_DIR', async () => {
+    const r = recorder((c) => c.emit('close', 0));
+    await manageBackground('stop', '5e1b5e9b', '/home/u/.claude-work', { spawn: r.spawn, platform: 'linux', env: {}, home: '/home/u' });
+    expect(r.calls[0].opts.env).toEqual({ CLAUDE_CONFIG_DIR: '/home/u/.claude-work' });
+  });
+
+  it('Windows: one command line through the shell', async () => {
+    const r = recorder((c) => c.emit('close', 0));
+    await manageBackground('rm', '5e1b5e9b', undefined, { spawn: r.spawn, platform: 'win32', env: {}, home: 'C:\\Users\\u' });
+    expect(r.calls[0].cmd).toBe('claude rm 5e1b5e9b');
+    expect(r.calls[0].args).toEqual([]);
+    expect(r.calls[0].opts.shell).toBe(true);
+  });
+
+  it('a refusal gives the output; a hang is killed after the timeout', async () => {
+    const refused = recorder((c) => {
+      c.stdout.write('\x1b[1mNot safe to remove:\x1b[0m unpushed commits\n');
+      setImmediate(() => c.emit('close', 1));
+    });
+    expect(await manageBackground('rm', '5e1b5e9b', undefined, { spawn: refused.spawn, platform: 'linux', env: {} })).toEqual({ ok: false, error: 'Not safe to remove: unpushed commits' });
+    const hang = recorder();
+    const res = await manageBackground('stop', '5e1b5e9b', undefined, { spawn: hang.spawn, platform: 'linux', env: {}, timeoutMs: 20 });
+    expect(res).toEqual({ ok: false, error: 'claude stop did not answer in 0 s' });
+    expect(hang.calls[0].child.killed).toBe(true);
+  });
+
+  it('refuses an invalid id or action before running anything', async () => {
+    const r = recorder();
+    await expect(manageBackground('stop', '5e1b;rm -rf', undefined, { spawn: r.spawn })).rejects.toThrow();
+    await expect(manageBackground('kill' as never, '5e1b5e9b', undefined, { spawn: r.spawn })).rejects.toThrow();
+    expect(r.calls).toHaveLength(0);
+    expect(isBgAction('respawn')).toBe(true);
+    expect(isBgAction('attach')).toBe(false);
   });
 });
 

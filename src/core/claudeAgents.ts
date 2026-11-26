@@ -12,12 +12,14 @@ import os from 'node:os';
  * `shell: true`, and a waiter's stderr is the very text Claude receives. The line is constant, so
  * nothing needs escaping.
  */
-export function runClaudeAgentsJson(platform: NodeJS.Platform = process.platform): Promise<string> {
+export function runClaudeAgentsJson(platform: NodeJS.Platform = process.platform, all = false): Promise<string> {
   const win = platform === 'win32';
+  // `--all`: also the background sessions that are no longer running (stopped or finished).
+  const argv = all ? ['agents', '--json', '--all'] : ['agents', '--json'];
   return new Promise((resolve, reject) => {
     execFile(
-      win ? 'claude agents --json' : 'claude',
-      win ? [] : ['agents', '--json'],
+      win ? `claude ${argv.join(' ')}` : 'claude',
+      win ? [] : argv,
       { cwd: os.homedir(), shell: win, windowsHide: true, timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => (err ? reject(err) : resolve(String(stdout))),
     );

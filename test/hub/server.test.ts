@@ -18,7 +18,7 @@ import { putPending, readAnswer } from '../../src/core/questions.js';
 import { paths } from '../../src/core/paths.js';
 import { getDisplayName } from '../../src/core/names.js';
 import { isPinned } from '../../src/core/pins.js';
-import { register, markDisconnected, markRemoved, getRegistration, isRemoved } from '../../src/core/registry.js';
+import { register, markDisconnected, markRemoved, getRegistration, isActive, isRemoved } from '../../src/core/registry.js';
 
 const TOKEN = 'a'.repeat(64);
 let home: string;
@@ -1163,6 +1163,152 @@ describe('open-terminal endpoint (background sessions)', () => {
     const r = await post(u);
     expect(r.status).toBe(409);
     expect(JSON.parse(r.body).code).toBe('folder-missing');
+  });
+});
+
+describe('stop, respawn and rm endpoints (spec 2026-11-26-stop-respawn-rm)', () => {
+  const post = (u: URL, action: string, sid = 's1', headers: Record<string, string> = auth) => req(u, `/api/sessions/${sid}/${action}`, { method: 'POST', headers });
+  const bgLive = (over: Partial<LiveSession> = {}): LiveSession => ({ pid: 7, cwd: '/x', kind: 'background', bgId: '5e1b5e9b', sessionId: 's1', name: 'n', status: 'idle', ...over });
+  const ok = () => vi.fn(async (_a: string, _id: string, _c?: string) => ({ ok: true as const }));
+  beforeEach(async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42, configDir: '/home/u/.claude-work' });
+  });
+
+  it('stop runs claude stop <bgId> with the session config dir and disconnects it at once', async () => {
+    const manage = ok();
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [bgLive()], manage } });
+    const r = await post(u, 'stop');
+    expect(r.status).toBe(200);
+    expect(manage).toHaveBeenCalledWith('stop', '5e1b5e9b', '/home/u/.claude-work');
+    const reg = (await getRegistration('s1'))!;
+    expect(reg.disconnectReason).toBe('exited');
+    expect(isRemoved(reg)).toBe(false);
+  });
+
+  it('respawn runs claude respawn <bgId>, keeps the session connected and tells the provider a restart is coming', async () => {
+    const manage = ok();
+    const expectRestart = vi.fn();
+    const u = await start(fakeProvider({ expectRestart }), { bg: { listLive: async () => [bgLive({ status: 'busy' })], manage } });
+    expect((await post(u, 'respawn')).status).toBe(200);
+    expect(manage).toHaveBeenCalledWith('respawn', '5e1b5e9b', '/home/u/.claude-work');
+    expect(expectRestart).toHaveBeenCalledWith('s1');
+    expect(isActive((await getRegistration('s1'))!)).toBe(true);
+  });
+
+  it('rm runs claude rm <bgId> and takes the session out of the app', async () => {
+    const manage = ok();
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [bgLive()], manage } });
+    expect((await post(u, 'rm')).status).toBe(200);
+    expect(manage).toHaveBeenCalledWith('rm', '5e1b5e9b', '/home/u/.claude-work');
+    expect(isRemoved((await getRegistration('s1'))!)).toBe(true);
+  });
+
+  it('rm of an ended session finds its short id among the stopped ones', async () => {
+    await markDisconnected('s1', 'exited');
+    const manage = ok();
+    const listStopped = async () => [{ bgId: 'abcdef01', sessionId: 's1', cwd: '/x', name: 'n' }];
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [], listStopped, manage } });
+    expect((await post(u, 'rm')).status).toBe(200);
+    expect(manage).toHaveBeenCalledWith('rm', 'abcdef01', '/home/u/.claude-work');
+    // stop and respawn need a running session
+    expect((await post(u, 'stop')).status).toBe(404);
+  });
+
+  it('409 not-background for an interactive session; 409 for a disconnected one; 503 when the lookup fails', async () => {
+    const manage = ok();
+    let list: LiveSession[] | null = [bgLive({ kind: 'interactive', bgId: undefined })];
+    const u = await start(fakeProvider(), { bg: { listLive: async () => list, listStopped: async () => [], manage } });
+    for (const a of ['stop', 'respawn', 'rm']) {
+      const r = await post(u, a);
+      expect(r.status).toBe(409);
+      expect(JSON.parse(r.body).code).toBe('not-background');
+    }
+    list = null;
+    expect((await post(u, 'stop')).status).toBe(503);
+    list = [bgLive()];
+    await markDisconnected('s1', 'off');
+    const r = await post(u, 'respawn');
+    expect(r.status).toBe(409);
+    expect(JSON.parse(r.body).code).toBe('session-disconnected');
+    expect(manage).not.toHaveBeenCalled();
+  });
+
+  it('a refusal of claude is 502 with its output, and the registration is untouched', async () => {
+    const u = await start(fakeProvider(), {
+      bg: { listLive: async () => [bgLive()], manage: async () => ({ ok: false as const, error: 'Not safe to remove: unpushed commits' }) },
+    });
+    const r = await post(u, 'rm');
+    expect(r.status).toBe(502);
+    expect(JSON.parse(r.body)).toEqual({ error: 'Not safe to remove: unpushed commits', code: 'claude-failed' });
+    expect(r.body).not.toContain(TOKEN);
+    const reg = (await getRegistration('s1'))!;
+    expect(isActive(reg)).toBe(true);
+    expect(isRemoved(reg)).toBe(false);
+  });
+
+  it('one action at a time per session', async () => {
+    let release!: () => void;
+    const manage = vi.fn(() => new Promise<{ ok: true }>((r) => (release = () => r({ ok: true }))));
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [bgLive()], manage } });
+    const first = post(u, 'respawn');
+    await vi.waitFor(() => expect(manage).toHaveBeenCalledTimes(1));
+    expect((await post(u, 'stop')).status).toBe(409);
+    release();
+    expect((await first).status).toBe(200);
+  });
+
+  it('404 unknown or removed; 401 without token; 403 foreign Origin; only POST', async () => {
+    const manage = ok();
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [bgLive()], manage } });
+    expect((await post(u, 'stop', 'nope')).status).toBe(404);
+    expect((await post(u, 'stop', 's1', {})).status).toBe(401);
+    expect((await post(u, 'stop', 's1', { ...auth, origin: 'http://evil.com' })).status).toBe(403);
+    expect((await req(u, '/api/sessions/s1/stop', { headers: auth })).status).toBe(404);
+    await markRemoved('s1');
+    expect((await post(u, 'rm')).status).toBe(404);
+    expect(manage).not.toHaveBeenCalled();
+  });
+});
+
+describe('stopped background sessions (spec 2026-11-26-stop-respawn-rm)', () => {
+  const stopped = [
+    { bgId: 'abcdef01', sessionId: 's1', cwd: '/x', name: 'old', state: 'done' },
+    { bgId: 'abcdef02', sessionId: 's9', cwd: '/y', name: 'other' },
+  ];
+  const rm = (u: URL, id: string, headers: Record<string, string> = auth) => req(u, `/api/background/${id}/rm`, { method: 'POST', headers });
+
+  it('GET lists them; 503 when the lookup fails; 401 without token', async () => {
+    let list: typeof stopped | null = stopped;
+    const u = await start(fakeProvider(), { bg: { listStopped: async () => list } });
+    const r = await req(u, '/api/background/stopped', { headers: auth });
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.body)).toEqual({ sessions: stopped });
+    expect((await req(u, '/api/background/stopped')).status).toBe(401);
+    list = null;
+    expect((await req(u, '/api/background/stopped', { headers: auth })).status).toBe(503);
+  });
+
+  it('rm removes a stopped one and takes its conversation out of the app', async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
+    await markDisconnected('s1', 'exited');
+    const manage = vi.fn(async () => ({ ok: true as const }));
+    const u = await start(fakeProvider(), { bg: { listStopped: async () => stopped, manage } });
+    expect((await rm(u, 'abcdef01')).status).toBe(200);
+    expect(manage).toHaveBeenCalledWith('rm', 'abcdef01', undefined);
+    expect(isRemoved((await getRegistration('s1'))!)).toBe(true);
+    expect((await rm(u, 'abcdef02')).status).toBe(200); // no registration: fine
+  });
+
+  it('refuses an id that is not a stopped session (400 invalid, 409 not stopped), and 502 on a refusal', async () => {
+    const manage = vi.fn(async () => ({ ok: false as const, error: 'nope' }));
+    const u = await start(fakeProvider(), { bg: { listStopped: async () => stopped, manage } });
+    expect((await rm(u, 'ABCDEF01')).status).toBe(400);
+    expect((await rm(u, '11111111')).status).toBe(409);
+    expect(manage).not.toHaveBeenCalled();
+    expect((await rm(u, 'abcdef01', {})).status).toBe(401);
+    const r = await rm(u, 'abcdef01');
+    expect(r.status).toBe(502);
+    expect(JSON.parse(r.body).error).toBe('nope');
   });
 });
 

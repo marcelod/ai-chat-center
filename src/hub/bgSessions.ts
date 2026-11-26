@@ -68,6 +68,7 @@ export type ResumeResult = { ok: true } | { ok: false; error: string };
 export type StartResult = { ok: true; bgId?: string } | { ok: false; error: string };
 
 const RESUME_TIMEOUT_MS = 60_000;
+const MANAGE_TIMEOUT_MS = 30_000;
 const MAX_ERROR = 500;
 
 /**
@@ -76,13 +77,28 @@ const MAX_ERROR = 500;
  * output as the error ("Workspace not trusted", claude missing...).
  */
 function runBg(args: string[], cwd: string, configDir: string | undefined, deps: BgDeps): Promise<{ ok: true; out: string } | { ok: false; error: string }> {
+  return runClaude(['--bg', ...args], cwd, configDir, deps, RESUME_TIMEOUT_MS);
+}
+
+/**
+ * Runs `claude <argv>` in `cwd`, never through a shell except on Windows (see below). Exit 0 is success with
+ * the output; anything else gives the first lines of the output (without terminal escapes) as the error.
+ */
+function runClaude(
+  argv: string[],
+  cwd: string,
+  configDir: string | undefined,
+  deps: BgDeps,
+  timeoutMs: number,
+): Promise<{ ok: true; out: string } | { ok: false; error: string }> {
   const platform = deps.platform ?? process.platform;
   const win = platform === 'win32';
   const spawn = deps.spawn ?? (nodeSpawn as Spawn);
   // Windows: `claude` is a .cmd shim and needs the shell; the line is built from validated values only
   // (see winQuote, and runClaudeAgentsJson for why it is one string).
-  const cmd = win ? ['claude', '--bg', ...args.map(winQuote)].join(' ') : 'claude';
-  const argv = win ? [] : ['--bg', ...args];
+  const cmd = win ? ['claude', ...argv.map(winQuote)].join(' ') : 'claude';
+  const args = win ? [] : argv;
+  const label = `claude ${argv[0] ?? ''}`.trim();
   return new Promise((resolve) => {
     let out = '';
     let done = false;
@@ -94,7 +110,7 @@ function runBg(args: string[], cwd: string, configDir: string | undefined, deps:
     };
     let child: ChildProcess;
     try {
-      child = spawn(cmd, argv, {
+      child = spawn(cmd, args, {
         cwd,
         env: cleanEnv(deps.env ?? process.env, configDirFor(configDir, deps.home, platform)),
         shell: win,
@@ -106,8 +122,8 @@ function runBg(args: string[], cwd: string, configDir: string | undefined, deps:
     }
     const timer = setTimeout(() => {
       child.kill();
-      finish({ ok: false, error: 'claude --bg did not answer in 60 s' });
-    }, RESUME_TIMEOUT_MS);
+      finish({ ok: false, error: `${label} did not answer in ${Math.round(timeoutMs / 1000)} s` });
+    }, timeoutMs);
     const collect = (d: Buffer | string) => {
       if (out.length < 4 * MAX_ERROR) out += String(d);
     };
@@ -119,6 +135,28 @@ function runBg(args: string[], cwd: string, configDir: string | undefined, deps:
       finish({ ok: false, error: stripAnsi(out).trim().slice(0, MAX_ERROR) || `claude exited with code ${code}` });
     });
   });
+}
+
+/** What the app may do to a background session (spec 2026-11-26-stop-respawn-rm). */
+export const BG_ACTIONS = ['stop', 'respawn', 'rm'] as const;
+export type BgAction = (typeof BG_ACTIONS)[number];
+export const isBgAction = (v: unknown): v is BgAction => typeof v === 'string' && (BG_ACTIONS as readonly string[]).includes(v);
+
+export interface ManageDeps extends BgDeps {
+  /** How long `claude stop|respawn|rm` may take (default 30 s). */
+  timeoutMs?: number;
+}
+
+/**
+ * Runs `claude stop <id>`, `claude respawn <id>` or `claude rm <id>` from the home folder (on Windows the
+ * current folder is searched first for `claude.cmd`). `configDir`: the session's Claude config dir, set
+ * only when it is not the default. The action and the 8-hex id are validated; nothing else goes on the line.
+ */
+export async function manageBackground(action: BgAction, id: string, configDir: string | undefined, deps: ManageDeps = {}): Promise<ResumeResult> {
+  if (!isBgAction(action)) throw new Error('invalid action');
+  if (!isBgId(id)) throw new Error('invalid background session id');
+  const r = await runClaude([action, id], deps.home ?? os.homedir(), configDir, deps, deps.timeoutMs ?? MANAGE_TIMEOUT_MS);
+  return r.ok ? { ok: true } : r;
 }
 
 /** Quotes one argument for the Windows command line. Only ever given values checked by the validators here. */
