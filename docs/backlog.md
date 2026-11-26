@@ -39,7 +39,7 @@ Pedido em 2026-11-26. A janela do app abre estreita na horizontal; dá para usar
 
 ### Tamanho do contexto da conversa
 
-Pedido em 2026-11-26 (parte da ideia 18). Mostrar quanto do contexto a conversa já ocupa, por exemplo "Contexto 62% · 124k / 200k" na barra sob o campo de mensagem, com aviso perto de compactar. Dá para fazer: cada resposta do Claude na transcrição traz `usage` (`input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` dá o contexto usado naquele turno). Falta o tamanho da janela do modelo (200k ou 1M); tirar do modelo da sessão ou, com `usage on`, da status line, se o Claude Code mandar isso para ela (confirmar). Depois de um `/compact` o número cai; conferir que o app acompanha.
+Pedido em 2026-11-26 (parte da ideia 18). Mostrar quanto do contexto a conversa já ocupa. Visual pedido pelo autor: um gráfico de pizza pequeno (círculo que vai enchendo) com o percentual ao lado, por exemplo "◔ 62%", na barra sob o campo de mensagem. Ao passar o mouse (ou tocar, no celular), um balão com os detalhes: tokens usados e o total ("124k / 200k"), o modelo, quanto falta até compactar e quando foi o último `/compact`. A cor muda perto do limite (por exemplo amarelo a partir de 80% e vermelho a partir de 90%), sem depender só da cor: o percentual continua visível. Dá para fazer: cada resposta do Claude na transcrição traz `usage` (`input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` dá o contexto usado naquele turno). Falta o tamanho da janela do modelo (200k ou 1M); tirar do modelo da sessão ou, com `usage on`, da status line, se o Claude Code mandar isso para ela (confirmar). Depois de um `/compact` o número cai; conferir que o app acompanha.
 
 ### Subagentes trabalhando
 
