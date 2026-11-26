@@ -7,8 +7,9 @@ import type { PendingMessage } from '../useLiveSessions';
 import { ActionsGroup } from './ActionsGroup';
 import { QuestionCard } from './QuestionCard';
 import { Composer } from './Composer';
-import { BackIcon, SearchIcon, WarningIcon } from './icons';
-import { matches, MIN_QUERY } from '@shared/search';
+import { BackIcon, ChevronIcon, SearchIcon, WarningIcon } from './icons';
+import { useFindInChat } from '../useFindInChat';
+import { MIN_QUERY } from '@shared/search';
 import { ChatMenu } from './ChatMenu';
 import type { BackgroundPreset } from '@shared/background';
 import { BackgroundPicker } from './BackgroundPicker';
@@ -437,7 +438,7 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
   const [search, setSearch] = useState<string | null>(initialSearch ?? null);
   const sq = (search ?? '').trim();
   const searching = sq.length >= MIN_QUERY;
-  const shown = searching ? events.filter((e) => matches(e, sq)) : events;
+  const find = useFindInChat(scroller, search !== null && searching ? sq : null, events);
   const runCommand = onCommand
     ? async (text: string) => {
         await onCommand(text);
@@ -577,15 +578,42 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Escape') setSearch(null);
+              else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (e.shiftKey) find.previous();
+                else find.next();
+              }
             }}
             placeholder={t('ui.chat.searchPlaceholder')}
             aria-label={t('ui.chat.search')}
             className="h-10 min-w-0 flex-1 rounded-[10px] bg-field px-3 text-sm text-ink outline-none focus:ring-2 focus:ring-accent"
           />
           {searching && (
-            <span role="status" className="shrink-0 text-xs text-muted">
-              {t('ui.chat.searchCount', { n: shown.length })}
-            </span>
+            <>
+              <span role="status" className="shrink-0 text-xs text-muted tabular-nums">
+                {find.total > 0 ? t('ui.chat.searchPosition', { i: find.current + 1, n: find.total }) : t('ui.chat.searchNone')}
+              </span>
+              <button
+                type="button"
+                aria-label={t('ui.chat.searchPrevious')}
+                title={t('ui.chat.searchPrevious')}
+                disabled={find.total === 0}
+                onClick={find.previous}
+                className="flex h-10 w-9 shrink-0 items-center justify-center rounded-[10px] text-muted hover:bg-field disabled:opacity-40"
+              >
+                <ChevronIcon width={18} height={18} className="-rotate-90" />
+              </button>
+              <button
+                type="button"
+                aria-label={t('ui.chat.searchNext')}
+                title={t('ui.chat.searchNext')}
+                disabled={find.total === 0}
+                onClick={find.next}
+                className="flex h-10 w-9 shrink-0 items-center justify-center rounded-[10px] text-muted hover:bg-field disabled:opacity-40"
+              >
+                <ChevronIcon width={18} height={18} className="rotate-90" />
+              </button>
+            </>
           )}
         </div>
       )}
@@ -600,8 +628,7 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
         className="relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 md:px-12"
       >
         {loading && events.length === 0 && <p className="self-center text-sm text-muted">{t('ui.chat.loading')}</p>}
-        {shown.map(render)}
-        {searching && shown.length === 0 && <p className="self-center text-sm text-muted">{t('ui.chat.searchNone')}</p>}
+        {events.map(render)}
         {/* Claude Code writes the AskUserQuestion entry to the transcript only after the tool returns: while the
             hook waits for the app, the card comes from the hub's pending question. */}
         {session.pendingQuestion &&

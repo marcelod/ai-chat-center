@@ -175,3 +175,7 @@ body {
 @keyframes acc-dot { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
 .typing-dot { animation: acc-dot 1.2s infinite ease-in-out; }
 @media (prefers-reduced-motion: reduce) { .typing-dot { animation: none; } }
+
+/* Find in the conversation (useFindInChat): every occurrence, and the one ↑/↓ is on. */
+::highlight(acc-search) { background-color: #fde68a; color: #111827; }
+::highlight(acc-search-current) { background-color: #f59e0b; color: #111827; }

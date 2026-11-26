@@ -6,6 +6,7 @@ import type { SearchHit } from '@shared/search';
 import { LangProvider } from '../i18n';
 import { ChatView } from './ChatView';
 import { SessionList } from './SessionList';
+import { findRanges } from '../useFindInChat';
 
 // Spec 2026-11-25-app-batch: search in a conversation and across all of them.
 
@@ -17,7 +18,7 @@ const events: ChatEvent[] = [
 ];
 
 describe('search in a conversation', () => {
-  it('the search bar keeps only the messages with the text, ignoring case and accents', async () => {
+  it('the whole conversation stays; the bar counts every occurrence, ignoring case and accents, and ↑/↓ move between them', async () => {
     render(
       <LangProvider lang="en">
         <ChatView session={session()} events={events} pending={[]} loading={false} onSend={async () => {}} onBack={() => {}} />
@@ -26,10 +27,29 @@ describe('search in a conversation', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Search in this conversation' }));
     await user.type(screen.getByRole('searchbox', { name: 'Search in this conversation' }), 'cobranca');
-    expect(screen.getByText('2 found')).toBeTruthy();
-    expect(screen.queryByText('Mais alguma coisa?')).toBeNull();
+    expect(screen.getByText('2 of 2')).toBeTruthy(); // starts at the newest occurrence
+    expect(screen.getByText('Mais alguma coisa?')).toBeTruthy(); // nothing is hidden
+    await user.click(screen.getByRole('button', { name: 'Previous' }));
+    expect(screen.getByText('1 of 2')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Previous' }));
+    expect(screen.getByText('2 of 2')).toBeTruthy(); // wraps around
+    await user.click(screen.getByRole('searchbox'));
+    await user.keyboard('{Enter}');
+    expect(screen.getByText('1 of 2')).toBeTruthy();
+    await user.keyboard('{Shift>}{Enter}{/Shift}');
+    expect(screen.getByText('2 of 2')).toBeTruthy();
     await user.keyboard('{Escape}');
-    expect(screen.getByText('Mais alguma coisa?')).toBeTruthy();
+    expect(screen.queryByRole('searchbox')).toBeNull();
+  });
+
+  it('says when nothing is found and disables ↑/↓', async () => {
+    render(
+      <LangProvider lang="en">
+        <ChatView initialSearch="xyzzy" session={session()} events={events} pending={[]} loading={false} onSend={async () => {}} onBack={() => {}} />
+      </LangProvider>,
+    );
+    expect(screen.getByText('No message found')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('opens already searching when a hit was picked in the list', () => {
@@ -38,8 +58,16 @@ describe('search in a conversation', () => {
         <ChatView initialSearch="mais alguma" session={session()} events={events} pending={[]} loading={false} onSend={async () => {}} onBack={() => {}} />
       </LangProvider>,
     );
-    expect(screen.getByText('1 found')).toBeTruthy();
-    expect(screen.queryByText('corrige a cobrança')).toBeNull();
+    expect(screen.getByText('1 of 1')).toBeTruthy();
+  });
+});
+
+describe('findRanges', () => {
+  it('finds every occurrence in the text, not in buttons, ignoring accents', () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<p>Ação e acao, ACAO.</p><button>acao</button><span aria-hidden="true">acao</span>';
+    const found = findRanges(root, 'ação');
+    expect(found.map((r) => r.toString())).toEqual(['Ação', 'acao', 'ACAO']);
   });
 });
 
