@@ -110,7 +110,7 @@ function SessionBar({ session, hubVersion, runCommand }: { session: SessionView;
   const t = useT();
   const live = session.state !== 'disconnected';
   return (
-    <div data-testid="session-bar" className="flex min-w-0 items-center justify-end gap-1.5">
+    <div data-testid="session-bar" className="relative flex min-w-0 items-center justify-end gap-1.5">
       {live && session.context && <ContextMeter context={session.context} model={session.model} />}
       {live && session.bgId && runCommand && (
         <SessionControls key={session.sessionId} onCommand={runCommand} working={session.state !== 'idle'} model={session.model} effort={session.effort} />

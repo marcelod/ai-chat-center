@@ -68,11 +68,12 @@ export function ContextMeter({ context, model }: { context: ContextUsage; model?
     return today ? d.toLocaleTimeString(lang, time) : d.toLocaleString(lang, { day: 'numeric', month: 'short', ...time });
   };
 
+  // Not `relative`: the tooltip is placed against the bar (SessionBar), so it stays on screen on a phone.
   return (
     <span
       ref={box}
       data-testid="context-meter"
-      className="relative inline-flex shrink-0"
+      className="inline-flex shrink-0"
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
