@@ -13,6 +13,7 @@ import { countUnsigned, enqueue, peek } from '../core/inbox.js';
 import { getPending } from '../core/questions.js';
 import { getWaiting } from '../core/waiting.js';
 import { paths } from '../core/paths.js';
+import { runningSubagents, subagentsDir } from './subagents.js';
 import { TranscriptReader } from './transcript/reader.js';
 import { queryLiveSessions } from './status.js';
 import { PROTOCOL, VERSION } from '../core/version.js';
@@ -76,6 +77,8 @@ const STALLED_AFTER_MS = 15_000;
 /** Claude Code creates the transcript with the /cc prompt: still missing this long after connecting, it is not written. */
 const TRANSCRIPT_MISSING_AFTER_MS = 15_000;
 const MISSES_TO_EXIT = 3;
+/** How old the count of a session's working subagents may be (it stats their files: kept cheap). */
+export const AGENTS_TTL_MS = 5000;
 
 export type ProviderOptions = {
   now?: () => number;
@@ -93,6 +96,7 @@ export class ClaudeCodeProvider implements Provider {
   private lastModels = new Map<string, string | undefined>(); // disconnected sessions
   private misses = new Map<string, { connectedAt: string; count: number }>();
   private liveCache: { at: number; value: LiveSession[] } | null = null;
+  private agentCounts = new Map<string, { at: number; n: number }>();
   private lastGood: LiveSession[] | null = null;
   private lastSignature: string | null = null;
   private readonly now: () => number;
@@ -357,6 +361,10 @@ export class ClaudeCodeProvider implements Provider {
       const claudeVersion = disconnected ? undefined : this.readers.get(sid)?.reader.claudeVersion();
       if (claudeVersion) view.claudeVersion = claudeVersion;
       if (!disconnected && l?.bgId) view.bgId = l.bgId;
+      if (!disconnected) {
+        const n = await this.agentsWorking(reg);
+        if (n > 0) view.agentsWorking = n;
+      }
       Object.assign(view, resumeView(sid, disconnected ? null : reg.connectedAt, this.now()));
       connected.push(view);
     }
@@ -375,6 +383,20 @@ export class ClaudeCodeProvider implements Provider {
     const others = live.list.filter((l) => l.kind === 'interactive' && !activeIds.has(l.sessionId));
     const usage = await readUsage();
     return { connected: connected.map(({ _sort, ...v }) => v), others, hubVersion: VERSION, ...(usage ? { usage } : {}) };
+  }
+
+  /**
+   * Subagents of an active session still working (spec 2026-11-26-side-panel): not finished, with a new line
+   * in their transcript in the last STALE_MS (an orphan never holds the state). Looked up at most every
+   * AGENTS_TTL_MS per session.
+   */
+  private async agentsWorking(reg: Registration): Promise<number> {
+    const t = this.now();
+    const c = this.agentCounts.get(reg.sessionId);
+    if (c && t >= c.at && t - c.at < AGENTS_TTL_MS) return c.n;
+    const n = await runningSubagents(subagentsDir(reg.transcriptPath, reg.sessionId), this.now).catch(() => 0);
+    this.agentCounts.set(reg.sessionId, { at: t, n });
+    return n;
   }
 
   async events(sid: string, opts: { diffs?: boolean } = {}): Promise<ChatEvent[]> {
@@ -413,7 +435,7 @@ export class ClaudeCodeProvider implements Provider {
       this.pending.delete(sid);
       if (events?.length) changes.push({ type: 'events', sessionId: sid, events });
     }
-    for (const m of [this.readers, this.pending, this.lastEvents, this.lastModels, this.misses] as Map<string, unknown>[]) {
+    for (const m of [this.readers, this.pending, this.lastEvents, this.lastModels, this.misses, this.agentCounts] as Map<string, unknown>[]) {
       for (const sid of [...m.keys()]) if (!known.has(sid)) m.delete(sid);
     }
 
@@ -443,6 +465,7 @@ export class ClaudeCodeProvider implements Provider {
         s.bgId ?? null,
         s.resuming ?? false,
         s.resumeError ?? null,
+        s.agentsWorking ?? 0,
       ]),
     });
     if (signature !== this.lastSignature) {

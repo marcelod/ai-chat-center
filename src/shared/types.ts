@@ -116,6 +116,11 @@ export type SessionView = {
   claudeVersion?: string;
   /** Runs as a Claude Code background session: its short id, for `claude attach <id>` and app commands. */
   bgId?: string;
+  /**
+   * Subagents of this active session still working (not finished, wrote lately), e.g. launched in the
+   * background after the turn ended; absent when none.
+   */
+  agentsWorking?: number;
   /** The app asked to resume this ended session and it has not reconnected yet. */
   resuming?: true;
   /** Why the last resume from the app failed (output of `claude --bg`, or a timeout). */
