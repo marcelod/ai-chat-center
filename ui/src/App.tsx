@@ -4,8 +4,8 @@ import type { Language } from './api';
 import { SessionList } from './components/SessionList';
 import { ChatView } from './components/ChatView';
 import { NewSessionDialog } from './components/NewSessionDialog';
-import { notificationsSupported } from './notify';
 import { useLiveSessions } from './useLiveSessions';
+import { useSystemNotifications } from './useSystemNotifications';
 import { useAppWindow } from './useAppWindow';
 import { useCollapsedList } from './useCollapsedList';
 import { LangProvider, useT } from './i18n';
@@ -30,6 +30,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
   const { data, eventsById, pending, unread, selectedId, select, send, retry, error, loading } = live;
   const selected = data.connected.find((s) => s.sessionId === selectedId);
   useAppWindow(select);
+  useSystemNotifications(data.connected, select);
   const [newOpen, setNewOpen] = useState(false);
   /** A message picked in the list search: its conversation opens with the search bar on that text. */
   const [hitSearch, setHitSearch] = useState<{ sid: string; q: string; n: number } | null>(null);
@@ -91,11 +92,6 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
           onOpenHit={(hit, q) => {
             setHitSearch((h) => ({ sid: hit.sessionId, q, n: (h?.n ?? 0) + 1 }));
             select(hit.sessionId);
-          }}
-          notifications={{
-            supported: notificationsSupported(),
-            enabled: live.notify,
-            onToggle: (on) => void live.setNotifications(on),
           }}
         />
       </aside>

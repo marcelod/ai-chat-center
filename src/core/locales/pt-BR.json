@@ -262,9 +262,16 @@
       "hint": "Uso de 5 horas: ative com /ai-chat-center:cc usage on"
     },
     "notifications": {
-      "label": "Notificações do navegador",
-      "enable": "Ativar notificações",
-      "denied": "Bloqueadas pelo navegador"
+      "enable": "Notificações do sistema",
+      "status": {
+        "granted": "Permitidas: você é avisado quando uma sessão termina, pede permissão ou pergunta algo com o app em segundo plano",
+        "denied": "Bloqueadas pelo navegador: permita as notificações deste site nas configurações do navegador",
+        "default": "O navegador pede permissão quando você liga",
+        "unsupported": "Não disponíveis neste navegador"
+      },
+      "turnEnded": "Terminou o turno",
+      "permission": "Pede permissão",
+      "question": "Fez uma pergunta"
     },
     "state": {
       "busy": "Status: trabalhando",

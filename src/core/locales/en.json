@@ -262,9 +262,16 @@
       "hint": "5-hour usage: turn it on with /ai-chat-center:cc usage on"
     },
     "notifications": {
-      "label": "Browser notifications",
-      "enable": "Enable notifications",
-      "denied": "Blocked by the browser"
+      "enable": "System notifications",
+      "status": {
+        "granted": "Allowed: you are told when a session finishes, needs a permission or asks something while the app is in the background",
+        "denied": "Blocked by the browser: allow notifications for this site in the browser settings",
+        "default": "The browser asks for permission when you turn them on",
+        "unsupported": "Not available in this browser"
+      },
+      "turnEnded": "Finished its turn",
+      "permission": "Needs your permission",
+      "question": "Asked a question"
     },
     "state": {
       "busy": "Status: working",

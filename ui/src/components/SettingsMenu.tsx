@@ -2,19 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import type { Language } from '../api';
 import { useLang, useT } from '../i18n';
 import { GearIcon } from './icons';
-import { saveShowDiffs, useShowDiffs } from '../prefs';
+import { saveShowDiffs, useShowDiffs, useSystemNotificationsPref } from '../prefs';
+import { notificationStatus, setNotificationsEnabled, type NotificationStatus } from '../notify';
 import { readTheme, saveTheme, type Theme } from '../theme';
-
-export type NotificationsControl = { supported: boolean; enabled: boolean; onToggle: (on: boolean) => void };
 
 export function SettingsMenu({
   onLanguage,
-  notifications,
   usageHint = false,
   version,
 }: {
   onLanguage: (l: Language) => void;
-  notifications?: NotificationsControl;
   /** No usage recorded: say how to turn it on. */
   usageHint?: boolean;
   /** Version of AI Chat Center running (the hub's). */
@@ -25,6 +22,10 @@ export function SettingsMenu({
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(readTheme);
   const showDiffs = useShowDiffs();
+  const notifyPref = useSystemNotificationsPref();
+  /** The browser permission can change in its own settings: read again whenever the menu opens. */
+  const [notifyStatus, setNotifyStatus] = useState<NotificationStatus>(notificationStatus);
+  const notifyOn = notifyPref && notifyStatus === 'granted';
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -47,7 +48,10 @@ export function SettingsMenu({
         type="button"
         aria-label={t('ui.settings')}
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          setNotifyStatus(notificationStatus());
+          setOpen((o) => !o);
+        }}
         className="flex h-11 w-10 shrink-0 items-center justify-center rounded-xl text-muted hover:bg-field"
       >
         <GearIcon />
@@ -87,17 +91,20 @@ export function SettingsMenu({
             <input type="checkbox" checked={showDiffs} onChange={(e) => saveShowDiffs(e.target.checked)} className="h-4 w-4 accent-accent" />
             {t('ui.showDiffs')}
           </label>
-          {notifications?.supported && (
-            <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={notifications.enabled}
-                onChange={(e) => notifications.onToggle(e.target.checked)}
-                className="h-4 w-4 accent-accent"
-              />
-              {t('ui.notifications.enable')}
-            </label>
-          )}
+          <label className={`mt-3 flex min-h-11 items-center gap-2 text-sm ${notifyStatus === 'unsupported' ? 'text-muted' : 'cursor-pointer'}`}>
+            <input
+              type="checkbox"
+              checked={notifyOn}
+              disabled={notifyStatus === 'unsupported'}
+              aria-describedby="acc-notify-status"
+              onChange={(e) => void setNotificationsEnabled(e.target.checked).finally(() => setNotifyStatus(notificationStatus()))}
+              className="h-4 w-4 accent-accent"
+            />
+            {t('ui.notifications.enable')}
+          </label>
+          <p id="acc-notify-status" className="text-xs text-muted">
+            {t(`ui.notifications.status.${notifyStatus}`)}
+          </p>
           {version && (
             <p data-testid="app-version" className="mt-3 text-xs text-muted">
               {t('ui.version', { v: version })}

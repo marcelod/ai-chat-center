@@ -237,7 +237,7 @@ describe('useLiveSessions', () => {
 });
 
 // Audit RT5: opening the UI (or a hub restart, or /cc again) replays history over SSE; that
-// history must not fire one browser notification per old assistant message.
+// history must not fire one browser notification per old assistant message. Since 0.6.7 no reply does.
 describe('notifications', () => {
   let shown: string[];
   beforeEach(() => {
@@ -256,33 +256,15 @@ describe('notifications', () => {
     localStorage.removeItem('acc.notify');
   });
 
-  const iso = (msFromNow: number) => new Date(Date.now() + msFromNow).toISOString();
-
-  it('history replayed after the UI connected fires no notification; a new reply fires one', async () => {
+  // Since 0.6.7 the notifications follow state changes (useSystemNotifications) and never carry reply text.
+  it('replies, old or new, fire no notification with their text', async () => {
     const old = Array.from({ length: 25 }, (_, i) => a(`h${i}`, `2025-12-01T10:00:${String(i).padStart(2, '0')}Z`, `old ${i}`));
     vi.mocked(api.getSessions).mockResolvedValue({ connected: [{ ...sessions.connected[0], lastEvent: old.at(-1) }], others: [] });
     const { result } = renderHook(() => useLiveSessions());
     await waitFor(() => expect(result.current.data.connected).toHaveLength(1));
     act(() => push({ type: 'events', sessionId: 's1', events: old }));
+    act(() => push({ type: 'events', sessionId: 's1', events: [a('n1', new Date(Date.now() + 1000).toISOString(), 'fresh reply')] }));
     expect(shown).toEqual([]);
-    act(() => push({ type: 'events', sessionId: 's1', events: [a('n1', iso(1000), 'fresh reply')] }));
-    expect(shown).toEqual(['fresh reply']);
-  });
-
-  it('a session first seen later does not notify its own backlog', async () => {
-    vi.mocked(api.getSessions).mockResolvedValue({ connected: [], others: [] });
-    const { result } = renderHook(() => useLiveSessions());
-    await waitFor(() => expect(api.getSessions).toHaveBeenCalled());
-    await new Promise((r) => setTimeout(r, 20));
-    const backlog = a('b1', iso(5), 'written just after the UI opened, before the session was seen');
-    vi.mocked(api.getSessions).mockResolvedValue(sessions);
-    await new Promise((r) => setTimeout(r, 20));
-    act(() => push({ type: 'sessions' }));
-    await waitFor(() => expect(result.current.data.connected).toHaveLength(2));
-    act(() => push({ type: 'events', sessionId: 's2', events: [backlog] }));
-    expect(shown).toEqual([]);
-    act(() => push({ type: 'events', sessionId: 's2', events: [a('b2', iso(2000), 'new')] }));
-    expect(shown).toEqual(['new']);
   });
 });
 
