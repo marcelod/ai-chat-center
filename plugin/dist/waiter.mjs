@@ -47,7 +47,7 @@ function paths() {
 }
 
 // src/core/version.ts
-var VERSION = "0.6.6";
+var VERSION = "0.6.7";
 var PROTOCOL = 2;
 
 // src/hooks/delegate.ts
@@ -640,12 +640,13 @@ async function markDisconnected(sid, reason) {
 // src/core/claudeAgents.ts
 import { execFile } from "node:child_process";
 import os3 from "node:os";
-function runClaudeAgentsJson(platform = process.platform) {
+function runClaudeAgentsJson(platform = process.platform, all = false) {
   const win = platform === "win32";
+  const argv = all ? ["agents", "--json", "--all"] : ["agents", "--json"];
   return new Promise((resolve, reject) => {
     execFile(
-      win ? "claude agents --json" : "claude",
-      win ? [] : ["agents", "--json"],
+      win ? `claude ${argv.join(" ")}` : "claude",
+      win ? [] : argv,
       { cwd: os3.homedir(), shell: win, windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => err ? reject(err) : resolve(String(stdout))
     );
@@ -734,8 +735,11 @@ async function readMeta(sid) {
   return d && typeof d === "object" && !Array.isArray(d) ? d : {};
 }
 async function setField(sid, key, value, re) {
+  paths().metaFile(sid);
+  if (typeof value === "string" && re.test(value)) await writeField(sid, key, value);
+}
+async function writeField(sid, key, value) {
   const file = paths().metaFile(sid);
-  if (typeof value !== "string" || !re.test(value)) return;
   const meta = await readMeta(sid);
   if (meta[key] === value) return;
   await writeJsonAtomic(file, { ...meta, [key]: value });

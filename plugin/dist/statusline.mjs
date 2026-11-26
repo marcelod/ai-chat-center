@@ -142,6 +142,53 @@ async function readStatuslineState() {
   return { original: o && typeof o === "object" && !Array.isArray(o) ? o : null };
 }
 
+// src/shared/context.ts
+var MIN_CONTEXT_WINDOW = 1e3;
+var MAX_CONTEXT_WINDOW = 1e8;
+var isContextWindow = (n) => typeof n === "number" && Number.isInteger(n) && n >= MIN_CONTEXT_WINDOW && n <= MAX_CONTEXT_WINDOW;
+
+// src/core/meta.ts
+async function readMeta(sid) {
+  const d = await readJson(paths().metaFile(sid));
+  return d && typeof d === "object" && !Array.isArray(d) ? d : {};
+}
+async function writeField(sid, key, value) {
+  const file = paths().metaFile(sid);
+  const meta = await readMeta(sid);
+  if (meta[key] === value) return;
+  await writeJsonAtomic(file, { ...meta, [key]: value });
+}
+async function setContextWindow(sid, size) {
+  paths().metaFile(sid);
+  if (!isContextWindow(size)) return;
+  await writeField(sid, "contextWindow", size);
+}
+function contextWindowFromStatusInput(input) {
+  if (!input || typeof input !== "object") return null;
+  const { session_id: sessionId, context_window: cw } = input;
+  const size = cw && typeof cw === "object" ? cw.context_window_size : void 0;
+  if (typeof sessionId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(sessionId) || !isContextWindow(size)) return null;
+  return { sessionId, size };
+}
+
+// src/core/registry.ts
+import path3 from "node:path";
+
+// src/shared/background.ts
+var BACKGROUND_IMAGE_MAX = 5 * 1024 * 1024;
+
+// src/core/attachments.ts
+var ATTACHMENT_MAX_AGE_MS = 30 * 864e5;
+
+// src/core/registry.ts
+function regFile(sid) {
+  assertSessionId(sid);
+  return path3.join(paths().sessionsDir, `${sid}.json`);
+}
+async function getRegistration(sid) {
+  return readJson(regFile(sid));
+}
+
 // src/bin/statusline.ts
 async function readStdin() {
   const chunks = [];
@@ -151,8 +198,11 @@ async function readStdin() {
 async function main() {
   const input = await readStdin();
   try {
-    const usage = usageFromStatusInput(JSON.parse(input.toString("utf8")));
+    const data = JSON.parse(input.toString("utf8"));
+    const usage = usageFromStatusInput(data);
     if (usage) await recordUsage(usage);
+    const cw = contextWindowFromStatusInput(data);
+    if (cw && await getRegistration(cw.sessionId)) await setContextWindow(cw.sessionId, cw.size);
   } catch {
   }
   let command = null;

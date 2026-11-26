@@ -1,6 +1,6 @@
 # Pendências
 
-Itens combinados e deixados para depois. Estado em 2026-11-25, versão 0.6.6. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
+Itens combinados e deixados para depois. Estado em 2026-11-26, versão 0.6.7. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
 
 ## A fazer
 
@@ -14,42 +14,9 @@ No primeiro teste no Windows (2026-11-24), o atalho funcionou, mas a pessoa teve
 
 Pedido em 2026-11-25. Investigado na rodada 0.6.2 (Claude Code 2.1.332), **adiado**: a sugestão não fica na transcrição (só `promptSource: "suggestion_accepted"` quando aceita), não fica em `~/.claude` e nenhum hook a entrega. `--prompt-suggestions` só entrega a sugestão no modo `-p`/SDK (`stream-json`), o que exigiria outro modo de sessão (sem `--bg`, `/cc` e attach). Caminho possível depois da ideia 2 (ver a tela da sessão): ler a linha cinza do `claude logs <id>`, com o filtro de token; frágil a cada versão. Bônus barato, se o autor quiser: marcar no app as mensagens com `suggestion_accepted`. Cuidado registrado: `claude --bg --help` cria uma sessão de verdade; para ver a ajuda, use `claude --help`.
 
-### Painel lateral para ver imagens, Markdown e outros arquivos
+### Painel lateral: próximos tipos de arquivo
 
-Pedido em 2026-11-26 (pode virar vários itens). Um painel à direita da conversa, que abre ao clicar num link e fecha com um X, para ver sem sair do app:
-
-1. **Imagens:** os anexos e as imagens citadas na conversa (um caminho de `.png`/`.jpg` numa resposta do Claude, ou um print que a pessoa mandou) aparecem como miniatura ou link; ao clicar, a imagem abre grande no painel.
-2. **Markdown:** quando o Claude cita um arquivo `.md` (por exemplo `docs/backlog.md` ou uma spec), o caminho vira link e o painel mostra o arquivo formatado, com o mesmo Markdown das mensagens.
-3. **Depois, o mesmo painel para outras coisas:** código com destaque de sintaxe (`arquivo.ts:42` abrindo na linha), o diff dos arquivos editados, PDF, a tela da sessão (ideia 2) e o resultado de `/status` ou `/context`.
-
-Cuidados:
-- O hub passa a ler arquivos do disco: só leitura, com o mesmo token, só dentro da pasta da sessão e dos anexos (`~/.ai-chat-center/attachments`), sem seguir links simbólicos para fora, com limite de tamanho e só os tipos conhecidos.
-- Markdown sem HTML cru e imagens remotas bloqueadas (ou só com clique), para um arquivo não carregar nada de fora.
-- Reconhecer caminhos no texto sem transformar tudo em link: só caminhos que existem dentro da pasta da sessão.
-- Em tela estreita (celular, janela pequena), o painel ocupa a tela inteira, com um botão de voltar.
-
-### Abrir a janela do app maior
-
-Pedido em 2026-11-26. A janela do app abre estreita na horizontal; dá para usar, mas o ideal é abrir maior. Causa: o `/cc` e o atalho abrem o Chrome com `--app=<url> --new-window` (`src/hooks/openWindow.ts`), sem tamanho, e o Chrome usa o tamanho padrão dele para janelas de app. Ideias:
-
-- Passar `--window-size=L,A` (e talvez `--window-position`) ao abrir, por exemplo 1400×900, limitado ao tamanho da tela. O atalho do menu (Linux, Windows e macOS, `src/hooks/launcher.ts`) precisa do mesmo.
-- Melhor ainda: lembrar o último tamanho e a posição que a pessoa deixou. A página manda o tamanho ao hub ao fechar ou redimensionar, e o próximo `/cc` abre com ele.
-- Alternativa no próprio app: `window.resizeTo` na primeira abertura (funciona em janelas `--app` no Chrome; confirmar). No Safari (aba comum) não se aplica.
-- Confirmar se o Chrome já guarda sozinho o tamanho das janelas `--app` por endereço; a porta do hub pode mudar e fazer o Chrome "esquecer".
-
-### Tamanho do contexto da conversa
-
-Pedido em 2026-11-26 (parte da ideia 18). Mostrar quanto do contexto a conversa já ocupa. Visual pedido pelo autor: um gráfico de pizza pequeno (círculo que vai enchendo) com o percentual ao lado, por exemplo "◔ 62%", na barra sob o campo de mensagem. Ao passar o mouse (ou tocar, no celular), um balão com os detalhes: tokens usados e o total ("124k / 200k"), o modelo, quanto falta até compactar e quando foi o último `/compact`. A cor muda perto do limite (por exemplo amarelo a partir de 80% e vermelho a partir de 90%), sem depender só da cor: o percentual continua visível. Dá para fazer: cada resposta do Claude na transcrição traz `usage` (`input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` dá o contexto usado naquele turno). Falta o tamanho da janela do modelo (200k ou 1M); tirar do modelo da sessão ou, com `usage on`, da status line, se o Claude Code mandar isso para ela (confirmar). Depois de um `/compact` o número cai; conferir que o app acompanha.
-
-### Subagentes trabalhando
-
-Pedido em 2026-11-26 (a pensar). Quando a conversa está "trabalhando", mostrar quais subagentes estão rodando. Ao clicar no "trabalhando", abre o painel lateral direito (ver "Painel lateral para ver imagens, Markdown e outros arquivos") com a lista. Dá para fazer: cada subagente tem uma transcrição em `<sessão>/subagents/agent-<id>.jsonl` e um `agent-<id>.meta.json` com a descrição da tarefa, o tipo, o modelo, se roda em segundo plano e `finished`. No painel: a descrição, o tipo, o modelo, há quanto tempo roda, a última ação (a última ferramenta usada na transcrição dele) e, ao clicar, a transcrição do subagente. A conversa em grupo com os agentes (0.4.7) já mostra as mensagens deles; aqui é o estado ao vivo.
-
-### "idle" com subagentes em segundo plano rodando
-
-Visto em 2026-11-26 (print do autor): a conversa de desenvolvimento lançou 5 subagentes em segundo plano (as frentes A a E), respondeu "aviso quando terminar" e encerrou o turno. O app mostra "idle", mas os agentes seguem trabalhando (o terminal lista os 5 `general-purpose` com tokens subindo). Causa provável: o estado vem do fim do turno (Stop); subagentes em segundo plano não contam. Isso é de propósito desde a 0.4.4 (o "trabalhando" preso com tarefa em segundo plano), então a correção não pode voltar a prender o "trabalhando".
-
-Ideia: um terceiro estado, por exemplo "agentes trabalhando (5)", diferente de "trabalhando" (o Claude no turno) e de "idle". A contagem vem dos `<sessão>/subagents/agent-<id>.meta.json` com `finished: false` (conferir que o campo vira `true` ao terminar, e o que acontece se a sessão morrer no meio: um agente órfão não pode deixar o estado preso; usar também a hora da última linha da transcrição dele). Ao clicar, abre o painel de "Subagentes trabalhando". A lista à esquerda também pode mostrar um sinal discreto.
+O painel lateral saiu na 0.6.7 com imagens, Markdown, subagentes e a tela da sessão. Falta, quando o autor quiser: código com destaque de sintaxe (`arquivo.ts:42` abrindo na linha), o diff dos arquivos editados no painel, PDF e o resultado de `/status` ou `/context` direto no painel depois do comando. Mesmos cuidados da rota de arquivos da 0.6.7 (só leitura, só a pasta da sessão e os anexos dela, realpath, limite de tamanho, tipos conhecidos).
 
 ### Entrada por voz
 
@@ -69,8 +36,8 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ### Sessões em segundo plano
 1. ★ ✅ 0.6.0 **Nova sessão pelo app:** botão "+" com a pasta (das já usadas), o nome, o modelo e o esforço. O hub roda `claude --bg -n <nome> --model … --effort … "/ai-chat-center:cc"`, e a sessão já nasce conectada.
-2. ★ **Ver a tela da sessão no app:** `claude logs <id>` mostra a tela da sessão. Resolve `/status`, `/cost` e `/context`: depois do comando, o app mostra o trecho da tela. Cuidado visto em 2026-11-25: a tela guarda o link do `/cc` com o token do app; o trecho precisa ser filtrado antes de aparecer.
-3. **Parar, reiniciar e remover pelo menu ⋮:** `claude stop`, `claude respawn` (roda a versão nova do Claude Code depois de um update) e `claude rm`. Também limpar sessões paradas que sobraram.
+2. ★ ✅ 0.6.7 **Ver a tela da sessão no app:** `claude logs <id>` mostra a tela da sessão. Resolve `/status`, `/cost` e `/context`: depois do comando, o app mostra o trecho da tela. Cuidado visto em 2026-11-25: a tela guarda o link do `/cc` com o token do app; o trecho precisa ser filtrado antes de aparecer.
+3. ✅ 0.6.7 **Parar, reiniciar e remover pelo menu ⋮:** `claude stop`, `claude respawn` (roda a versão nova do Claude Code depois de um update) e `claude rm`. Também limpar sessões paradas que sobraram.
 4. ✅ 0.6.0 **Lista de comandos ao digitar `/`.**
 5. ✅ 0.6.0 **Aviso de que o comando terminou.**
 6. ✅ 0.6.2 **Pergunta esperando resposta com `answers off`.**
@@ -80,14 +47,14 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 ### Conversa
 9. ★ ✅ 0.6.0 **Busca:** dentro da conversa e entre todas as conversas, incluindo as encerradas.
 10. **Exportar uma conversa** em Markdown ou PDF.
-11. **Respostas rápidas:** botões com mensagens frequentes ("pode seguir", "faz o commit", "resume o que falta").
+11. ✅ 0.6.7 **Respostas rápidas:** botões com mensagens frequentes ("pode seguir", "faz o commit", "resume o que falta").
 12. **Sugestão da próxima mensagem** (ver "A fazer").
 13. ✅ 0.6.2 **Diff dos arquivos editados**, com cores, em vez de só "Edit arquivo X".
 14. **Fila de mensagens visível:** ver o que foi mandado com a sessão ocupada, com opção de editar ou cancelar antes de ela ler.
 15. **Agendar uma mensagem:** por exemplo, "às 23:30 manda 'pode começar'".
 
 ### Avisos e visão geral
-16. ★ **Notificação do sistema:** quando uma sessão termina o turno, pede permissão ou faz uma pergunta, mesmo com o app minimizado.
+16. ★ ✅ 0.6.7 **Notificação do sistema:** quando uma sessão termina o turno, pede permissão ou faz uma pergunta, mesmo com o app minimizado.
 17. **Painel geral:** todas as sessões numa grade, com estado, tempo trabalhando e uso de contexto.
 18. **Uso e custo por sessão:** tokens, contexto ocupado (ver "Tamanho do contexto da conversa" em "A fazer") e o histórico do uso de 5 horas.
 19. **Agrupar sessões por projeto ou pasta** na lista.
@@ -100,6 +67,17 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 22. **Remote Control oficial:** comparar o `claude --remote-control` (acesso pelo claude.ai) com a ideia 21 antes de construir.
 
 ## A testar no uso
+
+- 0.6.7 (rodada em paralelo; specs em `docs/superpowers/specs/2026-11-26-*`):
+  - Janela maior: com o Chrome aberto, `/cc` abre a janela e ela cresce para 1280×860 (ou o último tamanho); redimensionar e esperar 1 s grava `windowSize` em `~/.ai-chat-center/config.json`; maximizada não grava; F5 não muda o tamanho. Conferir no Windows e no macOS.
+  - Contexto: pizza "◔ N%" na barra; balão com tokens, modelo, quanto falta e o último compact; com `usage on` o total passa a ser exato (1M numa sessão 1M); `/compact` derruba o percentual na hora; amarelo ≥80% e vermelho ≥90%; no celular o balão não sai da tela.
+  - Respostas rápidas (⚡): escolher preenche o campo sem enviar; editar a lista e recarregar mantém.
+  - Notificações do sistema (configurações, desligadas por padrão): fim do turno, pedido de permissão e pergunta, só com o app escondido ou sem foco; clicar abre a conversa. Linux, Windows e macOS/Safari.
+  - Painel lateral: caminho de `.md` ou imagem citado vira link só se existir; painel abre à direita (tela cheia no celular), X/Esc fecham, links relativos e "Voltar"; anexo de imagem clicável. Imagens remotas nas mensagens agora mostram só o texto alternativo: confirmar se é o desejado.
+  - Subagentes: clicar no estado do cabeçalho abre a lista (descrição, tipo, modelo, tempo, última ferramenta) e a transcrição de cada um.
+  - "Agentes trabalhando (N)": lançar 2 subagentes em segundo plano e encerrar o turno; cabeçalho e lista mostram o estado; volta para "parada" em até ~5 s quando terminam; sessão morta não prende (no máximo 10 min).
+  - Tela da sessão (⋮, só em segundo plano): depois de `/status`, o texto aparece sem link 127.0.0.1, sem token e sem a chave (`[app link removed]`/`[redacted]`); conferir a largura das linhas.
+  - Parar / reiniciar / remover (⋮ em sessão de segundo plano viva) e "Limpar sessões paradas" nas configurações. Testar com uma sessão de teste criada pelo "+": parar (confirmação no menu), reiniciar (deve reconectar sozinha em até ~1 min, sem `/cc`; anotar se não), remover (some da lista e de `claude agents --json --all`).
 
 - 0.6.6:
   - Atualização para todas as sessões: só vale a partir da 0.6.6 (as sessões abertas numa versão anterior não têm o código novo e ainda precisam de `/reload-plugins` uma vez). Na próxima atualização instalada pelo marketplace (0.6.7 ou maior), conferir que uma sessão aberta antes passa a mostrar a versão nova na barra sob o campo de mensagem depois do próximo turno, sem `/reload-plugins`. Um waiter já esperando continua no código antigo até o próximo evento. Com o plugin carregado da pasta do repositório (`plugin/`) nada muda: todas as sessões já leem os mesmos arquivos. Voltar para uma versão mais antiga não vale enquanto a pasta da mais nova existir no cache: apagar `~/.ai-chat-center/plugin.json` e a pasta da versão mais nova.
@@ -147,6 +125,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## Feito
 
+- 0.6.7: janela do app abre maior e lembra o tamanho; tamanho do contexto em pizza na barra; respostas rápidas (⚡); notificações do sistema; painel lateral com Markdown e imagens citados, subagentes da sessão e a tela da sessão (filtrada); estado "agentes trabalhando (N)"; parar, reiniciar e remover sessões em segundo plano pelo ⋮ e limpeza das paradas.
 - 0.6.6: sessões abertas antes de uma atualização passam a rodar a versão mais nova instalada (a partir da próxima); o hub não encurta o intervalo do `claude agents` por um "trabalhando" que a tela mostra como parado; blocos de código com Copiar e Quebrar linhas (texto sem linguagem já quebra); balão com fundo na mensagem "Claude → agente"; a cor ou o degradê do fundo pinta o círculo das iniciais, com iniciais claras ou escuras conforme o contraste; o nome "AI Chat Center" cabe inteiro no topo da lista (título e botões um pouco menores); busca na conversa destaca cada ocorrência, com ↑/↓ (e Enter/Shift+Enter) e contador "i de n", sem esconder as outras mensagens; README revisado e CLAUDE.md criado.
 - 0.6.5: cabeçalho da conversa enxuto (nome, pasta, attach e branch); modelo, esforço, modo e versão do plugin foram para a direita da dica do teclado, sob o campo de mensagem; o chip do modelo abre a lista de modelos e, no último item, os níveis de esforço; a versão do Claude Code fica no texto ao passar o mouse sobre a do plugin. Desenho aprovado em 2026-11-25.
 - 0.6.4: mensagens dos agentes (e do Claude para eles) vêm recolhidas na primeira linha, com "Ver tudo" para abrir.

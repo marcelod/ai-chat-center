@@ -47,7 +47,7 @@ function paths() {
 }
 
 // src/core/version.ts
-var VERSION = "0.6.6";
+var VERSION = "0.6.7";
 var PROTOCOL = 2;
 
 // src/hooks/delegate.ts
@@ -419,8 +419,11 @@ async function readMeta(sid) {
   return d && typeof d === "object" && !Array.isArray(d) ? d : {};
 }
 async function setField(sid, key, value2, re) {
+  paths().metaFile(sid);
+  if (typeof value2 === "string" && re.test(value2)) await writeField(sid, key, value2);
+}
+async function writeField(sid, key, value2) {
   const file = paths().metaFile(sid);
-  if (typeof value2 !== "string" || !re.test(value2)) return;
   const meta = await readMeta(sid);
   if (meta[key] === value2) return;
   await writeJsonAtomic(file, { ...meta, [key]: value2 });
@@ -712,12 +715,28 @@ async function ensureHub(opts = {}) {
   throw new Error("AI Chat Center hub did not start in time");
 }
 
+// src/shared/windowSize.ts
+var MIN_WINDOW_SIZE = { width: 480, height: 480 };
+var MAX_WINDOW_SIZE = { width: 8192, height: 8192 };
+var clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Math.round(n)));
+var finite = (n) => typeof n === "number" && Number.isFinite(n);
+function normalizeWindowSize(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const { width, height } = v;
+  if (!finite(width) || !finite(height)) return null;
+  return {
+    width: clamp(width, MIN_WINDOW_SIZE.width, MAX_WINDOW_SIZE.width),
+    height: clamp(height, MIN_WINDOW_SIZE.height, MAX_WINDOW_SIZE.height)
+  };
+}
+
 // src/core/config.ts
 var LANGS = ["en", "pt-BR"];
 async function loadConfig() {
   const c = await readJson(paths().config);
   const language = LANGS.includes(c?.language) ? c.language : "en";
-  return { language, answersFromApp: c?.answersFromApp === true, openWindow: c?.openWindow !== false };
+  const windowSize = normalizeWindowSize(c?.windowSize);
+  return { language, answersFromApp: c?.answersFromApp === true, openWindow: c?.openWindow !== false, ...windowSize ? { windowSize } : {} };
 }
 async function saveConfig(patch) {
   const next = { ...await loadConfig(), ...patch };
@@ -746,12 +765,50 @@ var en_default = {
     usageFailed: "AI Chat Center: could not change the status line in settings.json. See {log}"
   },
   ui: {
+    panel: {
+      label: "Side panel",
+      close: "Close panel",
+      loading: "Loading\u2026",
+      notFound: "File not found.",
+      tooLarge: "This file is too large to show.",
+      notAllowed: "This file can't be shown here.",
+      loadFailed: "Couldn't load this.",
+      image: "image",
+      imageBlocked: "Images in files are not loaded",
+      openFile: "Open {name}",
+      subagents: "Subagents",
+      showSubagents: "Show subagents",
+      noSubagents: "No subagents in this conversation.",
+      noMessages: "Nothing yet.",
+      background: "background",
+      workingFor: "Working for {d}",
+      ran: "Ran {d}",
+      noNewsFor: "No news for {d}",
+      lastTool: "Last: {tool}",
+      status: {
+        running: "Working",
+        finished: "Finished",
+        stale: "No news"
+      },
+      duration: {
+        lessThanMinute: "less than a minute",
+        minutes: "{n} min",
+        hours: "{h} h {m} min"
+      },
+      agentsWorking: "{n} subagents working",
+      screen: "Session screen",
+      refresh: "Refresh",
+      updatedAt: "Updated {time}",
+      screenNotBackground: "Only a background session's screen can be shown.",
+      screenWindows: "Not available on Windows yet.",
+      screenFailed: "Couldn't read the session screen."
+    },
     rename: {
       label: "Rename session",
       failed: "Couldn't rename"
     },
     pinned: "Pinned",
-    chatMenu: { label: "Conversation actions", rename: "Rename", remove: "Remove from app", confirmRemove: "Remove? Confirm", removeFailed: "Couldn't remove", pin: "Pin to top", unpin: "Unpin", disconnect: "Disconnect", confirmDisconnect: "Disconnect? Confirm", pinFailed: "Couldn't change the pin", disconnectFailed: "Couldn't disconnect", resume: "Resume in the background", openTerminal: "Open in a terminal" },
+    chatMenu: { label: "Conversation actions", rename: "Rename", remove: "Remove from app", confirmRemove: "Remove? Confirm", removeFailed: "Couldn't remove", pin: "Pin to top", unpin: "Unpin", disconnect: "Disconnect", confirmDisconnect: "Disconnect? Confirm", pinFailed: "Couldn't change the pin", disconnectFailed: "Couldn't disconnect", resume: "Resume in the background", openTerminal: "Open in a terminal", stop: "Stop session", confirmStop: "Stop? Confirm", stopFailed: "Couldn't stop", respawn: "Restart session", respawnFailed: "Couldn't restart", rm: "Remove from Claude Code", confirmRm: "Remove from Claude Code? Confirm", rmFailed: "Couldn't remove from Claude Code" },
     background: {
       menu: "Background",
       title: "Conversation background",
@@ -816,6 +873,7 @@ var en_default = {
         exit: "Ends the session"
       }
     },
+    stopped: { open: "Clean up stopped sessions", title: "Stopped background sessions", body: "Background sessions Claude Code still lists that no longer run. Removing one runs claude rm: its worktree is deleted when that is safe, and the conversation can still be opened with claude --resume.", loading: "Loading\u2026", empty: "No stopped background sessions.", loadFailed: "Couldn't list the background sessions.", selectAll: "Select all", remove: "Remove ({n})", confirm: "Remove {n} background sessions? This cannot be undone.", confirmOne: "Remove this background session? This cannot be undone.", confirmYes: "Remove", confirmBack: "Back", removing: "Removing\u2026", failed: "Couldn't remove {name}", close: "Close", unnamed: "Unnamed" },
     newSession: { open: "New session", title: "New session", body: "Starts Claude Code in the background in a folder of your computer. It connects to the app at once, with no terminal.", folder: "Folder", noFolders: "No recent folder yet: browse to one below.", foldersFailed: "Couldn't list the folders.", name: "Name (optional)", namePlaceholder: "e.g. billing fixes", nameInvalid: "Letters, numbers, spaces and . _ - only.", model: "Model", effort: "Effort", chosenApply: "Model and effort chosen here apply from the first message.", default: "Default", start: "Start", starting: "Starting\u2026", cancel: "Cancel", failed: "Couldn't start the session.", failedWith: "Couldn't start the session: {error}", waiting: "Starting the new session\u2026", recent: "Recent folders", browse: "Browse folders\u2026", browseHide: "Hide the folder browser", browser: "Folder browser", current: "Current folder", up: "Up one folder", showHidden: "Show hidden folders", use: "Use this folder", pathField: "Or type or paste a full path", pathPlaceholder: "/home/you/project", go: "Go", empty: "No subfolders here.", truncated: "Only the first {count} folders are shown.", loading: "Loading\u2026", browseFailed: "Couldn't open this folder.", folderInvalid: "Type a full path (starting with / or a drive letter).", folderOutside: "Only folders inside your home folder can be used.", folderNotFound: "This folder doesn't exist.", folderDenied: "No permission to open this folder.", untrusted: `Claude Code doesn't trust this folder yet. Open a terminal in {folder}, run claude once and accept "Yes, I trust this folder", then try again.` },
     theme: { label: "Theme", system: "System", light: "Light", dark: "Dark" },
     language: "Language",
@@ -851,11 +909,13 @@ var en_default = {
     },
     status: {
       busy: "working\u2026",
+      agents: "agents working ({n})",
       idle: "idle",
       waiting: "waiting for you in the terminal",
       disconnected: "disconnected \u2014 type /cc again"
     },
     chat: {
+      respawned: "Restarting with the current Claude Code version. The conversation reconnects by itself; if it doesn't within a minute, open it in a terminal and type /cc.",
       origin: {
         terminal: "Sent from the terminal",
         app: "Sent from the app"
@@ -990,15 +1050,51 @@ var en_default = {
       hint: "5-hour usage: turn it on with /ai-chat-center:cc usage on"
     },
     notifications: {
-      label: "Browser notifications",
-      enable: "Enable notifications",
-      denied: "Blocked by the browser"
+      enable: "System notifications",
+      status: {
+        granted: "Allowed: you are told when a session finishes, needs a permission or asks something while the app is in the background",
+        denied: "Blocked by the browser: allow notifications for this site in the browser settings",
+        default: "The browser asks for permission when you turn them on",
+        unsupported: "Not available in this browser"
+      },
+      turnEnded: "Finished its turn",
+      permission: "Needs your permission",
+      question: "Asked a question"
     },
     state: {
       busy: "Status: working",
       idle: "Status: idle",
       waiting: "Status: waiting for you in the terminal",
       disconnected: "Status: disconnected"
+    },
+    context: {
+      label: "Context",
+      summary: "{pct}% used",
+      warn: "near the limit",
+      danger: "almost full",
+      tokens: "{used} / {size} tokens",
+      model: "Model: {model}",
+      left: "{pct}% left until the limit ({tokens} tokens)",
+      autoCompact: "Claude Code compacts automatically before the limit; the exact point is not reported.",
+      estimated: "Window size estimated from the model. With /ai-chat-center:cc usage on, Claude Code reports the exact size.",
+      lastCompact: "Last compaction: {time}",
+      noCompact: "No compaction yet"
+    },
+    quickReplies: {
+      label: "Quick replies",
+      use: "Use: {text}",
+      remove: "Remove: {text}",
+      edit: "Edit",
+      done: "Done",
+      add: "Add",
+      new: "New quick reply",
+      empty: "No quick replies. Use Edit to add one.",
+      hint: "Fills the message field; press Enter to send.",
+      defaults: {
+        d1: "Go ahead",
+        d2: "Commit it",
+        d3: "Summarize what's left"
+      }
     }
   }
 };
@@ -1024,12 +1120,50 @@ var pt_BR_default = {
     usageFailed: "AI Chat Center: n\xE3o foi poss\xEDvel alterar a status line no settings.json. Veja {log}"
   },
   ui: {
+    panel: {
+      label: "Painel lateral",
+      close: "Fechar painel",
+      loading: "Carregando\u2026",
+      notFound: "Arquivo n\xE3o encontrado.",
+      tooLarge: "Este arquivo \xE9 grande demais para mostrar.",
+      notAllowed: "Este arquivo n\xE3o pode ser mostrado aqui.",
+      loadFailed: "N\xE3o foi poss\xEDvel carregar.",
+      image: "imagem",
+      imageBlocked: "Imagens dentro de arquivos n\xE3o s\xE3o carregadas",
+      openFile: "Abrir {name}",
+      subagents: "Subagentes",
+      showSubagents: "Ver subagentes",
+      noSubagents: "Nenhum subagente nesta conversa.",
+      noMessages: "Nada ainda.",
+      background: "segundo plano",
+      workingFor: "Trabalhando h\xE1 {d}",
+      ran: "Rodou {d}",
+      noNewsFor: "Sem novidade h\xE1 {d}",
+      lastTool: "\xDAltima: {tool}",
+      status: {
+        running: "Trabalhando",
+        finished: "Terminado",
+        stale: "Sem novidade"
+      },
+      duration: {
+        lessThanMinute: "menos de um minuto",
+        minutes: "{n} min",
+        hours: "{h} h {m} min"
+      },
+      agentsWorking: "{n} subagentes trabalhando",
+      screen: "Tela da sess\xE3o",
+      refresh: "Atualizar",
+      updatedAt: "Atualizada {time}",
+      screenNotBackground: "S\xF3 d\xE1 para ver a tela de uma sess\xE3o em segundo plano.",
+      screenWindows: "Ainda n\xE3o dispon\xEDvel no Windows.",
+      screenFailed: "N\xE3o foi poss\xEDvel ler a tela da sess\xE3o."
+    },
     rename: {
       label: "Renomear sess\xE3o",
       failed: "N\xE3o foi poss\xEDvel renomear"
     },
     pinned: "Fixada",
-    chatMenu: { label: "A\xE7\xF5es da conversa", rename: "Renomear", remove: "Remover do app", confirmRemove: "Remover? Confirmar", removeFailed: "N\xE3o foi poss\xEDvel remover", pin: "Fixar no topo", unpin: "Desafixar", disconnect: "Desconectar", confirmDisconnect: "Desconectar? Confirmar", pinFailed: "N\xE3o foi poss\xEDvel alterar a fixa\xE7\xE3o", disconnectFailed: "N\xE3o foi poss\xEDvel desconectar", resume: "Retomar em segundo plano", openTerminal: "Abrir no terminal" },
+    chatMenu: { label: "A\xE7\xF5es da conversa", rename: "Renomear", remove: "Remover do app", confirmRemove: "Remover? Confirmar", removeFailed: "N\xE3o foi poss\xEDvel remover", pin: "Fixar no topo", unpin: "Desafixar", disconnect: "Desconectar", confirmDisconnect: "Desconectar? Confirmar", pinFailed: "N\xE3o foi poss\xEDvel alterar a fixa\xE7\xE3o", disconnectFailed: "N\xE3o foi poss\xEDvel desconectar", resume: "Retomar em segundo plano", openTerminal: "Abrir no terminal", stop: "Parar sess\xE3o", confirmStop: "Parar? Confirmar", stopFailed: "N\xE3o foi poss\xEDvel parar", respawn: "Reiniciar sess\xE3o", respawnFailed: "N\xE3o foi poss\xEDvel reiniciar", rm: "Remover do Claude Code", confirmRm: "Remover do Claude Code? Confirmar", rmFailed: "N\xE3o foi poss\xEDvel remover do Claude Code" },
     background: {
       menu: "Fundo",
       title: "Fundo da conversa",
@@ -1094,6 +1228,7 @@ var pt_BR_default = {
         exit: "Encerra a sess\xE3o"
       }
     },
+    stopped: { open: "Limpar sess\xF5es paradas", title: "Sess\xF5es em segundo plano paradas", body: "Sess\xF5es em segundo plano que o Claude Code ainda lista, mas que n\xE3o est\xE3o mais rodando. Remover uma roda claude rm: a worktree dela \xE9 apagada quando \xE9 seguro, e a conversa continua dispon\xEDvel com claude --resume.", loading: "Carregando\u2026", empty: "Nenhuma sess\xE3o em segundo plano parada.", loadFailed: "N\xE3o foi poss\xEDvel listar as sess\xF5es em segundo plano.", selectAll: "Selecionar todas", remove: "Remover ({n})", confirm: "Remover {n} sess\xF5es em segundo plano? N\xE3o d\xE1 para desfazer.", confirmOne: "Remover esta sess\xE3o em segundo plano? N\xE3o d\xE1 para desfazer.", confirmYes: "Remover", confirmBack: "Voltar", removing: "Removendo\u2026", failed: "N\xE3o foi poss\xEDvel remover {name}", close: "Fechar", unnamed: "Sem nome" },
     newSession: { open: "Nova sess\xE3o", title: "Nova sess\xE3o", body: "Inicia o Claude Code em segundo plano numa pasta do seu computador. Ela j\xE1 entra conectada ao app, sem terminal.", folder: "Pasta", noFolders: "Nenhuma pasta recente ainda: navegue at\xE9 uma abaixo.", foldersFailed: "N\xE3o foi poss\xEDvel listar as pastas.", name: "Nome (opcional)", namePlaceholder: "ex.: corre\xE7\xF5es do faturamento", nameInvalid: "S\xF3 letras, n\xFAmeros, espa\xE7os e . _ -", model: "Modelo", effort: "Esfor\xE7o", chosenApply: "O modelo e o esfor\xE7o escolhidos aqui j\xE1 valem desde a primeira mensagem.", default: "Padr\xE3o", start: "Iniciar", starting: "Iniciando\u2026", cancel: "Cancelar", failed: "N\xE3o foi poss\xEDvel iniciar a sess\xE3o.", failedWith: "N\xE3o foi poss\xEDvel iniciar a sess\xE3o: {error}", waiting: "Iniciando a nova sess\xE3o\u2026", recent: "Pastas recentes", browse: "Procurar pastas\u2026", browseHide: "Fechar o navegador de pastas", browser: "Navegador de pastas", current: "Pasta atual", up: "Subir uma pasta", showHidden: "Mostrar pastas ocultas", use: "Usar esta pasta", pathField: "Ou digite ou cole um caminho completo", pathPlaceholder: "/home/voce/projeto", go: "Ir", empty: "Nenhuma subpasta aqui.", truncated: "S\xF3 as primeiras {count} pastas aparecem.", loading: "Carregando\u2026", browseFailed: "N\xE3o foi poss\xEDvel abrir esta pasta.", folderInvalid: "Digite um caminho completo (come\xE7ando com / ou com a letra do disco).", folderOutside: "S\xF3 d\xE1 para usar pastas dentro da sua pasta pessoal.", folderNotFound: "Esta pasta n\xE3o existe.", folderDenied: "Sem permiss\xE3o para abrir esta pasta.", untrusted: 'O Claude Code ainda n\xE3o confia nesta pasta. Abra um terminal em {folder}, rode claude uma vez e aceite "Yes, I trust this folder"; depois tente de novo.' },
     theme: { label: "Tema", system: "Sistema", light: "Claro", dark: "Escuro" },
     language: "Idioma",
@@ -1129,11 +1264,13 @@ var pt_BR_default = {
     },
     status: {
       busy: "trabalhando\u2026",
+      agents: "agentes trabalhando ({n})",
       idle: "parada",
       waiting: "aguardando voc\xEA no terminal",
       disconnected: "desconectada \u2014 digite /cc de novo"
     },
     chat: {
+      respawned: "Reiniciando com a vers\xE3o atual do Claude Code. A conversa se reconecta sozinha; se n\xE3o voltar em um minuto, abra no terminal e digite /cc.",
       origin: {
         terminal: "Enviada pelo terminal",
         app: "Enviada pelo app"
@@ -1268,15 +1405,51 @@ var pt_BR_default = {
       hint: "Uso de 5 horas: ative com /ai-chat-center:cc usage on"
     },
     notifications: {
-      label: "Notifica\xE7\xF5es do navegador",
-      enable: "Ativar notifica\xE7\xF5es",
-      denied: "Bloqueadas pelo navegador"
+      enable: "Notifica\xE7\xF5es do sistema",
+      status: {
+        granted: "Permitidas: voc\xEA \xE9 avisado quando uma sess\xE3o termina, pede permiss\xE3o ou pergunta algo com o app em segundo plano",
+        denied: "Bloqueadas pelo navegador: permita as notifica\xE7\xF5es deste site nas configura\xE7\xF5es do navegador",
+        default: "O navegador pede permiss\xE3o quando voc\xEA liga",
+        unsupported: "N\xE3o dispon\xEDveis neste navegador"
+      },
+      turnEnded: "Terminou o turno",
+      permission: "Pede permiss\xE3o",
+      question: "Fez uma pergunta"
     },
     state: {
       busy: "Status: trabalhando",
       idle: "Status: ociosa",
       waiting: "Status: esperando voc\xEA no terminal",
       disconnected: "Status: desconectada"
+    },
+    context: {
+      label: "Contexto",
+      summary: "{pct}% usado",
+      warn: "perto do limite",
+      danger: "quase cheio",
+      tokens: "{used} / {size} tokens",
+      model: "Modelo: {model}",
+      left: "faltam {pct}% at\xE9 o limite ({tokens} tokens)",
+      autoCompact: "O Claude Code compacta sozinho antes do limite; o ponto exato n\xE3o \xE9 informado.",
+      estimated: "Tamanho da janela estimado pelo modelo. Com /ai-chat-center:cc usage on, o Claude Code informa o tamanho exato.",
+      lastCompact: "\xDAltima compacta\xE7\xE3o: {time}",
+      noCompact: "Nenhuma compacta\xE7\xE3o ainda"
+    },
+    quickReplies: {
+      label: "Respostas r\xE1pidas",
+      use: "Usar: {text}",
+      remove: "Remover: {text}",
+      edit: "Editar",
+      done: "Pronto",
+      add: "Adicionar",
+      new: "Nova resposta r\xE1pida",
+      empty: "Nenhuma resposta r\xE1pida. Use Editar para adicionar.",
+      hint: "Preenche o campo de mensagem; aperte Enter para enviar.",
+      defaults: {
+        d1: "Pode seguir",
+        d2: "Faz o commit",
+        d3: "Resume o que falta"
+      }
     }
   }
 };
@@ -1317,12 +1490,13 @@ function isCcCommand(prompt) {
 // src/core/claudeAgents.ts
 import { execFile } from "node:child_process";
 import os4 from "node:os";
-function runClaudeAgentsJson(platform = process.platform) {
+function runClaudeAgentsJson(platform = process.platform, all = false) {
   const win = platform === "win32";
+  const argv = all ? ["agents", "--json", "--all"] : ["agents", "--json"];
   return new Promise((resolve, reject) => {
     execFile(
-      win ? "claude agents --json" : "claude",
-      win ? [] : ["agents", "--json"],
+      win ? `claude ${argv.join(" ")}` : "claude",
+      win ? [] : argv,
       { cwd: os4.homedir(), shell: win, windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => err ? reject(err) : resolve(String(stdout))
     );

@@ -47,7 +47,7 @@ function paths() {
 }
 
 // src/core/version.ts
-var VERSION = "0.6.6";
+var VERSION = "0.6.7";
 
 // src/hooks/delegate.ts
 var FLAG = /* @__PURE__ */ Symbol.for("ai-chat-center.delegated");
@@ -216,12 +216,28 @@ async function getRegistration(sid) {
   return readJson(regFile(sid));
 }
 
+// src/shared/windowSize.ts
+var MIN_WINDOW_SIZE = { width: 480, height: 480 };
+var MAX_WINDOW_SIZE = { width: 8192, height: 8192 };
+var clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Math.round(n)));
+var finite = (n) => typeof n === "number" && Number.isFinite(n);
+function normalizeWindowSize(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const { width, height } = v;
+  if (!finite(width) || !finite(height)) return null;
+  return {
+    width: clamp(width, MIN_WINDOW_SIZE.width, MAX_WINDOW_SIZE.width),
+    height: clamp(height, MIN_WINDOW_SIZE.height, MAX_WINDOW_SIZE.height)
+  };
+}
+
 // src/core/config.ts
 var LANGS = ["en", "pt-BR"];
 async function loadConfig() {
   const c = await readJson(paths().config);
   const language = LANGS.includes(c?.language) ? c.language : "en";
-  return { language, answersFromApp: c?.answersFromApp === true, openWindow: c?.openWindow !== false };
+  const windowSize = normalizeWindowSize(c?.windowSize);
+  return { language, answersFromApp: c?.answersFromApp === true, openWindow: c?.openWindow !== false, ...windowSize ? { windowSize } : {} };
 }
 
 // src/core/turn.ts

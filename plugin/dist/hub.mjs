@@ -2,9 +2,9 @@ import { createRequire as __acc_createRequire } from 'node:module';
 const require = __acc_createRequire(import.meta.url);
 
 // src/hub/main.ts
-import fs18 from "node:fs/promises";
+import fs20 from "node:fs/promises";
 import fsSync from "node:fs";
-import path17 from "node:path";
+import path19 from "node:path";
 import crypto10 from "node:crypto";
 import { fileURLToPath } from "node:url";
 
@@ -173,6 +173,19 @@ async function readGitBranch(cwd) {
   }
 }
 
+// src/shared/context.ts
+var DEFAULT_CONTEXT_WINDOW = 2e5;
+var LARGE_CONTEXT_WINDOW = 1e6;
+var MIN_CONTEXT_WINDOW = 1e3;
+var MAX_CONTEXT_WINDOW = 1e8;
+var isContextWindow = (n) => typeof n === "number" && Number.isInteger(n) && n >= MIN_CONTEXT_WINDOW && n <= MAX_CONTEXT_WINDOW;
+var ONE_MILLION = /\[1m\]|(?:^|[-_])1m$/i;
+function contextWindowSize(model, used, reported) {
+  if (isContextWindow(reported) && reported >= used) return { size: reported, exact: true };
+  if (model && ONE_MILLION.test(model) || used > DEFAULT_CONTEXT_WINDOW) return { size: LARGE_CONTEXT_WINDOW, exact: false };
+  return { size: DEFAULT_CONTEXT_WINDOW, exact: false };
+}
+
 // src/core/meta.ts
 var EFFORT_RE = /^[a-z]{1,16}$/;
 var MODE_RE = /^[a-zA-Z]{1,24}$/;
@@ -187,6 +200,10 @@ async function getEffort(sid) {
 async function getMode(sid) {
   const { mode } = await readMeta(sid);
   return typeof mode === "string" && MODE_RE.test(mode) ? mode : null;
+}
+async function getContextWindow(sid) {
+  const { contextWindow } = await readMeta(sid);
+  return isContextWindow(contextWindow) ? contextWindow : null;
 }
 var MODEL_RE = /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/;
 function shortModel(id) {
@@ -319,8 +336,8 @@ async function clearBackground(sid) {
 }
 
 // src/hub/provider.ts
-import fs12 from "node:fs/promises";
-import path11 from "node:path";
+import fs13 from "node:fs/promises";
+import path12 from "node:path";
 
 // src/core/registry.ts
 import fs9 from "node:fs/promises";
@@ -673,7 +690,7 @@ async function storeAttachment(sid, rawName, src, max) {
   const fh = await fs8.open(file, "wx", FILE_MODE);
   let ok = false;
   try {
-    await new Promise((resolve, reject) => {
+    await new Promise((resolve2, reject) => {
       let size = 0;
       let tooBig = false;
       let failed = null;
@@ -693,7 +710,7 @@ async function storeAttachment(sid, rawName, src, max) {
         }).finally(() => src.resume());
       });
       src.on("end", () => {
-        void chain.then(() => tooBig ? reject(new AttachmentTooLargeError()) : failed ? reject(failed) : resolve());
+        void chain.then(() => tooBig ? reject(new AttachmentTooLargeError()) : failed ? reject(failed) : resolve2());
       });
       src.on("error", reject);
     });
@@ -745,7 +762,7 @@ async function cleanupAttachments(alive, now = Date.now(), maxAgeMs = ATTACHMENT
 }
 
 // src/core/version.ts
-var VERSION = "0.6.6";
+var VERSION = "0.6.7";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -932,6 +949,10 @@ function validAnswers(questions, answers) {
   return out;
 }
 
+// src/hub/subagents.ts
+import fs11 from "node:fs/promises";
+import path10 from "node:path";
+
 // src/hub/transcript/reader.ts
 import { open } from "node:fs/promises";
 import { StringDecoder } from "node:string_decoder";
@@ -984,6 +1005,14 @@ function splitAttachments(text) {
   }
   if (attachments.length === 0) return { text, attachments };
   return { text: kept.join("\n").trim(), attachments };
+}
+function attachmentPaths(text) {
+  const out = [];
+  for (const line of text.split("\n")) {
+    const m = LINE_RE.exec(line.replace(/\r$/, ""));
+    if (m) out.push(m[1]);
+  }
+  return out;
 }
 
 // src/shared/diff.ts
@@ -1074,7 +1103,7 @@ var WRAPPER_TAGS = /<\/?(?:pasted_content|teammate-message)(?:\s+[\w-]+="[^"]*")
 var unwrapPrompt = (text) => text.replace(WRAPPER_TAGS, "");
 function body(text) {
   const r = splitAttachments(text);
-  return r.attachments.length ? r : { text };
+  return r.attachments.length ? { ...r, attachmentPaths: attachmentPaths(text) } : { text };
 }
 var AGENT_MESSAGE_PREFIX = "Another Claude session sent a message:";
 var AGENT_BLOCK = /<(teammate-message|agent-message)((?:\s+[\w-]+="[^"]*")*)\s*>\n?([\s\S]*?)<\/\1>/g;
@@ -1113,21 +1142,29 @@ function agentMessages(content, names = /* @__PURE__ */ new Map()) {
 }
 function toAgentMessage(name, input) {
   if (!isRecord(input)) return null;
-  const str = (v) => typeof v === "string" ? v.trim() : "";
+  const str2 = (v) => typeof v === "string" ? v.trim() : "";
   if (name === "Agent" || name === "Task") {
-    const text = str(input.prompt);
+    const text = str2(input.prompt);
     if (!text) return null;
-    return { to: str(input.name) || str(input.description), text: truncate(text, RESULT_MAX * 4) };
+    return { to: str2(input.name) || str2(input.description), text: truncate(text, RESULT_MAX * 4) };
   }
   if (name === "SendMessage") {
-    const text = str(input.message);
+    const text = str2(input.message);
     if (!text) return null;
-    return { to: str(input.to), text: truncate(text, RESULT_MAX * 4) };
+    return { to: str2(input.to), text: truncate(text, RESULT_MAX * 4) };
   }
   return null;
 }
 function isRecord(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+var isTokenCount = (v) => typeof v === "number" && Number.isInteger(v) && v >= 0;
+function contextTokens(usage) {
+  if (!isRecord(usage)) return void 0;
+  const parts = [usage.input_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens];
+  if (parts.some((v) => v !== void 0 && v !== null && !isTokenCount(v))) return void 0;
+  const sum = parts.reduce((a, v) => a + (isTokenCount(v) ? v : 0), 0);
+  return sum > 0 ? sum : void 0;
 }
 function summarize(name, input) {
   if (!isRecord(input)) return "";
@@ -1139,21 +1176,21 @@ function summarize(name, input) {
 }
 function actionDiff(name, input) {
   if (!isRecord(input)) return void 0;
-  const str = (v) => typeof v === "string" ? v : void 0;
+  const str2 = (v) => typeof v === "string" ? v : void 0;
   const edits = [];
   if (name === "Edit") {
-    const o = str(input.old_string);
-    const n = str(input.new_string);
+    const o = str2(input.old_string);
+    const n = str2(input.new_string);
     if (o !== void 0 && n !== void 0) edits.push({ oldText: o, newText: n });
   } else if (name === "MultiEdit" && Array.isArray(input.edits)) {
     for (const e of input.edits) {
       if (!isRecord(e)) continue;
-      const o = str(e.old_string);
-      const n = str(e.new_string);
+      const o = str2(e.old_string);
+      const n = str2(e.new_string);
       if (o !== void 0 && n !== void 0) edits.push({ oldText: o, newText: n });
     }
   } else if (name === "Write") {
-    const c = str(input.content);
+    const c = str2(input.content);
     if (c !== void 0) edits.push({ oldText: "", newText: c });
   }
   return edits.length && toolDiff(edits) || void 0;
@@ -1210,13 +1247,17 @@ var TranscriptParser = class {
   model;
   /** `version` (Claude Code) of the latest main-thread entry that carries one. */
   claudeVersion;
+  /** Tokens in the context at the latest main-thread reply, or left by the latest compaction (unknown when it did not say). */
+  contextTokens;
+  /** The latest compaction (`compact_boundary`): when, and whether `/compact` or automatic. */
+  lastCompact;
   /** Returns new or updated events (same id = replace). */
   push(entry) {
     if (!isRecord(entry)) return [];
     const uuid = entry.uuid;
     const ts = entry.timestamp;
     if (typeof uuid !== "string" || typeof ts !== "string") return [];
-    if (entry.isSidechain === true) return [];
+    if (entry.isSidechain === true && !this.opts.sidechain) return [];
     if (typeof entry.version === "string" && entry.version) this.claudeVersion = entry.version;
     if (entry.type === "system" && entry.subtype === "away_summary" && typeof entry.content === "string") {
       const text = cleanRecap(entry.content);
@@ -1224,12 +1265,20 @@ var TranscriptParser = class {
       this.open = null;
       return [{ kind: "recap", id: uuid, ts, text }];
     }
+    if (entry.type === "system" && entry.subtype === "compact_boundary") {
+      this.compacted(ts, entry.compactMetadata);
+      return [];
+    }
     if (entry.type === "attachment") return this.attachment(uuid, ts, entry.attachment);
     const message = isRecord(entry.message) ? entry.message : void 0;
     if (!message) return [];
     if (entry.type === "assistant") {
       const model = message.model;
-      if (typeof model === "string" && model && model !== "<synthetic>") this.model = model;
+      if (typeof model === "string" && model && model !== "<synthetic>") {
+        this.model = model;
+        const used = contextTokens(message.usage);
+        if (used !== void 0) this.contextTokens = used;
+      }
       return this.assistant(uuid, ts, message.content);
     }
     if (entry.type === "user") {
@@ -1241,6 +1290,13 @@ var TranscriptParser = class {
       return this.user(uuid, ts, message.content, entry.toolUseResult);
     }
     return [];
+  }
+  /** A compaction: the context now holds what it left (`postTokens`), until the next reply says otherwise. */
+  compacted(ts, meta) {
+    const m = isRecord(meta) ? meta : {};
+    const trigger = m.trigger === "manual" || m.trigger === "auto" ? m.trigger : void 0;
+    this.lastCompact = { at: ts, ...trigger ? { trigger } : {} };
+    this.contextTokens = isTokenCount(m.postTokens) ? m.postTokens : void 0;
   }
   /** A prompt the user typed while Claude was busy is recorded only as a queued_command attachment. */
   attachment(uuid, ts, a) {
@@ -1442,8 +1498,8 @@ var TranscriptParser = class {
 // src/hub/transcript/reader.ts
 var CHUNK = 64 * 1024;
 var TranscriptReader = class {
-  constructor(path18, keys, opts = {}) {
-    this.path = path18;
+  constructor(path20, keys, opts = {}) {
+    this.path = path20;
     this.keys = keys;
     this.opts = opts;
     this.parser = new TranscriptParser(keys, opts);
@@ -1478,6 +1534,11 @@ var TranscriptReader = class {
   /** Claude Code version recorded in the latest transcript lines, if any. */
   claudeVersion() {
     return this.parser.claudeVersion;
+  }
+  /** Tokens in the context now, and the last compaction (see TranscriptParser). */
+  context() {
+    const { contextTokens: tokens, lastCompact } = this.parser;
+    return { ...tokens !== void 0 ? { tokens } : {}, ...lastCompact ? { lastCompactAt: lastCompact.at } : {} };
   }
   reset() {
     this.offset = 0;
@@ -1537,17 +1598,189 @@ var TranscriptReader = class {
   }
 };
 
+// src/hub/subagents.ts
+var STALE_MS = 10 * 6e4;
+var MAX_LIST = 50;
+var HEAD_BYTES = 16 * 1024;
+var TAIL_BYTES = 256 * 1024;
+var MAX_META = 64 * 1024;
+var AGENT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+var isAgentId = (v) => typeof v === "string" && AGENT_ID_RE.test(v);
+function subagentsDir(transcriptPath, sid) {
+  assertSessionId(sid);
+  return path10.join(path10.dirname(transcriptPath), sid, "subagents");
+}
+var cache = /* @__PURE__ */ new Map();
+var str = (v, max = 300) => typeof v === "string" ? v.slice(0, max) : void 0;
+function parseMeta(raw) {
+  let j;
+  try {
+    j = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!j || typeof j !== "object" || Array.isArray(j)) return null;
+  const m = j;
+  return {
+    description: str(m.description) ?? "",
+    agentType: str(m.agentType, 100) ?? "",
+    model: str(m.model, 100) ? shortModel(str(m.model, 100)) : void 0,
+    background: m.requestShape === "background",
+    finished: m.finished === true || m.stoppedByUser === true
+  };
+}
+async function readRange(file, start, length) {
+  const fh = await fs11.open(file, "r");
+  try {
+    const buf = Buffer.alloc(length);
+    const { bytesRead } = await fh.read(buf, 0, length, start);
+    return buf.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await fh.close();
+  }
+}
+function jsonLines(text, cutStart) {
+  const lines2 = text.split("\n");
+  if (cutStart) lines2.shift();
+  const out = [];
+  for (const l of lines2) {
+    if (!l.trim()) continue;
+    try {
+      const j = JSON.parse(l);
+      if (j && typeof j === "object" && !Array.isArray(j)) out.push(j);
+    } catch {
+    }
+  }
+  return out;
+}
+function lastToolOf(lines2) {
+  for (let i = lines2.length - 1; i >= 0; i--) {
+    const l = lines2[i];
+    if (l.type !== "assistant") continue;
+    const content = l.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (let k = content.length - 1; k >= 0; k--) {
+      const b = content[k];
+      if (b && b.type === "tool_use" && typeof b.name === "string") return b.name.slice(0, 100);
+    }
+  }
+  return void 0;
+}
+async function readTail(file, size, prev, onRead) {
+  onRead?.(file);
+  let startedAt = prev?.startedAt;
+  if (!startedAt) {
+    const head = jsonLines(await readRange(file, 0, Math.min(size, HEAD_BYTES)), false);
+    startedAt = head.map((l) => str(l.timestamp, 40)).find(Boolean);
+  }
+  const from = Math.max(0, size - TAIL_BYTES);
+  const tail = jsonLines(await readRange(file, from, size - from), from > 0);
+  let lastAt;
+  for (let i = tail.length - 1; i >= 0 && !lastAt; i--) lastAt = str(tail[i].timestamp, 40);
+  return { startedAt, lastAt: lastAt ?? prev?.lastAt, lastTool: lastToolOf(tail) ?? prev?.lastTool };
+}
+async function readAgent(dir, id, onRead) {
+  const metaFile = path10.join(dir, `agent-${id}.meta.json`);
+  const logFile = path10.join(dir, `agent-${id}.jsonl`);
+  let metaSt;
+  try {
+    metaSt = await fs11.stat(metaFile);
+  } catch {
+    return null;
+  }
+  const logSt = await fs11.stat(logFile).catch(() => null);
+  const metaKey = `${metaSt.size}:${metaSt.mtimeMs}`;
+  const logKey = logSt ? `${logSt.size}:${logSt.mtimeMs}` : "";
+  const prev = cache.get(metaFile);
+  if (prev && prev.metaKey === metaKey && prev.logKey === logKey) return prev;
+  let meta = prev?.meta ?? null;
+  if (!prev || prev.metaKey !== metaKey) {
+    meta = null;
+    if (metaSt.size <= MAX_META) {
+      onRead?.(metaFile);
+      meta = parseMeta(await fs11.readFile(metaFile, "utf8").catch(() => ""));
+    }
+  }
+  let tail = prev?.tail ?? {};
+  if (logSt && (!prev || prev.logKey !== logKey)) tail = await readTail(logFile, logSt.size, prev?.tail, onRead).catch(() => tail);
+  if (!tail.startedAt && logSt && logSt.birthtimeMs > 0) tail = { ...tail, startedAt: new Date(logSt.birthtimeMs).toISOString() };
+  const entry = { metaKey, meta, logKey, tail, mtimeMs: logSt?.mtimeMs ?? metaSt.mtimeMs };
+  cache.set(metaFile, entry);
+  return entry;
+}
+function info(id, e, now) {
+  if (!e.meta) return null;
+  const lineAt = e.tail.lastAt ? Date.parse(e.tail.lastAt) : NaN;
+  const last = Math.max(Number.isFinite(lineAt) ? lineAt : 0, e.mtimeMs);
+  const status = e.meta.finished ? "finished" : now - last < STALE_MS ? "running" : "stale";
+  const out = { id, description: e.meta.description, agentType: e.meta.agentType, background: e.meta.background, status };
+  if (e.meta.model) out.model = e.meta.model;
+  if (e.tail.startedAt) out.startedAt = e.tail.startedAt;
+  if (last > 0) out.lastActivityAt = new Date(last).toISOString();
+  if (e.tail.lastTool) out.lastTool = e.tail.lastTool;
+  return out;
+}
+async function agentIds(dir) {
+  let names;
+  try {
+    names = await fs11.readdir(dir);
+  } catch {
+    return [];
+  }
+  const ids = [];
+  for (const n of names) {
+    const m = /^agent-(.+)\.meta\.json$/.exec(n);
+    if (m && isAgentId(m[1])) ids.push(m[1]);
+  }
+  return ids;
+}
+async function listSubagents(dir, opts = {}) {
+  const now = (opts.now ?? Date.now)();
+  const out = [];
+  for (const id of await agentIds(dir)) {
+    const e = await readAgent(dir, id, opts.onRead).catch(() => null);
+    const i = e && info(id, e, now);
+    if (i) out.push(i);
+  }
+  const at = (a) => a.lastActivityAt ? Date.parse(a.lastActivityAt) : 0;
+  out.sort((a, b) => at(b) - at(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return out.slice(0, opts.limit ?? MAX_LIST);
+}
+async function runningSubagents(dir, now = Date.now) {
+  const t = now();
+  let n = 0;
+  for (const id of await agentIds(dir)) {
+    if (cache.get(path10.join(dir, `agent-${id}.meta.json`))?.meta?.finished) continue;
+    const e = await readAgent(dir, id).catch(() => null);
+    if (e && info(id, e, t)?.status === "running") n++;
+  }
+  return n;
+}
+async function subagentEvents(dir, id) {
+  if (!isAgentId(id)) throw new Error("invalid agent id");
+  const file = path10.join(dir, `agent-${id}.jsonl`);
+  try {
+    await fs11.stat(file);
+  } catch {
+    return null;
+  }
+  const r = new TranscriptReader(file, void 0, { diffs: false, sidechain: true });
+  await r.readNew();
+  return r.all();
+}
+
 // src/core/claudeAgents.ts
 import { execFile } from "node:child_process";
 import os3 from "node:os";
-function runClaudeAgentsJson(platform = process.platform) {
+function runClaudeAgentsJson(platform = process.platform, all = false) {
   const win = platform === "win32";
-  return new Promise((resolve, reject) => {
+  const argv = all ? ["agents", "--json", "--all"] : ["agents", "--json"];
+  return new Promise((resolve2, reject) => {
     execFile(
-      win ? "claude agents --json" : "claude",
-      win ? [] : ["agents", "--json"],
+      win ? `claude ${argv.join(" ")}` : "claude",
+      win ? [] : argv,
       { cwd: os3.homedir(), shell: win, windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
-      (err, stdout) => err ? reject(err) : resolve(String(stdout))
+      (err, stdout) => err ? reject(err) : resolve2(String(stdout))
     );
   });
 }
@@ -1555,7 +1788,7 @@ function runClaudeAgentsJson(platform = process.platform) {
 // src/hub/bgSessions.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import os4 from "node:os";
-import path10 from "node:path";
+import path11 from "node:path";
 var BG_ID_RE = /^[0-9a-f]{8}$/;
 var isBgId = (id) => typeof id === "string" && BG_ID_RE.test(id);
 var MAX_COMMAND = 200;
@@ -1576,31 +1809,36 @@ function cleanEnv(env, configDir) {
 }
 function configDirFor(configDir, home = os4.homedir(), platform = process.platform) {
   if (!configDir) return void 0;
-  const a = path10.resolve(configDir);
-  const b = path10.resolve(home, ".claude");
+  const a = path11.resolve(configDir);
+  const b = path11.resolve(home, ".claude");
   const same = platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
   return same ? void 0 : configDir;
 }
 var RESUME_TIMEOUT_MS = 6e4;
+var MANAGE_TIMEOUT_MS = 3e4;
 var MAX_ERROR = 500;
 function runBg(args, cwd, configDir, deps) {
+  return runClaude(["--bg", ...args], cwd, configDir, deps, RESUME_TIMEOUT_MS);
+}
+function runClaude(argv, cwd, configDir, deps, timeoutMs) {
   const platform = deps.platform ?? process.platform;
   const win = platform === "win32";
   const spawn = deps.spawn ?? nodeSpawn;
-  const cmd = win ? ["claude", "--bg", ...args.map(winQuote)].join(" ") : "claude";
-  const argv = win ? [] : ["--bg", ...args];
-  return new Promise((resolve) => {
+  const cmd = win ? ["claude", ...argv.map(winQuote)].join(" ") : "claude";
+  const args = win ? [] : argv;
+  const label = `claude ${argv[0] ?? ""}`.trim();
+  return new Promise((resolve2) => {
     let out = "";
     let done = false;
     const finish = (r) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      resolve(r);
+      resolve2(r);
     };
     let child;
     try {
-      child = spawn(cmd, argv, {
+      child = spawn(cmd, args, {
         cwd,
         env: cleanEnv(deps.env ?? process.env, configDirFor(configDir, deps.home, platform)),
         shell: win,
@@ -1608,12 +1846,12 @@ function runBg(args, cwd, configDir, deps) {
         stdio: ["ignore", "pipe", "pipe"]
       });
     } catch (e) {
-      return resolve({ ok: false, error: e.message });
+      return resolve2({ ok: false, error: e.message });
     }
     const timer = setTimeout(() => {
       child.kill();
-      finish({ ok: false, error: "claude --bg did not answer in 60 s" });
-    }, RESUME_TIMEOUT_MS);
+      finish({ ok: false, error: `${label} did not answer in ${Math.round(timeoutMs / 1e3)} s` });
+    }, timeoutMs);
     const collect = (d) => {
       if (out.length < 4 * MAX_ERROR) out += String(d);
     };
@@ -1625,6 +1863,14 @@ function runBg(args, cwd, configDir, deps) {
       finish({ ok: false, error: stripAnsi(out).trim().slice(0, MAX_ERROR) || `claude exited with code ${code2}` });
     });
   });
+}
+var BG_ACTIONS = ["stop", "respawn", "rm"];
+var isBgAction = (v) => typeof v === "string" && BG_ACTIONS.includes(v);
+async function manageBackground(action, id, configDir, deps = {}) {
+  if (!isBgAction(action)) throw new Error("invalid action");
+  if (!isBgId(id)) throw new Error("invalid background session id");
+  const r = await runClaude([action, id], deps.home ?? os4.homedir(), configDir, deps, deps.timeoutMs ?? MANAGE_TIMEOUT_MS);
+  return r.ok ? { ok: true } : r;
 }
 function winQuote(a) {
   return /^[\w:./-]+$/.test(a) ? a : `"${a}"`;
@@ -1682,19 +1928,19 @@ async function typeCommand(id, text, deps = {}) {
   });
   let exited = false;
   let exitError = null;
-  const closed = new Promise((resolve) => {
+  const closed = new Promise((resolve2) => {
     child.on("error", (e) => {
       exitError = e;
       exited = true;
-      resolve();
+      resolve2();
     });
     child.on("close", () => {
       exited = true;
-      resolve();
+      resolve2();
     });
   });
   try {
-    await new Promise((resolve, reject) => {
+    await new Promise((resolve2, reject) => {
       let seen = "";
       const timer = setTimeout(() => reject(new Error("the session prompt did not show")), deps.promptTimeoutMs ?? 1e4);
       const onData = (d) => {
@@ -1702,7 +1948,7 @@ async function typeCommand(id, text, deps = {}) {
         if (seen.includes("\u276F")) {
           clearTimeout(timer);
           child.stdout?.off("data", onData);
-          resolve();
+          resolve2();
         }
       };
       child.stdout?.on("data", onData);
@@ -1752,9 +1998,28 @@ async function queryLiveSessions(run = runClaudeAgentsJson) {
     return null;
   }
 }
+function toStopped(x) {
+  if (!x || typeof x !== "object") return null;
+  const o = x;
+  if (o.kind !== "background" || typeof o.pid === "number") return null;
+  if (!isBgId(o.id) || typeof o.sessionId !== "string" || !o.sessionId || typeof o.cwd !== "string") return null;
+  const s = { bgId: o.id, sessionId: o.sessionId, cwd: o.cwd, name: typeof o.name === "string" ? o.name : "" };
+  if (typeof o.state === "string" && /^[a-z_-]{1,20}$/.test(o.state)) s.state = o.state;
+  if (typeof o.startedAt === "number" && Number.isFinite(o.startedAt)) s.startedAt = o.startedAt;
+  return s;
+}
+async function queryStoppedBackground(run = () => runClaudeAgentsJson(process.platform, true)) {
+  try {
+    const parsed = JSON.parse(await run());
+    if (!Array.isArray(parsed)) return null;
+    return parsed.map(toStopped).filter((s) => s !== null);
+  } catch {
+    return null;
+  }
+}
 
 // src/hooks/parentClaude.ts
-import fs11 from "node:fs";
+import fs12 from "node:fs";
 import { execFileSync } from "node:child_process";
 function isClaudeArgv(argv) {
   const base = (s) => s.split(/[\\/]/).pop() ?? "";
@@ -1764,7 +2029,7 @@ function isClaudeArgv(argv) {
 function readProcessArgv(pid, platform) {
   try {
     if (platform === "linux") {
-      return fs11.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
+      return fs12.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
     }
     const out = execFileSync("ps", ["-o", "args=", "-p", String(pid)], { encoding: "utf8", timeout: 2e3, stdio: ["ignore", "pipe", "ignore"] });
     return out.trim().split(/\s+/).filter(Boolean);
@@ -1773,16 +2038,16 @@ function readProcessArgv(pid, platform) {
   }
 }
 function createClaudeProcessCheck(platform = process.platform, readArgv = (p) => readProcessArgv(p, platform), now = Date.now, ttlMs = 1e4) {
-  const cache = /* @__PURE__ */ new Map();
+  const cache2 = /* @__PURE__ */ new Map();
   return (pid) => {
     if (!Number.isInteger(pid) || pid <= 1 || platform === "win32") return false;
     const t = now();
-    const hit = cache.get(pid);
+    const hit = cache2.get(pid);
     if (hit && t - hit.at < ttlMs) return hit.ok;
     const argv = readArgv(pid);
     const ok = argv !== null && isClaudeArgv(argv);
-    if (cache.size > 256) cache.clear();
-    cache.set(pid, { at: t, ok });
+    if (cache2.size > 256) cache2.clear();
+    cache2.set(pid, { at: t, ok });
     return ok;
   };
 }
@@ -1855,6 +2120,8 @@ var WAITER_HEARTBEAT_STALE_MS = 3e4;
 var STALLED_AFTER_MS = 15e3;
 var TRANSCRIPT_MISSING_AFTER_MS = 15e3;
 var MISSES_TO_EXIT = 3;
+var RESTART_GRACE_MS = 9e4;
+var AGENTS_TTL_MS = 5e3;
 var ClaudeCodeProvider = class {
   constructor(listLive = queryLiveSessions, opts = {}) {
     this.listLive = listLive;
@@ -1871,7 +2138,10 @@ var ClaudeCodeProvider = class {
   lastModels = /* @__PURE__ */ new Map();
   // disconnected sessions
   misses = /* @__PURE__ */ new Map();
+  /** Sessions being restarted (`claude respawn`): until when their absence is not an exit. */
+  restarting = /* @__PURE__ */ new Map();
   liveCache = null;
+  agentCounts = /* @__PURE__ */ new Map();
   lastGood = null;
   lastSignature = null;
   now;
@@ -1933,6 +2203,14 @@ var ClaudeCodeProvider = class {
       this.misses.set(sid, m);
     }
     if (!live.ok) return false;
+    const until = this.restarting.get(sid);
+    if (until !== void 0) {
+      if (this.now() < until && !live.list.some((l) => l.sessionId === sid)) {
+        m.count = 0;
+        return false;
+      }
+      this.restarting.delete(sid);
+    }
     if (reg.pid !== null && this.alive(reg.pid) && !live.list.some((l) => l.pid === reg.pid)) {
       m.count = 0;
       return false;
@@ -1950,7 +2228,7 @@ var ClaudeCodeProvider = class {
     const oldest = Math.min(...queued.map((m) => Date.parse(m.createdAt)).filter((n) => !Number.isNaN(n)));
     if (!Number.isFinite(oldest) || this.now() - oldest < STALLED_AFTER_MS) return false;
     try {
-      return this.now() - (await fs12.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
+      return this.now() - (await fs13.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
     } catch {
       return true;
     }
@@ -1964,7 +2242,7 @@ var ClaudeCodeProvider = class {
   async transcriptMissing(transcriptPath, connectedAt) {
     if (this.now() - (Date.parse(connectedAt) || 0) < TRANSCRIPT_MISSING_AFTER_MS) return false;
     try {
-      await fs12.stat(transcriptPath);
+      await fs13.stat(transcriptPath);
       return false;
     } catch (err) {
       return err.code === "ENOENT";
@@ -2017,6 +2295,10 @@ var ClaudeCodeProvider = class {
     }
     return LIVE_IDLE_TTL_MS;
   }
+  expectRestart(sid) {
+    this.restarting.set(sid, this.now() + RESTART_GRACE_MS);
+    this.misses.delete(sid);
+  }
   async listSessions() {
     const regs = await listRegistrations();
     const live = await this.live(false, await this.liveTtl(regs));
@@ -2067,7 +2349,7 @@ var ClaudeCodeProvider = class {
       if (!disconnected && live.ok && l?.status === "idle") await this.dropStaleBusy(sid);
       const cwd = l?.cwd ?? reg.cwd;
       const queued = disconnected ? [] : await peek(sid);
-      const originalName = l?.name || path11.basename(cwd);
+      const originalName = l?.name || path12.basename(cwd);
       const custom = await getDisplayName(sid);
       const view = {
         sessionId: sid,
@@ -2100,6 +2382,15 @@ var ClaudeCodeProvider = class {
       const claudeVersion = disconnected ? void 0 : this.readers.get(sid)?.reader.claudeVersion();
       if (claudeVersion) view.claudeVersion = claudeVersion;
       if (!disconnected && l?.bgId) view.bgId = l.bgId;
+      const ctx = disconnected ? void 0 : this.readers.get(sid)?.reader.context();
+      if (ctx?.tokens !== void 0) {
+        const { size, exact } = contextWindowSize(rawModel, ctx.tokens, await getContextWindow(sid));
+        view.context = { used: ctx.tokens, size, ...exact ? { exact: true } : {}, ...ctx.lastCompactAt ? { lastCompactAt: ctx.lastCompactAt } : {} };
+      }
+      if (!disconnected) {
+        const n = await this.agentsWorking(reg);
+        if (n > 0) view.agentsWorking = n;
+      }
       Object.assign(view, resumeView(sid, disconnected ? null : reg.connectedAt, this.now()));
       connected.push(view);
     }
@@ -2116,6 +2407,19 @@ var ClaudeCodeProvider = class {
     const others = live.list.filter((l) => l.kind === "interactive" && !activeIds.has(l.sessionId));
     const usage = await readUsage();
     return { connected: connected.map(({ _sort, ...v }) => v), others, hubVersion: VERSION, ...usage ? { usage } : {} };
+  }
+  /**
+   * Subagents of an active session still working (spec 2026-11-26-side-panel): not finished, with a new line
+   * in their transcript in the last STALE_MS (an orphan never holds the state). Looked up at most every
+   * AGENTS_TTL_MS per session.
+   */
+  async agentsWorking(reg) {
+    const t = this.now();
+    const c = this.agentCounts.get(reg.sessionId);
+    if (c && t >= c.at && t - c.at < AGENTS_TTL_MS) return c.n;
+    const n = await runningSubagents(subagentsDir(reg.transcriptPath, reg.sessionId), this.now).catch(() => 0);
+    this.agentCounts.set(reg.sessionId, { at: t, n });
+    return n;
   }
   async events(sid, opts = {}) {
     const reg = await getRegistration(sid);
@@ -2151,7 +2455,7 @@ var ClaudeCodeProvider = class {
       this.pending.delete(sid);
       if (events?.length) changes.push({ type: "events", sessionId: sid, events });
     }
-    for (const m of [this.readers, this.pending, this.lastEvents, this.lastModels, this.misses]) {
+    for (const m of [this.readers, this.pending, this.lastEvents, this.lastModels, this.misses, this.agentCounts]) {
       for (const sid of [...m.keys()]) if (!known.has(sid)) m.delete(sid);
     }
     const { connected, others, usage } = await this.listSessions();
@@ -2178,8 +2482,10 @@ var ClaudeCodeProvider = class {
         s.background ?? null,
         s.pinned ?? false,
         s.bgId ?? null,
+        s.context ?? null,
         s.resuming ?? false,
-        s.resumeError ?? null
+        s.resumeError ?? null,
+        s.agentsWorking ?? 0
       ])
     });
     if (signature !== this.lastSignature) {
@@ -2197,7 +2503,7 @@ var ClaudeCodeProvider = class {
     if (!again || !isActive(again)) {
       const dir = paths().inboxDir(sid);
       try {
-        for (const n of await fs12.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs12.rm(path11.join(dir, n), { force: true });
+        for (const n of await fs13.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs13.rm(path12.join(dir, n), { force: true });
       } catch {
       }
       throw new SessionDisconnectedError(sid);
@@ -2208,16 +2514,32 @@ var ClaudeCodeProvider = class {
 
 // src/hub/server.ts
 import http from "node:http";
-import fs17 from "node:fs/promises";
-import path16 from "node:path";
+import fs19 from "node:fs/promises";
+import path18 from "node:path";
 import crypto9 from "node:crypto";
+
+// src/shared/windowSize.ts
+var MIN_WINDOW_SIZE = { width: 480, height: 480 };
+var MAX_WINDOW_SIZE = { width: 8192, height: 8192 };
+var clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Math.round(n)));
+var finite = (n) => typeof n === "number" && Number.isFinite(n);
+function normalizeWindowSize(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const { width, height } = v;
+  if (!finite(width) || !finite(height)) return null;
+  return {
+    width: clamp(width, MIN_WINDOW_SIZE.width, MAX_WINDOW_SIZE.width),
+    height: clamp(height, MIN_WINDOW_SIZE.height, MAX_WINDOW_SIZE.height)
+  };
+}
 
 // src/core/config.ts
 var LANGS = ["en", "pt-BR"];
 async function loadConfig() {
   const c = await readJson(paths().config);
   const language = LANGS.includes(c?.language) ? c.language : "en";
-  return { language, answersFromApp: c?.answersFromApp === true, openWindow: c?.openWindow !== false };
+  const windowSize = normalizeWindowSize(c?.windowSize);
+  return { language, answersFromApp: c?.answersFromApp === true, openWindow: c?.openWindow !== false, ...windowSize ? { windowSize } : {} };
 }
 async function saveConfig(patch) {
   const next = { ...await loadConfig(), ...patch };
@@ -2265,12 +2587,12 @@ function createPairing(now = Date.now) {
 }
 
 // src/hub/folders.ts
-import fs13 from "node:fs/promises";
-import path12 from "node:path";
+import fs14 from "node:fs/promises";
+import path13 from "node:path";
 var MAX_FOLDERS = 50;
 var isDir = async (p) => {
   try {
-    return (await fs13.stat(p)).isDirectory();
+    return (await fs14.stat(p)).isDirectory();
   } catch {
     return false;
   }
@@ -2278,7 +2600,7 @@ var isDir = async (p) => {
 async function knownFolders(regs, live, exists = isDir) {
   const seen = /* @__PURE__ */ new Map();
   const add = (cwd, at) => {
-    if (!cwd || !path12.isAbsolute(cwd)) return;
+    if (!cwd || !path13.isAbsolute(cwd)) return;
     const prev = seen.get(cwd);
     if (!prev || prev < at) seen.set(cwd, at);
   };
@@ -2299,9 +2621,9 @@ function configDirOf(regs, cwd) {
 }
 
 // src/hub/folderBrowse.ts
-import fs14 from "node:fs/promises";
+import fs15 from "node:fs/promises";
 import os5 from "node:os";
-import path13 from "node:path";
+import path14 from "node:path";
 var MESSAGES = {
   invalid: "invalid folder path",
   outside: "folder outside the home folder",
@@ -2319,39 +2641,39 @@ var FolderError = class extends Error {
 var MAX_ENTRIES = 500;
 var MAX_PATH = 4096;
 function isInside(root, p) {
-  const rel = path13.relative(root, p);
-  return rel === "" || rel !== ".." && !rel.startsWith(".." + path13.sep) && !path13.isAbsolute(rel);
+  const rel = path14.relative(root, p);
+  return rel === "" || rel !== ".." && !rel.startsWith(".." + path14.sep) && !path14.isAbsolute(rel);
 }
 var errCode = (e) => e?.code;
 async function realHome(home) {
   try {
-    return { given: path13.resolve(home), real: await fs14.realpath(home) };
+    return { given: path14.resolve(home), real: await fs15.realpath(home) };
   } catch {
     throw new FolderError("not-found");
   }
 }
 async function assertAncestorInside(given, home) {
-  let dir = path13.dirname(given);
+  let dir = path14.dirname(given);
   for (; ; ) {
     try {
-      const real = await fs14.realpath(dir);
+      const real = await fs15.realpath(dir);
       if (!isInside(home.real, real)) throw new FolderError("outside");
       return;
     } catch (e) {
       if (e instanceof FolderError) throw e;
-      const parent = path13.dirname(dir);
+      const parent = path14.dirname(dir);
       if (parent === dir) return;
       dir = parent;
     }
   }
 }
 async function resolveIn(p, home) {
-  if (typeof p !== "string" || !p || p.length > MAX_PATH || p.includes("\0") || !path13.isAbsolute(p)) throw new FolderError("invalid");
-  const given = path13.resolve(p);
+  if (typeof p !== "string" || !p || p.length > MAX_PATH || p.includes("\0") || !path14.isAbsolute(p)) throw new FolderError("invalid");
+  const given = path14.resolve(p);
   if (!isInside(home.given, given) && !isInside(home.real, given)) throw new FolderError("outside");
   let real;
   try {
-    real = await fs14.realpath(given);
+    real = await fs15.realpath(given);
   } catch (e) {
     if (errCode(e) === "EACCES" || errCode(e) === "EPERM") throw new FolderError("denied");
     if (errCode(e) === "ENOENT" || errCode(e) === "ENOTDIR") await assertAncestorInside(given, home);
@@ -2359,7 +2681,7 @@ async function resolveIn(p, home) {
   }
   if (!isInside(home.real, real)) throw new FolderError("outside");
   try {
-    if (!(await fs14.stat(real)).isDirectory()) throw new FolderError("not-found");
+    if (!(await fs15.stat(real)).isDirectory()) throw new FolderError("not-found");
   } catch (e) {
     if (e instanceof FolderError) throw e;
     throw new FolderError(errCode(e) === "EACCES" ? "denied" : "not-found");
@@ -2380,19 +2702,19 @@ async function browseFolder(p, opts = {}) {
   const dir = p === void 0 ? homeReal : await resolveIn(p, home);
   let dirents;
   try {
-    dirents = await fs14.readdir(dir, { withFileTypes: true });
+    dirents = await fs15.readdir(dir, { withFileTypes: true });
   } catch (e) {
     throw new FolderError(errCode(e) === "EACCES" || errCode(e) === "EPERM" ? "denied" : "not-found");
   }
   const entries = [];
   for (const d of dirents) {
     if (!opts.hidden && d.name.startsWith(".")) continue;
-    const full = path13.join(dir, d.name);
+    const full = path14.join(dir, d.name);
     if (d.isDirectory()) entries.push({ name: d.name, path: full });
     else if (d.isSymbolicLink()) {
       try {
-        const target = await fs14.realpath(full);
-        if (isInside(homeReal, target) && (await fs14.stat(target)).isDirectory()) entries.push({ name: d.name, path: full });
+        const target = await fs15.realpath(full);
+        if (isInside(homeReal, target) && (await fs15.stat(target)).isDirectory()) entries.push({ name: d.name, path: full });
       } catch {
       }
     }
@@ -2401,7 +2723,7 @@ async function browseFolder(p, opts = {}) {
   const limit = opts.limit ?? MAX_ENTRIES;
   return {
     path: dir,
-    parent: dir === homeReal ? null : path13.dirname(dir),
+    parent: dir === homeReal ? null : path14.dirname(dir),
     entries: entries.slice(0, limit),
     truncated: entries.length > limit
   };
@@ -2466,18 +2788,18 @@ async function searchAll(provider, q) {
 
 // src/hub/openTerminal.ts
 import { spawn as nodeSpawn2 } from "node:child_process";
-import fs16 from "node:fs";
+import fs17 from "node:fs";
 import os6 from "node:os";
-import path15 from "node:path";
+import path16 from "node:path";
 
 // src/hooks/openWindow.ts
-import fs15 from "node:fs";
+import fs16 from "node:fs";
 function isExecutableFile(p, platform = process.platform, checks = {}) {
-  const stat = checks.stat ?? fs15.statSync;
-  const access = checks.access ?? fs15.accessSync;
+  const stat = checks.stat ?? fs16.statSync;
+  const access = checks.access ?? fs16.accessSync;
   try {
     if (!stat(p).isFile()) return false;
-    if (platform !== "win32") access(p, fs15.constants.X_OK);
+    if (platform !== "win32") access(p, fs16.constants.X_OK);
     return true;
   } catch {
     return false;
@@ -2485,7 +2807,7 @@ function isExecutableFile(p, platform = process.platform, checks = {}) {
 }
 
 // src/hooks/launcherMac.ts
-import path14 from "node:path";
+import path15 from "node:path";
 
 // src/hooks/launcherFiles.ts
 var PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -2493,9 +2815,9 @@ var PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 // src/hooks/launcherMac.ts
 var EXECUTABLE = "ai-chat-center";
 var shQuote = (s) => `'${s.replace(/'/g, "'\\''")}'`;
-var OUR_DIRS = /* @__PURE__ */ new Set(["Contents", path14.join("Contents", "MacOS"), path14.join("Contents", "Resources")]);
-var OUR_EXEC = path14.join("Contents", "MacOS", EXECUTABLE);
-var OUR_ICON = path14.join("Contents", "Resources", "icon.icns");
+var OUR_DIRS = /* @__PURE__ */ new Set(["Contents", path15.join("Contents", "MacOS"), path15.join("Contents", "Resources")]);
+var OUR_EXEC = path15.join("Contents", "MacOS", EXECUTABLE);
+var OUR_ICON = path15.join("Contents", "Resources", "icon.icns");
 
 // src/hub/openTerminal.ts
 var LINUX_TERMINALS = [
@@ -2512,10 +2834,10 @@ var LINUX_TERMINALS = [
 ];
 function linuxTerminal(id, cwd, env, exists) {
   const run = ["claude", "attach", id];
-  const dirs = (env.PATH ?? "").split(path15.posix.delimiter).filter((d) => path15.posix.isAbsolute(d));
+  const dirs = (env.PATH ?? "").split(path16.posix.delimiter).filter((d) => path16.posix.isAbsolute(d));
   for (const [name, argsFor] of LINUX_TERMINALS) {
     for (const d of dirs) {
-      const p = path15.posix.join(d, name);
+      const p = path16.posix.join(d, name);
       let ok = false;
       try {
         ok = exists(p);
@@ -2532,7 +2854,7 @@ function macCommandScript(id, cwd, file, configDir) {
   return [
     "#!/bin/sh",
     `rm -f ${shQuote(file)}`,
-    `rmdir ${shQuote(path15.posix.dirname(file))} 2>/dev/null`,
+    `rmdir ${shQuote(path16.posix.dirname(file))} 2>/dev/null`,
     ...configDir ? [`export CLAUDE_CONFIG_DIR=${shQuote(configDir)}`] : [],
     `cd ${shQuote(cwd)} || exit 1`,
     `exec claude attach ${id}`,
@@ -2545,11 +2867,11 @@ async function openTerminal(t, deps = {}) {
   const env = deps.env ?? process.env;
   const spawn = deps.spawn ?? nodeSpawn2;
   const configDir = configDirFor(t.configDir, deps.home, platform);
-  const isAbs = platform === "win32" ? path15.win32.isAbsolute : path15.posix.isAbsolute;
+  const isAbs = platform === "win32" ? path16.win32.isAbsolute : path16.posix.isAbsolute;
   if (!isAbs(t.cwd)) return { ok: false, code: "spawn-failed", error: "the session folder is not an absolute path" };
   let isDir2 = false;
   try {
-    isDir2 = (deps.isDir ?? ((p) => fs16.statSync(p).isDirectory()))(t.cwd);
+    isDir2 = (deps.isDir ?? ((p) => fs17.statSync(p).isDirectory()))(t.cwd);
   } catch {
     isDir2 = false;
   }
@@ -2560,9 +2882,9 @@ async function openTerminal(t, deps = {}) {
   if (platform === "darwin") {
     let dir;
     try {
-      dir = (deps.mkdtemp ?? (() => fs16.mkdtempSync(path15.join(os6.tmpdir(), "ai-chat-center-term-"))))();
-      const file = path15.posix.join(dir, `attach-${t.bgId}.command`);
-      (deps.writeFile ?? ((p, d, mode) => fs16.writeFileSync(p, d, { mode, flag: "wx" })))(file, macCommandScript(t.bgId, t.cwd, file, configDir), 448);
+      dir = (deps.mkdtemp ?? (() => fs17.mkdtempSync(path16.join(os6.tmpdir(), "ai-chat-center-term-"))))();
+      const file = path16.posix.join(dir, `attach-${t.bgId}.command`);
+      (deps.writeFile ?? ((p, d, mode) => fs17.writeFileSync(p, d, { mode, flag: "wx" })))(file, macCommandScript(t.bgId, t.cwd, file, configDir), 448);
       cmd = "/usr/bin/open";
       args = ["-a", "Terminal", file];
     } catch (e) {
@@ -2570,13 +2892,13 @@ async function openTerminal(t, deps = {}) {
     }
   } else if (platform === "win32") {
     const root = env.SystemRoot ?? env.SYSTEMROOT ?? env.windir;
-    if (!root || !path15.win32.isAbsolute(root)) return { ok: false, code: "no-terminal", error: "SystemRoot is not set" };
-    const cmdExe = path15.win32.join(root, "System32", "cmd.exe");
+    if (!root || !path16.win32.isAbsolute(root)) return { ok: false, code: "no-terminal", error: "SystemRoot is not set" };
+    const cmdExe = path16.win32.join(root, "System32", "cmd.exe");
     const run = [cmdExe, "/k", "claude", "attach", t.bgId];
     procEnv = { ...procEnv, NoDefaultCurrentDirectoryInExePath: "1" };
     const local = env.LOCALAPPDATA;
-    const wt = local && path15.win32.isAbsolute(local) ? path15.win32.join(local, "Microsoft", "WindowsApps", "wt.exe") : null;
-    const has = deps.exists ?? ((p) => fs16.existsSync(p));
+    const wt = local && path16.win32.isAbsolute(local) ? path16.win32.join(local, "Microsoft", "WindowsApps", "wt.exe") : null;
+    const has = deps.exists ?? ((p) => fs17.existsSync(p));
     if (wt && has(wt)) {
       cmd = wt;
       args = ["-d", ".", ...run];
@@ -2590,7 +2912,7 @@ async function openTerminal(t, deps = {}) {
     cmd = term.cmd;
     args = term.args;
   }
-  return new Promise((resolve) => {
+  return new Promise((resolve2) => {
     let child;
     try {
       child = spawn(cmd, args, {
@@ -2602,12 +2924,227 @@ async function openTerminal(t, deps = {}) {
         // The terminal window must show: no windowsHide.
       });
     } catch (e) {
-      return resolve({ ok: false, code: "spawn-failed", error: `could not start ${cmd}: ${e.message}` });
+      return resolve2({ ok: false, code: "spawn-failed", error: `could not start ${cmd}: ${e.message}` });
     }
-    child.once("error", (e) => resolve({ ok: false, code: "spawn-failed", error: `could not start ${cmd}: ${e.message}` }));
+    child.once("error", (e) => resolve2({ ok: false, code: "spawn-failed", error: `could not start ${cmd}: ${e.message}` }));
     child.once("spawn", () => {
       child.unref();
-      resolve({ ok: true });
+      resolve2({ ok: true });
+    });
+  });
+}
+
+// src/hub/sessionFiles.ts
+import fs18 from "node:fs/promises";
+import path17 from "node:path";
+var MAX_MARKDOWN_BYTES = 2 * 1024 * 1024;
+var MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+var MAX_PATH2 = 4096;
+var MAX_EXISTS = 200;
+var FILE_TYPES = {
+  ".md": { kind: "markdown", type: "text/markdown; charset=utf-8", max: MAX_MARKDOWN_BYTES },
+  ".markdown": { kind: "markdown", type: "text/markdown; charset=utf-8", max: MAX_MARKDOWN_BYTES },
+  ".png": { kind: "image", type: "image/png", max: MAX_IMAGE_BYTES, image: "png" },
+  ".jpg": { kind: "image", type: "image/jpeg", max: MAX_IMAGE_BYTES, image: "jpg" },
+  ".jpeg": { kind: "image", type: "image/jpeg", max: MAX_IMAGE_BYTES, image: "jpg" },
+  ".gif": { kind: "image", type: "image/gif", max: MAX_IMAGE_BYTES, image: "gif" },
+  ".webp": { kind: "image", type: "image/webp", max: MAX_IMAGE_BYTES, image: "webp" }
+};
+var MESSAGES2 = {
+  invalid: "invalid file path",
+  type: "file type not supported",
+  outside: "file outside the session folder",
+  "not-found": "no such file",
+  "too-large": "file too large",
+  denied: "permission denied"
+};
+var SessionFileError = class extends Error {
+  constructor(code2) {
+    super(MESSAGES2[code2]);
+    this.code = code2;
+    this.name = "SessionFileError";
+  }
+  code;
+};
+var errCode2 = (e) => e?.code;
+var typeOf = (p) => FILE_TYPES[path17.extname(p).toLowerCase()];
+async function realRoots(r) {
+  const out = [];
+  for (const g of r.roots) {
+    try {
+      out.push({ given: path17.resolve(g), real: await fs18.realpath(g) });
+    } catch {
+    }
+  }
+  return out;
+}
+var insideAny = (roots, p, which) => roots.some((r) => which !== "real" && isInside(r.given, p) || which !== "given" && isInside(r.real, p));
+async function assertAncestorInside2(given, roots) {
+  let dir = path17.dirname(given);
+  for (; ; ) {
+    try {
+      const real = await fs18.realpath(dir);
+      if (!insideAny(roots, real, "real")) throw new SessionFileError("outside");
+      return;
+    } catch (e) {
+      if (e instanceof SessionFileError) throw e;
+      const parent = path17.dirname(dir);
+      if (parent === dir) return;
+      dir = parent;
+    }
+  }
+}
+async function resolve(p, r, roots) {
+  if (typeof p !== "string" || !p || p.length > MAX_PATH2 || p.includes("\0")) throw new SessionFileError("invalid");
+  const given = path17.resolve(r.base, p);
+  const ft = typeOf(given);
+  if (!ft) throw new SessionFileError("type");
+  if (!insideAny(roots, given, "both")) throw new SessionFileError("outside");
+  let real;
+  try {
+    real = await fs18.realpath(given);
+  } catch (e) {
+    if (errCode2(e) === "EACCES" || errCode2(e) === "EPERM") throw new SessionFileError("denied");
+    await assertAncestorInside2(given, roots);
+    throw new SessionFileError("not-found");
+  }
+  if (!insideAny(roots, real, "real")) throw new SessionFileError("outside");
+  if (typeOf(real) !== ft) throw new SessionFileError("type");
+  let size;
+  try {
+    const st = await fs18.stat(real);
+    if (!st.isFile()) throw new SessionFileError("not-found");
+    size = st.size;
+  } catch (e) {
+    if (e instanceof SessionFileError) throw e;
+    throw new SessionFileError(errCode2(e) === "EACCES" ? "denied" : "not-found");
+  }
+  if (size > ft.max) throw new SessionFileError("too-large");
+  return { real, ft, size };
+}
+async function readCapped(file, max) {
+  const fh = await fs18.open(file, "r");
+  try {
+    const buf = Buffer.alloc(max + 1);
+    let n = 0;
+    for (; ; ) {
+      const { bytesRead } = await fh.read(buf, n, buf.length - n, n);
+      if (bytesRead === 0) break;
+      n += bytesRead;
+      if (n > max) throw new SessionFileError("too-large");
+    }
+    return buf.subarray(0, n);
+  } finally {
+    await fh.close();
+  }
+}
+async function readSessionFile(p, r) {
+  const { real, ft } = await resolve(p, r, await realRoots(r));
+  let data;
+  try {
+    data = await readCapped(real, ft.max);
+  } catch (e) {
+    if (e instanceof SessionFileError) throw e;
+    throw new SessionFileError(errCode2(e) === "EACCES" ? "denied" : "not-found");
+  }
+  if (ft.image && sniffImage(data) !== ft.image) throw new SessionFileError("type");
+  return { data, type: ft.type, kind: ft.kind };
+}
+async function existingSessionFiles(ps, r) {
+  if (!Array.isArray(ps)) return [];
+  const roots = await realRoots(r);
+  const asked = [...new Set(ps.slice(0, MAX_EXISTS).filter((p) => typeof p === "string"))];
+  const out = [];
+  for (const p of asked) {
+    try {
+      await resolve(p, r, roots);
+      out.push(p);
+    } catch {
+    }
+  }
+  return out;
+}
+
+// src/hub/sessionScreen.ts
+import { spawn as nodeSpawn3 } from "node:child_process";
+import os7 from "node:os";
+var MAX_SCREEN_CHARS = 2e5;
+var MAX_BYTES = 512 * 1024;
+var TIMEOUT_MS = 1e4;
+var ANSI = [
+  /\x1b\][\s\S]*?(?:\x07|\x1b\\)/g,
+  // OSC (window title, hyperlinks)
+  /\x1b[P^_][\s\S]*?\x1b\\/g,
+  // DCS, PM, APC
+  /\x1b\[[0-?]*[ -/]*[@-~]/g,
+  // CSI (colours, cursor)
+  /\x1b[()*+][0-9A-Za-z]/g,
+  // character sets
+  /\x1b[@-Z\\-_=>78]/g
+  // other two-byte escapes
+];
+var CONTROL = /[\x00-\x08\x0b-\x1f\x7f]/g;
+var APP_URL = /(?:[a-z][a-z0-9+.-]*:\/\/)?(?:127\.\d+\.\d+\.\d+|localhost|\[::1\]|0\.0\.0\.0)(?::\d+)?(?:[/?#]\S*)?/gi;
+var LINK_PARTS = /[#?&](?:token|pair)=\S*/gi;
+var HEX_RUN = /[0-9a-fA-F]{16,}/g;
+function cleanScreen(raw, secrets) {
+  let s = raw;
+  for (const re of ANSI) s = s.replace(re, "");
+  s = s.replace(/\r\n?/g, "\n").replace(CONTROL, "");
+  for (const secret of secrets) if (secret && secret.length >= 8) s = s.split(secret).join("[redacted]");
+  s = s.replace(APP_URL, "[app link removed]").replace(LINK_PARTS, "[app link removed]").replace(HEX_RUN, "[redacted]");
+  s = s.split("\n").map((l) => l.trimEnd()).join("\n").replace(/\n+$/, "");
+  return s.length > MAX_SCREEN_CHARS ? s.slice(s.length - MAX_SCREEN_CHARS) : s;
+}
+function readScreen(bgId, deps = {}) {
+  if (!isBgId(bgId)) return Promise.reject(new Error("invalid background session id"));
+  const platform = deps.platform ?? process.platform;
+  if (platform === "win32") return Promise.reject(new Error("the session screen is not available on Windows yet"));
+  const spawn = deps.spawn ?? nodeSpawn3;
+  const max = deps.maxBytes ?? MAX_BYTES;
+  return new Promise((resolve2, reject) => {
+    let chunks = [];
+    let size = 0;
+    let done = false;
+    let child;
+    const finish = (err, out) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve2(out ?? "");
+    };
+    try {
+      child = spawn("claude", ["logs", bgId], {
+        cwd: os7.homedir(),
+        env: { ...cleanEnv(deps.env ?? process.env, configDirFor(deps.configDir, void 0, platform)), COLUMNS: "200" },
+        shell: false,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+    } catch {
+      return reject(new Error("could not run claude logs"));
+    }
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(new Error("claude logs did not answer"));
+    }, deps.timeoutMs ?? TIMEOUT_MS);
+    child.stdout?.on("data", (d) => {
+      const b = Buffer.isBuffer(d) ? d : Buffer.from(d);
+      chunks.push(b);
+      size += b.length;
+      if (size > 2 * max) {
+        const all = Buffer.concat(chunks);
+        chunks = [all.subarray(all.length - max)];
+        size = max;
+      }
+    });
+    child.stderr?.resume();
+    child.on("error", () => finish(new Error("could not run claude logs")));
+    child.on("close", (code2) => {
+      if (code2 !== 0) return finish(new Error("claude logs failed"));
+      const all = Buffer.concat(chunks);
+      finish(null, all.subarray(Math.max(0, all.length - max)).toString("utf8"));
     });
   });
 }
@@ -2652,6 +3189,8 @@ var HttpError = class extends Error {
 };
 var FOLDER_STATUS = { invalid: 400, outside: 403, "not-found": 404, denied: 403 };
 var folderHttpError = (e, status = FOLDER_STATUS[e.code]) => new HttpError(status, e.message, `folder-${e.code}`);
+var FILE_STATUS = { invalid: 400, type: 415, outside: 403, "not-found": 404, "too-large": 413, denied: 403 };
+var fileHttpError = (e) => new HttpError(FILE_STATUS[e.code], e.message, `file-${e.code}`);
 var isUntrustedError = (error) => /not trusted|trust (this|the) folder|trust dialog/i.test(error);
 function tokenOk(given, expected) {
   if (!given) return false;
@@ -2661,7 +3200,7 @@ function tokenOk(given, expected) {
   return crypto9.timingSafeEqual(a, b);
 }
 function readRawBody(req, max) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve2, reject) => {
     const declared = Number(req.headers["content-length"]);
     if (Number.isFinite(declared) && declared > max) {
       req.resume();
@@ -2680,7 +3219,7 @@ function readRawBody(req, max) {
       }
       chunks.push(c);
     });
-    req.on("end", () => tooBig ? reject(new HttpError(413, "body too large")) : resolve(Buffer.concat(chunks)));
+    req.on("end", () => tooBig ? reject(new HttpError(413, "body too large")) : resolve2(Buffer.concat(chunks)));
     req.on("error", reject);
   });
 }
@@ -2712,8 +3251,28 @@ async function createHub(opts) {
   const type = opts.bg?.type ?? ((id, text) => typeCommand(id, text));
   const start = opts.bg?.start ?? ((s) => startInBackground(s));
   const openTerm = opts.bg?.openTerminal ?? ((t) => openTerminal(t));
+  const listStopped = opts.bg?.listStopped ?? (() => queryStoppedBackground());
+  const manage = opts.bg?.manage ?? ((a, id, configDir) => manageBackground(a, id, configDir));
+  const managing = /* @__PURE__ */ new Set();
+  const runManage = async (key, action, bgId, configDir) => {
+    if (managing.has(key)) throw new HttpError(409, "another action is under way", "busy");
+    managing.add(key);
+    let r;
+    try {
+      r = await manage(action, bgId, configDir);
+    } catch (e) {
+      r = { ok: false, error: e.message };
+    } finally {
+      managing.delete(key);
+    }
+    if (!r.ok) {
+      log(`claude ${action} ${bgId} failed: ${r.error}`);
+      throw new HttpError(502, r.error, "claude-failed");
+    }
+  };
   const folders = async () => knownFolders(await listRegistrations(), await listLive(), opts.bg?.folderExists);
   const bgPlatform = opts.bg?.platform ?? process.platform;
+  const screenOf = opts.bg?.screen ?? ((bgId, configDir) => readScreen(bgId, { configDir, platform: bgPlatform }));
   const typing = /* @__PURE__ */ new Set();
   const now = opts.now ?? Date.now;
   const windows = /* @__PURE__ */ new Map();
@@ -2760,8 +3319,8 @@ data: ${JSON.stringify(c)}
           if (inFlight === tracked) inFlight = null;
         });
         inFlight = tracked;
-        const timeout = new Promise((resolve) => {
-          timer = setTimeout(() => resolve(null), POLL_TIMEOUT_MS);
+        const timeout = new Promise((resolve2) => {
+          timer = setTimeout(() => resolve2(null), POLL_TIMEOUT_MS);
         });
         const r = await Promise.race([real, timeout]);
         if (r === null) log("poll timed out");
@@ -2804,15 +3363,15 @@ data: ${JSON.stringify(c)}
       return sendJson(res, 404, { error: "not found" });
     }
     if (rel.includes("\0")) return sendJson(res, 404, { error: "not found" });
-    const root = path16.resolve(staticDir);
-    const target = path16.resolve(root, "." + path16.sep + rel);
-    if (target !== root && !target.startsWith(root + path16.sep)) return sendJson(res, 404, { error: "not found" });
+    const root = path18.resolve(staticDir);
+    const target = path18.resolve(root, "." + path18.sep + rel);
+    if (target !== root && !target.startsWith(root + path18.sep)) return sendJson(res, 404, { error: "not found" });
     const send = async (file) => {
       try {
-        const st = await fs17.stat(file);
+        const st = await fs19.stat(file);
         if (!st.isFile()) return false;
-        const data = await fs17.readFile(file);
-        const ext = path16.extname(file).toLowerCase();
+        const data = await fs19.readFile(file);
+        const ext = path18.extname(file).toLowerCase();
         const type2 = MIME2[ext] ?? "application/octet-stream";
         const headers = { "Content-Type": type2, "Content-Length": data.length };
         if (ext === ".html") headers["Content-Security-Policy"] = CSP;
@@ -2825,12 +3384,12 @@ data: ${JSON.stringify(c)}
     };
     let rootExists = true;
     try {
-      rootExists = (await fs17.stat(root)).isDirectory();
+      rootExists = (await fs19.stat(root)).isDirectory();
     } catch {
       rootExists = false;
     }
     const accepts = String(req.headers.accept ?? "").includes("text/html");
-    const spaEligible = req.method === "GET" && accepts && path16.extname(pathname) === "";
+    const spaEligible = req.method === "GET" && accepts && path18.extname(pathname) === "";
     const isRoot = pathname === "/";
     if (!rootExists) {
       if (isRoot || spaEligible) {
@@ -2841,7 +3400,7 @@ data: ${JSON.stringify(c)}
     }
     if (target !== root && await send(target)) return;
     if (isRoot || spaEligible) {
-      if (await send(path16.join(root, "index.html"))) return;
+      if (await send(path18.join(root, "index.html"))) return;
     }
     sendJson(res, 404, { error: "not found" });
   };
@@ -2963,7 +3522,110 @@ data: ${JSON.stringify(c)}
       await saveConfig({ language: body2.language });
       return sendJson(res, 200, { language: body2.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|pin|disconnect|remove|resume|command|open-terminal|background|background-image|attachments|questions\/([^/]+))$/.exec(p);
+    if (p === "/api/window-size" && method === "PUT") {
+      const windowSize = normalizeWindowSize(await readJsonBody(req));
+      if (!windowSize) throw new HttpError(400, "invalid window size");
+      await saveConfig({ windowSize });
+      return sendJson(res, 200, { windowSize });
+    }
+    if (p === "/api/background/stopped" && method === "GET") {
+      const list2 = await listStopped();
+      if (list2 === null) throw new HttpError(503, "could not list background sessions");
+      return sendJson(res, 200, { sessions: list2 });
+    }
+    const bgRm = /^\/api\/background\/([^/]+)\/rm$/.exec(p);
+    if (bgRm && method === "POST") {
+      req.resume();
+      const id = bgRm[1];
+      if (!isBgId(id)) throw new HttpError(400, "invalid background session id");
+      const list2 = await listStopped();
+      if (list2 === null) throw new HttpError(503, "could not list background sessions");
+      const s = list2.find((x) => x.bgId === id);
+      if (!s) throw new HttpError(409, "not a stopped background session", "not-stopped");
+      await runManage(`bg:${id}`, "rm", id, void 0);
+      let reg = null;
+      try {
+        assertSessionId(s.sessionId);
+        reg = await getRegistration(s.sessionId);
+      } catch {
+        reg = null;
+      }
+      if (reg && !isRemoved(reg)) await markRemoved(s.sessionId);
+      fanOut({ type: "sessions" });
+      return sendJson(res, 200, { ok: true });
+    }
+    const sp = /^\/api\/sessions\/([^/]+)\/(file|files\/exists|subagents|subagents\/([^/]+)\/events|screen)$/.exec(p);
+    if (sp) {
+      let sid;
+      try {
+        sid = decodeURIComponent(sp[1]);
+        assertSessionId(sid);
+      } catch {
+        req.resume();
+        throw new HttpError(404, "not found");
+      }
+      const reg = await getRegistration(sid);
+      if (!reg || isRemoved(reg)) {
+        req.resume();
+        throw new HttpError(404, "no such session");
+      }
+      const roots = { base: reg.cwd, roots: [reg.cwd, sessionAttachmentsDir(sid)] };
+      if (sp[2] === "file" && method === "GET") {
+        try {
+          const f = await readSessionFile(url.searchParams.get("path") ?? "", roots);
+          res.writeHead(200, {
+            "Content-Type": f.type,
+            "Content-Length": f.data.length,
+            "Content-Security-Policy": "default-src 'none'; sandbox"
+          });
+          return void res.end(f.data);
+        } catch (e) {
+          if (e instanceof SessionFileError) throw fileHttpError(e);
+          throw e;
+        }
+      }
+      if (sp[2] === "files/exists" && method === "POST") {
+        const body2 = await readJsonBody(req);
+        if (!body2 || typeof body2 !== "object" || !Array.isArray(body2.paths)) throw new HttpError(400, "invalid body");
+        return sendJson(res, 200, { exists: await existingSessionFiles(body2.paths, roots) });
+      }
+      if (sp[2] === "screen" && method === "GET") {
+        if (!isActive(reg)) throw new HttpError(409, "session is disconnected", "session-disconnected");
+        if (bgPlatform === "win32") throw new HttpError(501, "not available on Windows yet");
+        const live = await listLive();
+        if (live === null) throw new HttpError(503, "could not list running sessions");
+        const l = live.find((x) => x.sessionId === sid);
+        if (!l || l.kind !== "background" || !l.bgId) throw new HttpError(409, "not a background session", "not-background");
+        let raw;
+        try {
+          raw = await screenOf(l.bgId, reg.configDir);
+        } catch (e) {
+          log(`screen of ${sid} failed: ${e.message}`);
+          throw new HttpError(502, "could not read the session screen");
+        }
+        const secret = await loadSecret({ tries: 1 });
+        const secrets = [token, ...trustedKeys(reg), ...secret.ok ? [secret.secret] : []];
+        return sendJson(res, 200, { text: cleanScreen(raw, secrets) });
+      }
+      if (sp[2] === "subagents" && method === "GET") {
+        return sendJson(res, 200, { subagents: await listSubagents(subagentsDir(reg.transcriptPath, sid), { now }) });
+      }
+      if (sp[3] !== void 0 && method === "GET") {
+        let id;
+        try {
+          id = decodeURIComponent(sp[3]);
+        } catch {
+          throw new HttpError(404, "not found");
+        }
+        if (!isAgentId(id)) throw new HttpError(404, "not found");
+        const events = await subagentEvents(subagentsDir(reg.transcriptPath, sid), id);
+        if (!events) throw new HttpError(404, "no such subagent");
+        return sendJson(res, 200, events);
+      }
+      req.resume();
+      throw new HttpError(404, "not found");
+    }
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|pin|disconnect|remove|resume|command|open-terminal|stop|respawn|rm|background|background-image|attachments|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid;
       try {
@@ -3021,7 +3683,7 @@ data: ${JSON.stringify(c)}
         if (!reg) throw new HttpError(404, "no such session");
         await setDisplayName(sid, name);
         let shown = name;
-        if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path16.basename(reg.cwd);
+        if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path18.basename(reg.cwd);
         return sendJson(res, 200, { name: shown });
       }
       if (m[2] === "pin" && method === "PUT") {
@@ -3092,6 +3754,32 @@ data: ${JSON.stringify(c)}
         } finally {
           typing.delete(sid);
         }
+        return sendJson(res, 200, { ok: true });
+      }
+      if ((m[2] === "stop" || m[2] === "respawn" || m[2] === "rm") && method === "POST") {
+        req.resume();
+        const action = m[2];
+        const reg = await getRegistration(sid);
+        if (!reg || isRemoved(reg)) throw new HttpError(404, "no such session");
+        let bgId;
+        if (isActive(reg)) {
+          const live = await listLive();
+          if (live === null) throw new HttpError(503, "could not list running sessions");
+          const l = live.find((x) => x.sessionId === sid);
+          if (l && l.kind === "background" && l.bgId) bgId = l.bgId;
+          else if (action !== "rm" || l) throw new HttpError(409, "not a background session", "not-background");
+        } else if (action !== "rm") throw new HttpError(409, "session is disconnected", "session-disconnected");
+        if (!bgId) {
+          const stopped = await listStopped();
+          if (stopped === null) throw new HttpError(503, "could not list background sessions");
+          bgId = stopped.find((x) => x.sessionId === sid)?.bgId;
+          if (!bgId) throw new HttpError(409, "not a background session", "not-background");
+        }
+        await runManage(sid, action, bgId, reg.configDir);
+        if (action === "stop") await markDisconnected(sid, "exited");
+        else if (action === "rm") await markRemoved(sid);
+        else provider.expectRestart?.(sid);
+        fanOut({ type: "sessions" });
         return sendJson(res, 200, { ok: true });
       }
       if (m[2] === "open-terminal" && method === "POST") {
@@ -3223,11 +3911,11 @@ data: ${JSON.stringify(c)}
       sendJson(res, 500, { error: "internal error" });
     }
   });
-  await new Promise((resolve, reject) => {
+  await new Promise((resolve2, reject) => {
     server.once("error", reject);
     server.listen(port, "127.0.0.1", () => {
       server.off("error", reject);
-      resolve();
+      resolve2();
     });
   });
   port = server.address().port;
@@ -3237,14 +3925,14 @@ data: ${JSON.stringify(c)}
     clients: () => clients.size,
     windows: () => liveWindows(),
     server,
-    close: () => new Promise((resolve) => {
+    close: () => new Promise((resolve2) => {
       closed = true;
       stopTimers();
       for (const r of clients) r.end();
       clients.clear();
       writePresence(0).catch(() => {
       }).finally(() => {
-        server.close(() => resolve());
+        server.close(() => resolve2());
         server.closeAllConnections();
       });
     })
@@ -3263,7 +3951,7 @@ async function holdsHub(r, now = Date.now()) {
   if (r.pid !== null) return isAlive(r.pid);
   let last = Date.parse(r.connectedAt) || 0;
   try {
-    last = Math.max(last, (await fs18.stat(r.transcriptPath)).mtimeMs);
+    last = Math.max(last, (await fs20.stat(r.transcriptPath)).mtimeMs);
   } catch {
   }
   return now - last < UNKNOWN_PID_HOLD_MS;
@@ -3278,40 +3966,40 @@ async function prune(log) {
 }
 async function rotateToken() {
   const file = paths().token;
-  await ensureDir(path17.dirname(file));
+  await ensureDir(path19.dirname(file));
   const t = crypto10.randomBytes(32).toString("hex");
   await writeFileAtomic600(file, t);
-  await fs18.chmod(file, 384).catch(() => {
+  await fs20.chmod(file, 384).catch(() => {
   });
   return t;
 }
 async function writeFileAtomic600(file, data) {
   const tmp = `${file}.${process.pid}.${crypto10.randomUUID()}.tmp`;
   try {
-    await fs18.writeFile(tmp, data, { mode: 384 });
-    await withFsRetry(() => fs18.rename(tmp, file));
+    await fs20.writeFile(tmp, data, { mode: 384 });
+    await withFsRetry(() => fs20.rename(tmp, file));
   } catch (e) {
-    await fs18.rm(tmp, { force: true });
+    await fs20.rm(tmp, { force: true });
     throw e;
   }
 }
 async function liveHubExists(self) {
-  const info = await readJson(paths().hubJson);
-  if (!info || typeof info.port !== "number") return false;
-  if (self && info.port === self.port) return false;
+  const info2 = await readJson(paths().hubJson);
+  if (!info2 || typeof info2.port !== "number") return false;
+  if (self && info2.port === self.port) return false;
   let token;
   try {
-    token = (await fs18.readFile(paths().token, "utf8")).trim();
+    token = (await fs20.readFile(paths().token, "utf8")).trim();
   } catch {
     return false;
   }
   if (!TOKEN_RE.test(token)) return false;
   const challenge = newChallenge();
   try {
-    const r = await fetch(`http://127.0.0.1:${info.port}/api/health?challenge=${challenge}`, { signal: AbortSignal.timeout(1e3) });
+    const r = await fetch(`http://127.0.0.1:${info2.port}/api/health?challenge=${challenge}`, { signal: AbortSignal.timeout(1e3) });
     if (!r.ok) return false;
     const j = await r.json();
-    return j.ok === true && typeof j.pid === "number" && typeof j.version === "string" && typeof j.proof === "string" && proofMatches(token, challenge, info.port, { pid: j.pid, version: j.version, proof: j.proof });
+    return j.ok === true && typeof j.pid === "number" && typeof j.version === "string" && typeof j.proof === "string" && proofMatches(token, challenge, info2.port, { pid: j.pid, version: j.version, proof: j.proof });
   } catch {
     return false;
   }
@@ -3334,7 +4022,7 @@ async function acquireHubLock(lock) {
 async function startHub(opts = {}) {
   const logDir = paths().logDir;
   await ensureDir(logDir);
-  const logFile = path17.join(logDir, "hub.log");
+  const logFile = path19.join(logDir, "hub.log");
   let secret = "";
   const log = (msg) => {
     try {
@@ -3349,7 +4037,7 @@ async function startHub(opts = {}) {
     return null;
   };
   if (await liveHubExists()) return deferred("before the lock");
-  const lock = path17.join(paths().home, "hub.lock");
+  const lock = path19.join(paths().home, "hub.lock");
   const locked2 = await acquireHubLock(lock);
   let hub;
   try {
@@ -3358,7 +4046,7 @@ async function startHub(opts = {}) {
     secret = token;
     const base = pickPort();
     const tries = base === 0 ? 1 : 11;
-    const staticDir = path17.join(path17.dirname(fileURLToPath(import.meta.url)), "ui");
+    const staticDir = path19.join(path19.dirname(fileURLToPath(import.meta.url)), "ui");
     const provider = opts.listLive ? new ClaudeCodeProvider(opts.listLive) : new ClaudeCodeProvider();
     let lastErr;
     for (let i = 0; i < tries && !hub; i++) {
@@ -3449,7 +4137,7 @@ async function startHub(opts = {}) {
         clearInterval(ownTimer);
         await started.close();
         const cur = await readJson(paths().hubJson);
-        if (cur?.pid === process.pid && cur?.port === port) await fs18.rm(paths().hubJson, { force: true });
+        if (cur?.pid === process.pid && cur?.port === port) await fs20.rm(paths().hubJson, { force: true });
         log("hub stopped");
       }
     };
