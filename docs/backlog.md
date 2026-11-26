@@ -14,6 +14,20 @@ No primeiro teste no Windows (2026-11-24), o atalho funcionou, mas a pessoa teve
 
 Pedido em 2026-11-25. Investigado na rodada 0.6.2 (Claude Code 2.1.332), **adiado**: a sugestão não fica na transcrição (só `promptSource: "suggestion_accepted"` quando aceita), não fica em `~/.claude` e nenhum hook a entrega. `--prompt-suggestions` só entrega a sugestão no modo `-p`/SDK (`stream-json`), o que exigiria outro modo de sessão (sem `--bg`, `/cc` e attach). Caminho possível depois da ideia 2 (ver a tela da sessão): ler a linha cinza do `claude logs <id>`, com o filtro de token; frágil a cada versão. Bônus barato, se o autor quiser: marcar no app as mensagens com `suggestion_accepted`. Cuidado registrado: `claude --bg --help` cria uma sessão de verdade; para ver a ajuda, use `claude --help`.
 
+### Painel lateral para ver imagens, Markdown e outros arquivos
+
+Pedido em 2026-11-26 (pode virar vários itens). Um painel à direita da conversa, que abre ao clicar num link e fecha com um X, para ver sem sair do app:
+
+1. **Imagens:** os anexos e as imagens citadas na conversa (um caminho de `.png`/`.jpg` numa resposta do Claude, ou um print que a pessoa mandou) aparecem como miniatura ou link; ao clicar, a imagem abre grande no painel.
+2. **Markdown:** quando o Claude cita um arquivo `.md` (por exemplo `docs/backlog.md` ou uma spec), o caminho vira link e o painel mostra o arquivo formatado, com o mesmo Markdown das mensagens.
+3. **Depois, o mesmo painel para outras coisas:** código com destaque de sintaxe (`arquivo.ts:42` abrindo na linha), o diff dos arquivos editados, PDF, a tela da sessão (ideia 2) e o resultado de `/status` ou `/context`.
+
+Cuidados:
+- O hub passa a ler arquivos do disco: só leitura, com o mesmo token, só dentro da pasta da sessão e dos anexos (`~/.ai-chat-center/attachments`), sem seguir links simbólicos para fora, com limite de tamanho e só os tipos conhecidos.
+- Markdown sem HTML cru e imagens remotas bloqueadas (ou só com clique), para um arquivo não carregar nada de fora.
+- Reconhecer caminhos no texto sem transformar tudo em link: só caminhos que existem dentro da pasta da sessão.
+- Em tela estreita (celular, janela pequena), o painel ocupa a tela inteira, com um botão de voltar.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
