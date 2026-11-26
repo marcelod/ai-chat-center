@@ -37,6 +37,14 @@ Pedido em 2026-11-26. A janela do app abre estreita na horizontal; dá para usar
 - Alternativa no próprio app: `window.resizeTo` na primeira abertura (funciona em janelas `--app` no Chrome; confirmar). No Safari (aba comum) não se aplica.
 - Confirmar se o Chrome já guarda sozinho o tamanho das janelas `--app` por endereço; a porta do hub pode mudar e fazer o Chrome "esquecer".
 
+### Tamanho do contexto da conversa
+
+Pedido em 2026-11-26 (parte da ideia 18). Mostrar quanto do contexto a conversa já ocupa, por exemplo "Contexto 62% · 124k / 200k" na barra sob o campo de mensagem, com aviso perto de compactar. Dá para fazer: cada resposta do Claude na transcrição traz `usage` (`input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` dá o contexto usado naquele turno). Falta o tamanho da janela do modelo (200k ou 1M); tirar do modelo da sessão ou, com `usage on`, da status line, se o Claude Code mandar isso para ela (confirmar). Depois de um `/compact` o número cai; conferir que o app acompanha.
+
+### Subagentes trabalhando
+
+Pedido em 2026-11-26 (a pensar). Quando a conversa está "trabalhando", mostrar quais subagentes estão rodando. Ao clicar no "trabalhando", abre o painel lateral direito (ver "Painel lateral para ver imagens, Markdown e outros arquivos") com a lista. Dá para fazer: cada subagente tem uma transcrição em `<sessão>/subagents/agent-<id>.jsonl` e um `agent-<id>.meta.json` com a descrição da tarefa, o tipo, o modelo, se roda em segundo plano e `finished`. No painel: a descrição, o tipo, o modelo, há quanto tempo roda, a última ação (a última ferramenta usada na transcrição dele) e, ao clicar, a transcrição do subagente. A conversa em grupo com os agentes (0.4.7) já mostra as mensagens deles; aqui é o estado ao vivo.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
@@ -75,7 +83,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 ### Avisos e visão geral
 16. ★ **Notificação do sistema:** quando uma sessão termina o turno, pede permissão ou faz uma pergunta, mesmo com o app minimizado.
 17. **Painel geral:** todas as sessões numa grade, com estado, tempo trabalhando e uso de contexto.
-18. **Uso e custo por sessão:** tokens, contexto ocupado (aviso perto de compactar) e o histórico do uso de 5 horas.
+18. **Uso e custo por sessão:** tokens, contexto ocupado (ver "Tamanho do contexto da conversa" em "A fazer") e o histórico do uso de 5 horas.
 19. **Agrupar sessões por projeto ou pasta** na lista.
 
 ### Permissões
