@@ -139,3 +139,21 @@ export type Usage = { fiveHour?: UsageWindow; sevenDay?: UsageWindow; updatedAt:
 
 /** `hubVersion`: the AI Chat Center version the hub (and so the app) runs. */
 export type SessionsResponse = { connected: SessionView[]; others: LiveSession[]; usage?: Usage; hubVersion?: string };
+
+/** A subagent of a session, for the side panel (spec 2026-11-26-side-panel). */
+export type SubagentInfo = {
+  /** The id in `agent-<id>.jsonl`. */
+  id: string;
+  description: string;
+  agentType: string;
+  /** Raw model id, when the meta names one. */
+  model?: string;
+  /** Launched in the background (the session's turn may end while it works). */
+  background: boolean;
+  /** finished: the meta says so; stale: not finished but no news for a while (never counted as working). */
+  status: 'running' | 'finished' | 'stale';
+  startedAt?: string;
+  lastActivityAt?: string;
+  /** The name of the last tool it called. */
+  lastTool?: string;
+};

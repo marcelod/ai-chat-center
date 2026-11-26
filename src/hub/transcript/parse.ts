@@ -207,7 +207,7 @@ export class TranscriptParser {
   /** @param keys trusted marker keys of the session; when given, other app-message blocks are ignored. */
   constructor(
     private readonly keys?: string[],
-    private readonly opts: { diffs?: boolean } = {},
+    private readonly opts: { diffs?: boolean; sidechain?: boolean } = {},
   ) {}
 
   /** Returns new or updated events (same id = replace). */
@@ -216,7 +216,7 @@ export class TranscriptParser {
     const uuid = entry.uuid;
     const ts = entry.timestamp;
     if (typeof uuid !== 'string' || typeof ts !== 'string') return [];
-    if (entry.isSidechain === true) return [];
+    if (entry.isSidechain === true && !this.opts.sidechain) return [];
     if (typeof entry.version === 'string' && entry.version) this.claudeVersion = entry.version;
     if (entry.type === 'system' && entry.subtype === 'away_summary' && typeof entry.content === 'string') {
       const text = cleanRecap(entry.content);

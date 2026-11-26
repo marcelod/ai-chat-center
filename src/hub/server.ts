@@ -42,6 +42,7 @@ import { MAX_QUERY, MIN_QUERY } from '../shared/search.js';
 import { failResume, isResuming, startResume } from './resumeState.js';
 import { openTerminal, type OpenTerminalResult, type TerminalTarget } from './openTerminal.js';
 import { existingSessionFiles, readSessionFile, SessionFileError, type FileRoots } from './sessionFiles.js';
+import { isAgentId, listSubagents, subagentEvents, subagentsDir } from './subagents.js';
 import { sessionAttachmentsDir } from '../core/attachments.js';
 
 export interface HubOptions {
@@ -464,7 +465,7 @@ export async function createHub(
       return sendJson(res, 200, { language: body.language });
     }
     // The side panel (spec 2026-11-26-side-panel): read-only views of a session's files, subagents and screen.
-    const sp = /^\/api\/sessions\/([^/]+)\/(file|files\/exists)$/.exec(p);
+    const sp = /^\/api\/sessions\/([^/]+)\/(file|files\/exists|subagents|subagents\/([^/]+)\/events)$/.exec(p);
     if (sp) {
       let sid: string;
       try {
@@ -498,6 +499,21 @@ export async function createHub(
         const body = (await readJsonBody(req)) as { paths?: unknown } | null;
         if (!body || typeof body !== 'object' || !Array.isArray(body.paths)) throw new HttpError(400, 'invalid body');
         return sendJson(res, 200, { exists: await existingSessionFiles(body.paths, roots) });
+      }
+      if (sp[2] === 'subagents' && method === 'GET') {
+        return sendJson(res, 200, { subagents: await listSubagents(subagentsDir(reg.transcriptPath, sid), { now }) });
+      }
+      if (sp[3] !== undefined && method === 'GET') {
+        let id: string;
+        try {
+          id = decodeURIComponent(sp[3]);
+        } catch {
+          throw new HttpError(404, 'not found');
+        }
+        if (!isAgentId(id)) throw new HttpError(404, 'not found');
+        const events = await subagentEvents(subagentsDir(reg.transcriptPath, sid), id);
+        if (!events) throw new HttpError(404, 'no such subagent');
+        return sendJson(res, 200, events);
       }
       req.resume();
       throw new HttpError(404, 'not found');

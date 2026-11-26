@@ -49,6 +49,7 @@ const parse = (b: Buffer) => JSON.parse(b.toString('utf8'));
 
 let cwd: string;
 let outside: string;
+let subDir: string;
 
 beforeEach(async () => {
   home = tmpDir('acc-panel-');
@@ -67,6 +68,17 @@ beforeEach(async () => {
   fs.mkdirSync(att, { recursive: true });
   fs.writeFileSync(path.join(att, '0123456789abcdef-pic.png'), fakePng(1, 1));
   await register({ sessionId: 's1', transcriptPath: path.join(root, 's1.jsonl'), cwd, pid: 42 });
+  subDir = path.join(root, 's1', 'subagents');
+  fs.mkdirSync(subDir, { recursive: true });
+  fs.writeFileSync(path.join(subDir, 'agent-a1.meta.json'), JSON.stringify({ agentType: 'Explore', description: 'Find things', model: 'claude-opus-5-5' }));
+  const line = (o: Record<string, unknown>) => JSON.stringify({ isSidechain: true, timestamp: new Date().toISOString(), ...o });
+  fs.writeFileSync(
+    path.join(subDir, 'agent-a1.jsonl'),
+    [
+      line({ type: 'user', uuid: 'u1', message: { role: 'user', content: 'find things' } }),
+      line({ type: 'assistant', uuid: 'a1', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Grep', input: {} }] } }),
+    ].join('\n') + '\n',
+  );
 });
 afterEach(async () => {
   await hub?.close();
@@ -152,5 +164,27 @@ describe('POST /api/sessions/:sid/files/exists', () => {
     expect((await post(u, null)).status).toBe(400);
     expect((await post(u, { paths: [] }, auth)).status).toBe(415);
     expect((await post(u, { paths: [] }, { 'content-type': 'application/json' })).status).toBe(401);
+  });
+});
+
+describe('GET /api/sessions/:sid/subagents', () => {
+  it('lists the subagents of the session', async () => {
+    const u = await start();
+    const r = await req(u, '/api/sessions/s1/subagents', { headers: auth });
+    expect(r.status).toBe(200);
+    const { subagents } = parse(r.body);
+    expect(subagents).toHaveLength(1);
+    expect(subagents[0]).toMatchObject({ id: 'a1', description: 'Find things', agentType: 'Explore', status: 'running', lastTool: 'Grep' });
+  });
+  it("gives one subagent's events; 404 for an unknown agent or a bad id; 401 without the token", async () => {
+    const u = await start();
+    const r = await req(u, '/api/sessions/s1/subagents/a1/events', { headers: auth });
+    expect(r.status).toBe(200);
+    expect(parse(r.body).map((e: { kind: string }) => e.kind)).toEqual(['user', 'actions']);
+    expect((await req(u, '/api/sessions/s1/subagents/nope/events', { headers: auth })).status).toBe(404);
+    expect((await req(u, '/api/sessions/s1/subagents/a.b/events', { headers: auth })).status).toBe(404);
+    expect((await req(u, '/api/sessions/s1/subagents/..%2F..%2Fx/events', { headers: auth })).status).toBe(404);
+    expect((await req(u, '/api/sessions/s1/subagents')).status).toBe(401);
+    expect((await req(u, '/api/sessions/zz/subagents', { headers: auth })).status).toBe(404);
   });
 });
