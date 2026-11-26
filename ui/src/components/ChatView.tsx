@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { ChatEvent, SessionView } from '@shared/types';
 import { formatTime, initials } from '../format';
+import { avatarStyle } from './backgrounds';
 import { useLang, useT } from '../i18n';
 import type { PendingMessage } from '../useLiveSessions';
 import { ActionsGroup } from './ActionsGroup';
@@ -524,7 +525,11 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
         >
           <BackIcon />
         </button>
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-avatar text-sm font-semibold text-avatar-text">
+        <div
+          data-avatar
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-avatar text-sm font-semibold text-avatar-text"
+          style={avatarStyle(session.background)}
+        >
           {initials(shownName)}
         </div>
         <div className="min-w-0">

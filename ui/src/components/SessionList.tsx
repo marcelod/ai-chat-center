@@ -5,6 +5,7 @@ import type { LiveSession, SessionView, Usage } from '@shared/types';
 import { formatTime, initials, previewText } from '../format';
 import { useLang, useT } from '../i18n';
 import { Logo } from './Logo';
+import { avatarStyle } from './backgrounds';
 import { ChevronIcon, PanelIcon, PinIcon, SearchIcon } from './icons';
 import { SettingsMenu, type NotificationsControl } from './SettingsMenu';
 import { UsageMeter } from './UsageMeter';
@@ -144,7 +145,11 @@ export function SessionList({ connected, others, usage, hubVersion, unread, sele
                   selected ? 'bg-selected' : 'hover:bg-field'
                 }`}
               >
-                <span className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-avatar text-sm font-semibold text-avatar-text">
+                <span
+                  data-avatar
+                  className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-avatar text-sm font-semibold text-avatar-text"
+                  style={avatarStyle(s.background)}
+                >
                   <span aria-hidden="true">{initials(s.name)}</span>
                   <span
                     aria-hidden="true"
