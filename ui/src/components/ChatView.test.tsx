@@ -88,6 +88,7 @@ describe('ChatView', () => {
     const { container } = setup({ events: [{ kind: 'toAgent', id: 'm1', ts: ts(1), to: 'dev-c2-frontend', text: long }] });
     const b = container.querySelector('[data-bubble="toAgent"]') as HTMLElement;
     expect(within(b).getByText('dev-c2-frontend')).toBeTruthy();
+    expect(b.className).toMatch(/\bbg-surface\b/); // a filled bubble, readable over a conversation background
     expect(within(b).getByTestId('agent-preview')).toHaveTextContent('Fix the casing.');
     expect(b.textContent).not.toContain('More detail.');
     await userEvent.click(within(b).getByRole('button', { name: 'Show all' }));

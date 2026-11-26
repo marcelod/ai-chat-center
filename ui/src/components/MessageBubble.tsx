@@ -195,7 +195,7 @@ export function ToAgentBubble({ event }: { event: ToAgent }) {
   return (
     <div
       data-bubble="toAgent"
-      className="md min-w-0 max-w-[min(100%,720px)] self-start break-words rounded-[14px_14px_14px_4px] border border-dashed border-line px-3.5 py-2 text-sm leading-relaxed text-muted"
+      className="md min-w-0 max-w-[min(100%,720px)] self-start break-words rounded-[14px_14px_14px_4px] border border-dashed border-line bg-surface/90 px-3.5 py-2 text-sm leading-relaxed text-muted"
     >
       <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold">
         <span>{t('ui.chat.toAgent')}</span>
