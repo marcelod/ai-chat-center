@@ -7,6 +7,7 @@ import { useLang, useT } from '../i18n';
 import { splitAttachments } from '@shared/attachments';
 import { ClockIcon, KeyboardIcon, PhoneIcon } from './icons';
 import { SentAttachments } from './Attachments';
+import { CodeBlock } from './CodeBlock';
 
 type User = Extract<ChatEvent, { kind: 'user' }>;
 
@@ -89,6 +90,7 @@ export function AssistantBubble({ text }: { text: string }) {
         remarkPlugins={[remarkGfm]}
         components={{
           a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+        pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
         }}
       >
         {text}
@@ -129,6 +131,7 @@ function MarkdownText({ text }: { text: string }) {
       remarkPlugins={[remarkGfm]}
       components={{
         a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+        pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
       }}
     >
       {text}

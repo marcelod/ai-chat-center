@@ -149,6 +149,7 @@
       "agent": "Agente",
       "agentFrom": "Agente {name}",
       "toAgent": "Claude →",
+      "code": {"copy": "Copiar", "copied": "Copiado", "copyFailed": "Não deu para copiar", "wrap": "Quebrar linhas", "noWrap": "Não quebrar linhas"},
       "showAll": "Ver tudo",
       "recap": "Resumo",
       "diffShow": "Ver alterações (+{added} -{removed})",
