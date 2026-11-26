@@ -8,7 +8,9 @@ import type { Provider } from '../../src/hub/provider.js';
 import { tmpDir } from '../helpers/tmp.js';
 import { fakePng } from '../helpers/png.js';
 import { paths } from '../../src/core/paths.js';
-import { register, markRemoved } from '../../src/core/registry.js';
+import { register, markRemoved, markDisconnected } from '../../src/core/registry.js';
+import { installSecret } from '../../src/core/secret.js';
+import type { LiveSession } from '../../src/shared/types.js';
 
 // Spec 2026-11-26-side-panel: the routes behind the side panel.
 
@@ -186,5 +188,58 @@ describe('GET /api/sessions/:sid/subagents', () => {
     expect((await req(u, '/api/sessions/s1/subagents/..%2F..%2Fx/events', { headers: auth })).status).toBe(404);
     expect((await req(u, '/api/sessions/s1/subagents')).status).toBe(401);
     expect((await req(u, '/api/sessions/zz/subagents', { headers: auth })).status).toBe(404);
+  });
+});
+
+describe('GET /api/sessions/:sid/screen', () => {
+  const KEY = '1234567890abcdef'.repeat(2);
+  const bgLive = (over: Partial<LiveSession> = {}): LiveSession => ({ pid: 7, cwd, kind: 'background', bgId: '5e1b5e9b', sessionId: 's1', name: 'n', status: 'idle', ...over });
+  beforeEach(async () => {
+    await register({ sessionId: 's1', transcriptPath: path.join(cwd, 's1.jsonl'), cwd, pid: 42, key: KEY, configDir: '/home/u/.claude-work' });
+  });
+
+  it('answers the cleaned screen: no app link, token, key or install secret', async () => {
+    const secret = await installSecret();
+    const calls: unknown[][] = [];
+    const u = await start({
+      listLive: async () => [bgLive()],
+      screen: async (...a) => {
+        calls.push(a);
+        return `\x1b[32mhello\x1b[0m\nhttp://127.0.0.1:7777/#token=${TOKEN}\nAI Chat Center key: ${KEY}\nsecret ${secret}\n/status shown`;
+      },
+    });
+    const r = await req(u, '/api/sessions/s1/screen', { headers: auth });
+    expect(r.status).toBe(200);
+    const { text } = parse(r.body);
+    expect(text).toContain('hello\n[app link removed]');
+    expect(text).toContain('/status shown');
+    for (const bad of [TOKEN, KEY, secret, '127.0.0.1', '\x1b']) expect(text).not.toContain(bad);
+    expect(calls).toEqual([['5e1b5e9b', '/home/u/.claude-work']]);
+  });
+
+  it('409 for an interactive or disconnected session, 503 failed lookup, 502 failed read, 401 without token', async () => {
+    let list: LiveSession[] | null = [bgLive({ kind: 'interactive', bgId: undefined })];
+    let fail = false;
+    const u = await start({ listLive: async () => list, screen: async () => { if (fail) throw new Error(`boom ${TOKEN}`); return 'ok'; } });
+    let r = await req(u, '/api/sessions/s1/screen', { headers: auth });
+    expect(r.status).toBe(409);
+    expect(parse(r.body).code).toBe('not-background');
+    list = null;
+    expect((await req(u, '/api/sessions/s1/screen', { headers: auth })).status).toBe(503);
+    list = [bgLive()];
+    fail = true;
+    r = await req(u, '/api/sessions/s1/screen', { headers: auth });
+    expect(r.status).toBe(502);
+    expect(r.body.toString()).not.toContain(TOKEN);
+    expect((await req(u, '/api/sessions/s1/screen')).status).toBe(401);
+    await markDisconnected('s1', 'exited');
+    r = await req(u, '/api/sessions/s1/screen', { headers: auth });
+    expect(r.status).toBe(409);
+    expect(parse(r.body).code).toBe('session-disconnected');
+  });
+
+  it('501 on Windows', async () => {
+    const u = await start({ platform: 'win32', listLive: async () => [bgLive()], screen: async () => 'x' });
+    expect((await req(u, '/api/sessions/s1/screen', { headers: auth })).status).toBe(501);
   });
 });

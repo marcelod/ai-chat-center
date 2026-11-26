@@ -14,7 +14,7 @@ import { setDisplayName, validDisplayName } from '../core/names.js';
 import { setPinned } from '../core/pins.js';
 import { readBackgroundImage, saveBackgroundImage, setBackground, validBackgroundPreset } from '../core/background.js';
 import { BACKGROUND_IMAGE_MAX } from '../shared/background.js';
-import { getRegistration, isActive, listRegistrations, isRemoved, markDisconnected, markRemoved, type Registration } from '../core/registry.js';
+import { getRegistration, isActive, listRegistrations, isRemoved, markDisconnected, markRemoved, trustedKeys, type Registration } from '../core/registry.js';
 import { VERSION } from '../core/version.js';
 import { CHALLENGE_RE, healthProof } from '../core/healthProof.js';
 import { createPairing } from './pairing.js';
@@ -43,6 +43,8 @@ import { failResume, isResuming, startResume } from './resumeState.js';
 import { openTerminal, type OpenTerminalResult, type TerminalTarget } from './openTerminal.js';
 import { existingSessionFiles, readSessionFile, SessionFileError, type FileRoots } from './sessionFiles.js';
 import { isAgentId, listSubagents, subagentEvents, subagentsDir } from './subagents.js';
+import { cleanScreen, readScreen } from './sessionScreen.js';
+import { loadSecret } from '../core/secret.js';
 import { sessionAttachmentsDir } from '../core/attachments.js';
 
 export interface HubOptions {
@@ -67,6 +69,8 @@ export interface HubOptions {
     platform?: NodeJS.Platform;
     /** The home folder the folder browser and a new session are limited to (default: os.homedir()). */
     home?: string;
+    /** The raw screen of a background session, `claude logs <bgId>` (default: readScreen). */
+    screen?: (bgId: string, configDir?: string) => Promise<string>;
   };
 }
 
@@ -194,6 +198,7 @@ export async function createHub(
   const openTerm = opts.bg?.openTerminal ?? ((t: TerminalTarget) => openTerminal(t));
   const folders = async () => knownFolders(await listRegistrations(), await listLive(), opts.bg?.folderExists);
   const bgPlatform = opts.bg?.platform ?? process.platform;
+  const screenOf = opts.bg?.screen ?? ((bgId: string, configDir?: string) => readScreen(bgId, { configDir, platform: bgPlatform }));
   /** Sessions with a command being typed: one at a time each. */
   const typing = new Set<string>();
   const now = opts.now ?? Date.now;
@@ -465,7 +470,7 @@ export async function createHub(
       return sendJson(res, 200, { language: body.language });
     }
     // The side panel (spec 2026-11-26-side-panel): read-only views of a session's files, subagents and screen.
-    const sp = /^\/api\/sessions\/([^/]+)\/(file|files\/exists|subagents|subagents\/([^/]+)\/events)$/.exec(p);
+    const sp = /^\/api\/sessions\/([^/]+)\/(file|files\/exists|subagents|subagents\/([^/]+)\/events|screen)$/.exec(p);
     if (sp) {
       let sid: string;
       try {
@@ -499,6 +504,25 @@ export async function createHub(
         const body = (await readJsonBody(req)) as { paths?: unknown } | null;
         if (!body || typeof body !== 'object' || !Array.isArray(body.paths)) throw new HttpError(400, 'invalid body');
         return sendJson(res, 200, { exists: await existingSessionFiles(body.paths, roots) });
+      }
+      if (sp[2] === 'screen' && method === 'GET') {
+        // The terminal screen of a background session, cleaned of the app link, the token and the keys.
+        if (!isActive(reg)) throw new HttpError(409, 'session is disconnected', 'session-disconnected');
+        if (bgPlatform === 'win32') throw new HttpError(501, 'not available on Windows yet');
+        const live = await listLive();
+        if (live === null) throw new HttpError(503, 'could not list running sessions');
+        const l = live.find((x) => x.sessionId === sid);
+        if (!l || l.kind !== 'background' || !l.bgId) throw new HttpError(409, 'not a background session', 'not-background');
+        let raw: string;
+        try {
+          raw = await screenOf(l.bgId, reg.configDir);
+        } catch (e) {
+          log(`screen of ${sid} failed: ${(e as Error).message}`);
+          throw new HttpError(502, 'could not read the session screen');
+        }
+        const secret = await loadSecret({ tries: 1 });
+        const secrets = [token, ...trustedKeys(reg), ...(secret.ok ? [secret.secret] : [])];
+        return sendJson(res, 200, { text: cleanScreen(raw, secrets) });
       }
       if (sp[2] === 'subagents' && method === 'GET') {
         return sendJson(res, 200, { subagents: await listSubagents(subagentsDir(reg.transcriptPath, sid), { now }) });
