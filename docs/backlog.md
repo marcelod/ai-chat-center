@@ -18,6 +18,16 @@ Pedido em 2026-11-25. Investigado na rodada 0.6.2 (Claude Code 2.1.332), **adiad
 
 O painel lateral saiu na 0.6.7 com imagens, Markdown, subagentes e a tela da sessão. Falta, quando o autor quiser: código com destaque de sintaxe (`arquivo.ts:42` abrindo na linha), o diff dos arquivos editados no painel, PDF e o resultado de `/status` ou `/context` direto no painel depois do comando. Mesmos cuidados da rota de arquivos da 0.6.7 (só leitura, só a pasta da sessão e os anexos dela, realpath, limite de tamanho, tipos conhecidos).
 
+### "Abrir no terminal" falha no Ubuntu com o Ptyxis
+
+Visto em 2026-11-26 (print do autor): ao clicar em "Abrir no terminal", abre uma janela "claude attach 856fd72f (Falhou)" com "Failed to find executable claude attach 856fd72f: No such file or directory". Causa confirmada: neste Ubuntu o terminal padrão é o Ptyxis (`/usr/bin/x-terminal-emulator` aponta para `/usr/bin/ptyxis`) e não há `gnome-terminal`. Então `linuxTerminal` (`src/hub/openTerminal.ts`) cai no último da lista, `x-terminal-emulator -e "claude attach <id>"`, com o comando numa string só, e o Ptyxis trata a string inteira como o nome do programa.
+
+Correção:
+- Pôr o Ptyxis na lista (antes do `x-terminal-emulator`), com a pasta e o comando em argumentos separados. Pelo `ptyxis --help`: `-d <pasta>` e `-x`/`--execute`, ou `--new-window -d <pasta> -- claude attach <id>`; confirmar ao vivo qual forma separa os argumentos.
+- No `x-terminal-emulator`, descobrir o terminal real (`realpath`) e usar a sintaxe dele quando for conhecido; a string única fica só para um terminal desconhecido.
+- Conferir também o Console do GNOME (`kgx`), padrão em outras distribuições.
+- Se o terminal abrir e o comando falhar, o app não fica sabendo: avaliar um aviso no app ("o terminal abriu, mas o comando falhou? veja …").
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
