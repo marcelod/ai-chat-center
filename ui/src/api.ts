@@ -1,4 +1,4 @@
-import type { ChatEvent, ProviderChange, SessionsResponse } from '@shared/types';
+import type { ChatEvent, ProviderChange, SessionsResponse, SubagentInfo } from '@shared/types';
 import type { BackgroundPreset } from '@shared/background';
 import type { SearchHit } from '@shared/search';
 
@@ -401,6 +401,8 @@ export function panelApi(sid: string) {
   return {
     file: (path: string) => getSessionFile(sid, path),
     filesExist: (paths: string[]) => filesExist(sid, paths),
+    subagents: async () => (await request<{ subagents: SubagentInfo[] }>(`/api/sessions/${encodeURIComponent(sid)}/subagents`)).subagents,
+    subagentEvents: (id: string) => request<ChatEvent[]>(`/api/sessions/${encodeURIComponent(sid)}/subagents/${encodeURIComponent(id)}/events`),
   };
 }
 export const getConfig = () => request<UiConfig>('/api/config');

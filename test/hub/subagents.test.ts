@@ -51,7 +51,7 @@ describe('listSubagents', () => {
     const list = await listSubagents(dir, { now: () => T0 + 6 * 60_000 });
     expect(list).toEqual([
       { id: 'a2', description: 'Find B', agentType: 'Explore', background: false, status: 'finished', startedAt: iso(3), lastActivityAt: iso(5), lastTool: 'Grep' },
-      { id: 'a1', description: 'Front A', agentType: 'general-purpose', model: 'claude-opus-5-5', background: true, status: 'running', startedAt: iso(0), lastActivityAt: iso(2), lastTool: 'Bash' },
+      { id: 'a1', description: 'Front A', agentType: 'general-purpose', model: 'Opus 5.5', background: true, status: 'running', startedAt: iso(0), lastActivityAt: iso(2), lastTool: 'Bash' },
     ]);
   });
 

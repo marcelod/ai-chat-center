@@ -7,6 +7,7 @@ import path from 'node:path';
 import type { ChatEvent, SubagentInfo } from '../shared/types.js';
 import { assertSessionId } from '../core/paths.js';
 import { TranscriptReader } from './transcript/reader.js';
+import { shortModel } from '../core/meta.js';
 
 /** A subagent with no new line for this long is not counted as working (it may have died with its session). */
 export const STALE_MS = 10 * 60_000;
@@ -48,7 +49,7 @@ function parseMeta(raw: string): Meta | null {
   return {
     description: str(m.description) ?? '',
     agentType: str(m.agentType, 100) ?? '',
-    model: str(m.model, 100) || undefined,
+    model: str(m.model, 100) ? shortModel(str(m.model, 100)!) : undefined,
     background: m.requestShape === 'background',
     finished: m.finished === true || m.stoppedByUser === true,
   };

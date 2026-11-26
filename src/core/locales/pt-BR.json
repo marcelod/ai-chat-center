@@ -28,7 +28,26 @@
       "loadFailed": "Não foi possível carregar.",
       "image": "imagem",
       "imageBlocked": "Imagens dentro de arquivos não são carregadas",
-      "openFile": "Abrir {name}"
+      "openFile": "Abrir {name}",
+      "subagents": "Subagentes",
+      "showSubagents": "Ver subagentes",
+      "noSubagents": "Nenhum subagente nesta conversa.",
+      "noMessages": "Nada ainda.",
+      "background": "segundo plano",
+      "workingFor": "Trabalhando há {d}",
+      "ran": "Rodou {d}",
+      "noNewsFor": "Sem novidade há {d}",
+      "lastTool": "Última: {tool}",
+      "status": {
+        "running": "Trabalhando",
+        "finished": "Terminado",
+        "stale": "Sem novidade"
+      },
+      "duration": {
+        "lessThanMinute": "menos de um minuto",
+        "minutes": "{n} min",
+        "hours": "{h} h {m} min"
+      }
     },
     "rename": {
       "label": "Renomear sessão",

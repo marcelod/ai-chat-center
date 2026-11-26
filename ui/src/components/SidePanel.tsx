@@ -1,7 +1,7 @@
 // The side panel (spec 2026-11-26-side-panel): right of the conversation on a wide screen, the whole screen
 // on a narrow one. Shows a cited file (image or Markdown), the session's subagents and the session screen.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import type { ChatEvent } from '@shared/types';
+import type { ChatEvent, SubagentInfo } from '@shared/types';
 import { useT } from '../i18n';
 import { fileKind } from '../filePaths';
 import { FileLinksProvider, useFileLinksContext } from '../fileLinks';
@@ -14,7 +14,7 @@ export type PanelItem = { kind: 'file'; path: string } | { kind: 'subagents' } |
 export type PanelApi = {
   file: (path: string) => Promise<Blob>;
   filesExist?: (paths: string[]) => Promise<string[]>;
-  subagents?: () => Promise<unknown>;
+  subagents?: () => Promise<SubagentInfo[]>;
   subagentEvents?: (id: string) => Promise<ChatEvent[]>;
   screen?: () => Promise<string>;
 };

@@ -17,6 +17,7 @@ import { ChatBackground } from './ChatBackground';
 import { useCommandProgress } from '../useCommandProgress';
 import { SessionControls } from './SessionControls';
 import { SidePanel, type PanelApi, type PanelItem } from './SidePanel';
+import { SubagentList, SubagentTranscript } from './SubagentsPanel';
 import { FileLinksProvider, useExistingFiles, type FileLinks } from '../fileLinks';
 import { AgentBubble, RecapCard, AssistantBubble, ToAgentBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
 
@@ -56,6 +57,8 @@ type Props = {
   onOpenTerminal?: () => Promise<void>;
   /** The side panel's loaders for this session (spec 2026-11-26-side-panel); absent: no panel, no file links. */
   panel?: PanelApi;
+  /** For tests: the clock of the subagent times. */
+  now?: () => number;
   onBack: () => void;
 };
 
@@ -135,7 +138,8 @@ function SessionBar({ session, hubVersion, runCommand }: { session: SessionView;
   );
 }
 
-function StatusPill({ state, asking }: { state: SessionView['state']; asking: boolean }) {
+/** The session state; a button that opens the subagents in the side panel when `onOpen` is given. */
+function StatusPill({ state, asking, onOpen }: { state: SessionView['state']; asking: boolean; onOpen?: () => void }) {
   const t = useT();
   const label = asking ? t('ui.question.waiting') : t(`ui.status.${state}`);
   const style: Record<SessionView['state'], string> = {
@@ -144,14 +148,31 @@ function StatusPill({ state, asking }: { state: SessionView['state']; asking: bo
     idle: 'bg-field text-muted',
     disconnected: 'bg-field text-muted',
   };
-  return (
-    <span
-      data-state={state}
-      className={`ml-auto flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${style[state]}`}
-    >
+  const cls = `ml-auto flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${style[state]}`;
+  const inner = (
+    <>
       {state === 'busy' && <span className="h-2 w-2 rounded-full bg-busy" />}
       {state === 'waiting' && <WarningIcon width={14} height={14} />}
       {label}
+    </>
+  );
+  if (onOpen) {
+    return (
+      <button
+        type="button"
+        data-state={state}
+        onClick={onOpen}
+        aria-label={t('ui.panel.showSubagents')}
+        title={t('ui.panel.showSubagents')}
+        className={`${cls} min-h-9 hover:brightness-95`}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <span data-state={state} className={cls}>
+      {inner}
     </span>
   );
 }
@@ -424,7 +445,7 @@ function SessionTitle({
   );
 }
 
-export function ChatView({ hubVersion, initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, onOpenTerminal, panel, ...bg }: Props) {
+export function ChatView({ hubVersion, initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, onOpenTerminal, panel, now = Date.now, ...bg }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -591,7 +612,11 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
         >
           <SearchIcon width={18} height={18} />
         </button>
-        <StatusPill state={state} asking={session.waitingKind === 'question'} />
+        <StatusPill
+          state={state}
+          asking={session.waitingKind === 'question'}
+          onOpen={panel?.subagents ? () => setPanelStack([{ kind: 'subagents' }]) : undefined}
+        />
       </header>
       {search !== null && (
         <div className="flex items-center gap-2 border-b border-line bg-surface px-3 py-2 md:px-5">
@@ -777,7 +802,23 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
       <div className="flex h-full min-h-0">
         {view}
         {panelOpen && (
-          <SidePanel stack={panelStack} api={panel} onBack={() => setPanelStack((st) => st.slice(0, -1))} onClose={closePanel} />
+          <SidePanel
+            stack={panelStack}
+            api={panel}
+            onBack={() => setPanelStack((st) => st.slice(0, -1))}
+            onClose={closePanel}
+            renderOther={(item) => {
+              if (item.kind === 'subagents' && panel.subagents) {
+                const load = panel.subagents;
+                return <SubagentList load={load} now={now} onOpen={(a) => openPanel({ kind: 'subagent', id: a.id, title: a.description || a.agentType || a.id })} />;
+              }
+              if (item.kind === 'subagent' && panel.subagentEvents) {
+                const load = panel.subagentEvents;
+                return <SubagentTranscript key={item.id} title={item.title} load={() => load(item.id)} />;
+              }
+              return null;
+            }}
+          />
         )}
       </div>
     </FileLinksProvider>

@@ -146,7 +146,7 @@ export type SubagentInfo = {
   id: string;
   description: string;
   agentType: string;
-  /** Raw model id, when the meta names one. */
+  /** Short model name ("Opus 5.5"), when the meta names one. */
   model?: string;
   /** Launched in the background (the session's turn may end while it works). */
   background: boolean;
