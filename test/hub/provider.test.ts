@@ -92,12 +92,26 @@ describe('provider', () => {
     t += 25_000;
     await p.listSessions();
     expect(calls).toBe(2);
-    status = 'busy';
+    status = 'waiting';
     t += 31_000;
-    await p.listSessions(); // sees busy
+    await p.listSessions(); // sees waiting
     t += 6000;
     await p.listSessions();
-    expect(calls).toBe(4); // busy: every 5 s
+    expect(calls).toBe(4); // waiting: every 5 s
+  });
+  it('a raw busy without the turn marker (background task after the turn) keeps the 30 s lookups', async () => {
+    await reg();
+    let t = Date.now();
+    let calls = 0;
+    const p = new ClaudeCodeProvider(async () => (calls++, [live({ status: 'busy' })]), { now: () => t, isAlive: () => true });
+    await p.listSessions();
+    t += 6000;
+    await p.listSessions();
+    expect(calls).toBe(1); // shown as idle, so looked up as idle
+    await setBusy('s1');
+    t += 6000;
+    await p.listSessions();
+    expect(calls).toBe(2); // a real turn: every 5 s
   });
   it('a busy marker (prompt just sent) brings back the 5 s lookups', async () => {
     await reg();

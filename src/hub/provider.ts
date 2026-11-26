@@ -254,8 +254,10 @@ export class ClaudeCodeProvider implements Provider {
       // Connected after the last lookup: its first status should not wait for the long TTL.
       if ((Date.parse(reg.connectedAt) || 0) > this.liveCache!.at) return LIVE_TTL_MS;
       if (l) {
-        // Busy or waiting, or its claude just exited (Ctrl-D): exit detection needs fresh lookups.
-        if (l.status !== 'idle' || (reg.pid !== null && !this.alive(reg.pid))) return LIVE_TTL_MS;
+        // Waiting, or its claude just exited (Ctrl-D): exit detection needs fresh lookups. A raw `busy`
+        // counts only with the hub's turn marker (checked below), as for the state shown: `claude agents`
+        // keeps saying busy while a background task (shell, monitor) runs after the turn ended.
+        if (l.status === 'waiting' || (reg.pid !== null && !this.alive(reg.pid))) return LIVE_TTL_MS;
       } else if (sameConfigDir(reg) && !(reg.pid !== null && this.alive(reg.pid) && !last.some((x) => x.pid === reg.pid))) {
         return LIVE_TTL_MS;
       }
