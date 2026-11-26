@@ -35,6 +35,8 @@ export type ChatEvent =
       images?: number;
       /** Names of the files attached in the app (`[Attachment: <path>]` lines, taken out of `text`). */
       attachments?: string[];
+      /** The full paths of those files, in the same order (the side panel opens images by path). */
+      attachmentPaths?: string[];
       /** A `!` shell-mode command typed in the terminal (its output follows as an actions item). */
       shell?: true;
     }

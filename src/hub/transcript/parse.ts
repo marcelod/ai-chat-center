@@ -2,7 +2,7 @@ import { unwrapMessages } from '../../core/protocol.js';
 import { isCcCommand } from '../../core/ccCommand.js';
 import { parseQuestions } from '../../core/questions.js';
 import type { ChatEvent, ToolAction } from '../../shared/types.js';
-import { splitAttachments } from '../../shared/attachments.js';
+import { attachmentPaths, splitAttachments } from '../../shared/attachments.js';
 import { toolDiff } from '../../shared/diff.js';
 
 type ActionsEvent = Extract<ChatEvent, { kind: 'actions' }>;
@@ -28,9 +28,9 @@ const WRAPPER_TAGS = /<\/?(?:pasted_content|teammate-message)(?:\s+[\w-]+="[^"]*
 const unwrapPrompt = (text: string): string => text.replace(WRAPPER_TAGS, '');
 
 /** The text of a user message without its `[Attachment: <path>]` lines, and those files' names (chips). */
-function body(text: string): { text: string; attachments?: string[] } {
+function body(text: string): { text: string; attachments?: string[]; attachmentPaths?: string[] } {
   const r = splitAttachments(text);
-  return r.attachments.length ? r : { text };
+  return r.attachments.length ? { ...r, attachmentPaths: attachmentPaths(text) } : { text };
 }
 
 

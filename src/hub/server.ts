@@ -41,6 +41,8 @@ import { searchAll } from './search.js';
 import { MAX_QUERY, MIN_QUERY } from '../shared/search.js';
 import { failResume, isResuming, startResume } from './resumeState.js';
 import { openTerminal, type OpenTerminalResult, type TerminalTarget } from './openTerminal.js';
+import { existingSessionFiles, readSessionFile, SessionFileError, type FileRoots } from './sessionFiles.js';
+import { sessionAttachmentsDir } from '../core/attachments.js';
 
 export interface HubOptions {
   provider: Provider;
@@ -115,6 +117,10 @@ class HttpError extends Error {
 /** A FolderError as an HTTP error (its message never carries a path). */
 const FOLDER_STATUS = { invalid: 400, outside: 403, 'not-found': 404, denied: 403 } as const;
 const folderHttpError = (e: FolderError, status: number = FOLDER_STATUS[e.code]) => new HttpError(status, e.message, `folder-${e.code}`);
+
+/** A SessionFileError as an HTTP error (its message never carries a path). */
+const FILE_STATUS = { invalid: 400, type: 415, outside: 403, 'not-found': 404, 'too-large': 413, denied: 403 } as const;
+const fileHttpError = (e: SessionFileError) => new HttpError(FILE_STATUS[e.code], e.message, `file-${e.code}`);
 
 /** `claude --bg` refused the folder: it was never trusted in Claude Code ("Workspace not trusted"). */
 export const isUntrustedError = (error: string) => /not trusted|trust (this|the) folder|trust dialog/i.test(error);
@@ -456,6 +462,45 @@ export async function createHub(
       if (!body || typeof body !== 'object' || !LANGS.includes(body.language as Lang)) throw new HttpError(400, 'invalid language');
       await saveConfig({ language: body.language as Lang });
       return sendJson(res, 200, { language: body.language });
+    }
+    // The side panel (spec 2026-11-26-side-panel): read-only views of a session's files, subagents and screen.
+    const sp = /^\/api\/sessions\/([^/]+)\/(file|files\/exists)$/.exec(p);
+    if (sp) {
+      let sid: string;
+      try {
+        sid = decodeURIComponent(sp[1]);
+        assertSessionId(sid);
+      } catch {
+        req.resume();
+        throw new HttpError(404, 'not found');
+      }
+      const reg = await getRegistration(sid);
+      if (!reg || isRemoved(reg)) {
+        req.resume();
+        throw new HttpError(404, 'no such session');
+      }
+      const roots: FileRoots = { base: reg.cwd, roots: [reg.cwd, sessionAttachmentsDir(sid)] };
+      if (sp[2] === 'file' && method === 'GET') {
+        try {
+          const f = await readSessionFile(url.searchParams.get('path') ?? '', roots);
+          res.writeHead(200, {
+            'Content-Type': f.type,
+            'Content-Length': f.data.length,
+            'Content-Security-Policy': "default-src 'none'; sandbox",
+          });
+          return void res.end(f.data);
+        } catch (e) {
+          if (e instanceof SessionFileError) throw fileHttpError(e);
+          throw e;
+        }
+      }
+      if (sp[2] === 'files/exists' && method === 'POST') {
+        const body = (await readJsonBody(req)) as { paths?: unknown } | null;
+        if (!body || typeof body !== 'object' || !Array.isArray(body.paths)) throw new HttpError(400, 'invalid body');
+        return sendJson(res, 200, { exists: await existingSessionFiles(body.paths, roots) });
+      }
+      req.resume();
+      throw new HttpError(404, 'not found');
     }
     const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|pin|disconnect|remove|resume|command|open-terminal|background|background-image|attachments|questions\/([^/]+))$/.exec(p);
     if (m) {

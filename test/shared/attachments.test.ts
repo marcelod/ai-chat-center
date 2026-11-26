@@ -5,6 +5,7 @@ import {
   attachmentDisplayName,
   attachmentLine,
   splitAttachments,
+  attachmentPaths,
   withAttachments,
 } from '../../src/shared/attachments.js';
 
@@ -30,6 +31,11 @@ describe('attachment lines', () => {
     expect(splitAttachments(withAttachments('', ['/p/0123456789abcdef-a.png']))).toEqual({ text: '', attachments: ['a.png'] });
     expect(splitAttachments('plain\ntext')).toEqual({ text: 'plain\ntext', attachments: [] });
     expect(splitAttachments('a\r\n[Attachment: /p/0123456789abcdef-a.png]\r\n')).toEqual({ text: 'a', attachments: ['a.png'] });
+  });
+  it('gives the full paths of the attachment lines, in order (the side panel opens images by path)', () => {
+    const body = withAttachments('look', ['/h/a/s/0123456789abcdef-x.png', '/h/a/s/fedcba9876543210-y.txt']);
+    expect(attachmentPaths(body)).toEqual(['/h/a/s/0123456789abcdef-x.png', '/h/a/s/fedcba9876543210-y.txt']);
+    expect(attachmentPaths('plain')).toEqual([]);
   });
   it('leaves lines that are not exactly the form (relative path, inline) in the text', () => {
     const s = 'see [Attachment: /a.png] inline\n[Attachment: rel/a.png]';
