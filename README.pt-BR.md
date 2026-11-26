@@ -2,125 +2,165 @@
 
 [English](README.md)
 
-O AI Chat Center é um plugin para o Claude Code mais um pequeno app local. Ele permite acompanhar suas sessões de código no terminal em uma interface web no estilo WhatsApp e responder por lá, para que você vigie uma sessão demorada de outra janela do navegador no mesmo computador.
+O AI Chat Center é um plugin do Claude Code com um pequeno app web local. Acompanhe suas sessões do Claude Code numa janela no estilo WhatsApp e responda por lá: fique de olho em tarefas longas, responda quando o Claude terminar e inicie ou retome sessões sem abrir um terminal. Tudo roda no seu próprio computador.
 
 ```
 +----------------------+--------------------------------------+
 | Sessões              | meu-projeto                          |
 |----------------------|--------------------------------------|
-| > meu-projeto   (2)  |  você:   adicione retry no upload    |
+| > meu-projeto   (2)  |  você:   coloca retry no upload      |
 |   api-server         |  claude: pronto, 3 arquivos mudaram  |
-|   site-docs          |  você:   agora rode os testes        |
+|   site-docs          |  você:   agora roda os testes        |
 |                      |--------------------------------------|
 |                      | [ digite uma mensagem...       ] [>] |
 +----------------------+--------------------------------------+
 ```
 
+## O que dá para fazer
+
+- **Conversar com todas as sessões conectadas** numa janela só: mensagens, respostas do Claude, as ações que ele executou (com o diff dos arquivos editados, se você ligar) e os agentes com quem ele falou, numa visão de conversa em grupo.
+- **Mandar mensagens enquanto o Claude trabalha.** Elas ficam na fila e são entregues quando o turno termina.
+- **Ver o estado de cada sessão** (trabalhando, parada, esperando você) e, se você ligar nas configurações, receber uma notificação do navegador quando o Claude responde.
+- **Responder às perguntas de múltipla escolha do Claude** pelo app (opcional, veja `answers on` abaixo).
+- **Anexar arquivos e imagens** (📎, arrastar e soltar ou colar).
+- **Sessões em segundo plano:** iniciar uma sessão nova em qualquer pasta da sua pasta pessoal, retomar uma que terminou, rodar comandos de barra (`/compact`, `/model`, `/effort`…), trocar o modelo e o esforço e abrir a sessão num terminal (`claude attach`).
+- **Buscar** na conversa aberta (cada ocorrência destacada, com anterior e próxima) e em todas as conversas, inclusive as encerradas.
+- **Organizar:** renomear, fixar no topo, remover da lista e dar a cada conversa um fundo de cor, degradê ou imagem. A cor também pinta o círculo da conversa na lista.
+- **Ver o uso de 5 horas** na lista (opcional, veja `usage on` abaixo).
+- O app está em inglês e em português do Brasil.
+
 ## Requisitos
 
-- **Para usar:** Claude Code 2.1.139 ou mais recente (os hooks usam a forma exec, `command` mais `args`, adicionada nessa versão) e Node.js 18 ou mais recente. O plugin não precisa de `npm install`, e os hooks não precisam de shell (nem do Git Bash no Windows).
-- **O Node.js 18+ precisa estar no PATH que o Claude Code enxerga; sem ele, todo prompt mostra um erro de hook. Desinstale o plugin ou instale o Node.**
-- **Windows:** o instalador nativo do Claude Code não instala o Node. Instale o Node.js 18 ou mais recente (por exemplo pelo nodejs.org, ou com `winget install OpenJS.NodeJS.LTS`) e abra um terminal novo para que o Claude Code o encontre no PATH (`node -v` deve funcionar ali). Sem ele, todo prompt de toda sessão mostra um erro de hook.
-- **Para desenvolver:** Node.js 22.22.2 ou um 22.x mais recente, ou Node.js 24.15 ou mais recente (`^22.22.2 || >=24.15`, exigido pelo jsdom nos testes da interface).
+- **Claude Code 2.1.139 ou mais novo.** As sessões em segundo plano usam `claude --bg`, `claude agents` e `claude attach`, que pedem um Claude Code recente.
+- **Node.js 18 ou mais novo no PATH que o Claude Code enxerga.** Os hooks rodam com `node`; o plugin não precisa de `npm install` nem de shell (nada de Git Bash no Windows). Sem o Node, todo prompt de toda sessão mostra um erro de hook: instale o Node ou desinstale o plugin.
+- **Windows:** o instalador nativo do Claude Code não instala o Node. Instale o Node.js (pelo nodejs.org ou com `winget install OpenJS.NodeJS.LTS`), feche todos os terminais e editores e abra um novo, para o Claude Code enxergá-lo (`node -v` precisa funcionar ali).
+- **Um navegador.** Chrome, Chromium ou Edge abrem o app numa janela própria; qualquer outro abre numa aba.
 
 ## Instalação
+
+No Claude Code:
 
 ```
 /plugin marketplace add marcelod/ai-chat-center
 /plugin install ai-chat-center@ai-chat-center
 ```
 
+Depois digite `/cc` numa sessão.
+
+**A partir de um clone local** (para testar mudanças): `/plugin marketplace add /caminho/para/ai-chat-center` e o mesmo `/plugin install`. O plugin passa a rodar direto da pasta `plugin/` do clone: depois de um `npm run build`, rode `/reload-plugins` em cada sessão aberta.
+
+## Atualização
+
+1. `/plugin marketplace update ai-chat-center` (ou atualize pelo menu `/plugin`).
+2. Em cada sessão que já estava aberta, rode `/reload-plugins` ou reinicie a sessão. Até lá ela continua com a cópia antiga, e o app mostra a versão do plugin dela em amarelo, embaixo do campo de mensagem.
+3. Rode `/cc` uma vez em qualquer sessão: ele troca o hub em execução pelo novo.
+
+A partir da 0.6.6, uma sessão aberta antes de uma atualização também passa a rodar os hooks da cópia mais nova instalada, assim que outra sessão tiver usado essa cópia.
+
 ## Uso
 
-- Digite `/cc` em uma sessão para conectá-la. O plugin mostra no terminal um link para o app, no formato `http://127.0.0.1:7777/#token=…`; abra-o no navegador. O Claude só confirma a conexão: o link é mostrado a você pelo plugin e o Claude nunca o repete.
-- Digite `/ai-chat-center:cc off` para desconectar a sessão.
-- Digite `/ai-chat-center:cc answers on` uma vez, no terminal, para responder pelo app a janela de múltipla escolha do Claude (a ferramenta AskUserQuestion), inclusive confirmações. Quando o Claude faz uma pergunta assim num turno que você começou pelo app, o app a mostra com um botão por opção, um campo para uma resposta livre e um botão "responder no terminal". A configuração fica salva no `config.json` do AI Chat Center e vale para todas as sessões até você digitar `/ai-chat-center:cc answers off`. Só um comando digitado no terminal a muda: uma mensagem do app nunca vira slash command. Antes de ligar, essas perguntas aparecem no app só para leitura e são respondidas no terminal.
-- Digite `/ai-chat-center:cc window on` uma vez, no terminal, para que todo `/cc` que conecta (ou reconecta) uma sessão também abra o app numa janela própria do Chrome, Chromium ou Edge (uma janela `--app`, sem abas nem barra de endereço). O link continua aparecendo como sempre. A configuração fica salva no `config.json` e vale para todas as sessões até você digitar `/ai-chat-center:cc window off`; a confirmação diz se um navegador compatível foi encontrado. Fica uma janela só: com o app já aberto (numa janela ou aba, mesmo minimizada), o `/cc` não abre outra, e o app aberto passa a mostrar a sessão. No Linux, o `window on` também põe o atalho “AI Chat Center” no menu de aplicativos: ele inicia o hub se preciso e abre o app, e a janela aberta aparece sob esse ícone. O `window off` remove o atalho.
-- O comando também funciona pelo nome completo, `/ai-chat-center:cc`. O Claude Code só troca `/cc` por `/ai-chat-center:cc` pelo menu de autocompletar: digitado com argumentos (`/cc off`, `/cc answers on`), ele pode responder "Unknown command: /cc", então use o nome completo nesses casos. Se outro plugin ou um comando seu também definir `/cc`, use `/ai-chat-center:cc`.
+Digite `/cc` numa sessão para conectá-la. O plugin mostra no terminal um link para o app (`http://127.0.0.1:7777/#token=…`) e, por padrão, abre o app numa janela própria. O Claude só confirma a conexão; ele nunca repete o link.
+
+| Comando | O que faz |
+| --- | --- |
+| `/cc` | Conecta a sessão (ou reconecta) e abre o app. |
+| `/ai-chat-center:cc off` | Desconecta a sessão. As mensagens ainda não entregues são descartadas. |
+| `/ai-chat-center:cc answers on` / `off` | Deixa o app responder ao diálogo de múltipla escolha do Claude (AskUserQuestion), inclusive confirmações. Desligado por padrão: o app então mostra essas perguntas só para leitura. |
+| `/ai-chat-center:cc window on` / `off` | Abre o app numa janela própria a cada `/cc` (ligado por padrão). No Linux, `on` também põe um ícone "AI Chat Center" no menu de aplicativos. |
+| `/ai-chat-center:cc usage on` / `off` | Mostra o uso de 5 horas no rodapé da lista. Ele envolve a sua status line em `~/.claude/settings.json`; `off` devolve a sua. |
+
+`answers`, `window` e `usage` valem para todas as sessões, e só um comando digitado no terminal muda essas opções: uma mensagem do app nunca roda o `/cc`.
+
+Digite os argumentos com o nome completo, `/ai-chat-center:cc`. O Claude Code só troca `/cc` pelo nome completo pelo menu de autocompletar: digitado com argumentos, `/cc off` pode responder "Unknown command". Se outro plugin ou um comando seu também definir `/cc`, use o nome completo em todos os comandos.
+
+### Sessões em segundo plano
+
+Uma sessão iniciada pelo botão **+** do app, ou retomada pelo app, roda como sessão em segundo plano do Claude Code (`claude --bg`). Ela não tem terminal, então o app também pode rodar comandos de barra nela (pelo `claude attach`), trocar o modelo e o esforço e abri-la num terminal pelo menu ⋮ quando ela precisa de algo que só o terminal faz, como um pedido de permissão. Uma sessão que você abriu num terminal não recebe comandos de barra pelo app (eles chegariam como texto comum): digite-os no terminal dela.
+
+Observações:
+
+- Sessões novas podem começar em qualquer pasta da sua pasta pessoal. Uma pasta que você nunca abriu no Claude Code precisa ser confiada antes: abra um terminal nela, rode `claude` uma vez e aceite.
+- `/model` e `/effort` no Claude Code também gravam a escolha como padrão das novas sessões (`model` e `effortLevel` em `~/.claude/settings.json`). Trocar pelo app faz o mesmo.
+- Comandos de barra pelo app ainda não funcionam no Windows. Retomar funciona.
 
 ## Como funciona
 
-O plugin registra hooks que rodam quando uma sessão começa, quando você envia um prompt, quando o Claude Code para e quando ele envia uma notificação. Sessões em que você nunca digitou `/cc` não gravam nada, e os hooks delas terminam na hora, com uma exceção: enquanto outra sessão estiver conectada, o waiter que começa com toda sessão (início, retomada, `/clear` e fork) roda o `claude agents` uma vez (uma fração de segundo) para verificar se a nova conversa substituiu uma conectada no mesmo terminal e, se for o caso, desconecta essa outra. O `/cc` inicia um hub local, caso ele ainda não esteja rodando. O hub lê as transcrições das sessões que o Claude Code já grava em disco e as serve para a interface web. Enquanto uma aba do app está aberta, o hub também roda o `claude agents` a cada 5 segundos, mais ou menos, para saber o estado das sessões; uma aba oculta fecha a conexão (a menos que as notificações do navegador estejam ligadas), o que interrompe isso. As mensagens digitadas no app vão para uma caixa de entrada por sessão. Um pequeno processo em segundo plano, o waiter (`dist/waiter.mjs`, iniciado por um hook `asyncRewake` quando a sessão começa ou é retomada, quando um turno começa e sempre que o Claude Code para), vigia essa caixa; quando chega uma mensagem e nenhum turno está em andamento, ele acorda a sessão e a entrega como retorno de hook, envolvida em marcadores com uma chave própria de cada conexão, para que a sessão só confie nas mensagens que vieram mesmo de você. Mensagens enviadas enquanto o Claude trabalha esperam o turno terminar, por mais que ele demore. Com `/cc answers on`, um hook `PreToolUse` para o AskUserQuestion (`dist/ask.mjs`) verifica de onde veio o turno atual: num turno iniciado por uma mensagem do app, com uma aba do app aberta, ele grava a pergunta no estado da sessão e espera (até 24 horas) a sua resposta pelo app, e então a entrega ao Claude como resposta da janela, que assim não aparece. Em qualquer outro caso ele termina na hora e a janela nativa aparece no terminal, como sempre. Um turno que você interrompe (Esc) ou que termina com um erro da API não dispara o hook Stop do Claude Code; o waiter iniciado com esse turno continua esperando e, quando há mensagens na fila, consulta o `claude agents` (no máximo a cada 15 segundos) para saber se a sessão está ociosa e então as entrega. O waiter termina quando a sessão fecha ou é desconectada; ao desconectar, as mensagens ainda não entregues são descartadas. O processo da sessão vem do `claude agents`; quando ele não lista a sessão (o Claude Code às vezes não grava a entrada dela em `~/.claude/sessions`), o `/cc` usa o processo pai do hook, se ele for o `claude`, e o hub não dá como encerrada uma sessão cujo processo segue vivo e não aparece sob outra sessão. Quando o plugin não conseguiu identificar o processo da sessão, o waiter consulta o `claude agents` uma vez por minuto: ele termina depois de cerca de 3 minutos em que a sessão não aparece mais na lista, ou depois de 30 minutos em que essa consulta continua falhando.
+O plugin registra hooks no início da sessão, no envio de prompt, no Stop, nas notificações e na ferramenta AskUserQuestion. Sessões em que você nunca digitou `/cc` não gravam nada, e os hooks delas terminam na hora.
 
-Com `/cc window on`, o hook do `/cc` procura um navegador (Linux: `google-chrome`, `google-chrome-stable`, `chromium`, `chromium-browser`, `microsoft-edge`, `microsoft-edge-stable` no `PATH`; macOS: Google Chrome, Chromium ou Microsoft Edge em `/Applications`; Windows: `chrome.exe` ou `msedge.exe` em `%ProgramFiles%`, `%ProgramFiles(x86)%` ou `%LOCALAPPDATA%`). Ele não coloca o token na linha de comando do navegador, que outros usuários do computador poderiam ler (`ps`): pede ao hub um código de pareamento de uso único (válido por 60 segundos) e abre `http://127.0.0.1:<porta>/#pair=<código>`; o app troca o código pelo token e o tira da barra de endereço. Toda página aberta do app avisa o hub que está viva a cada 20 segundos, oculta ou não, e se despede ao fechar; o hub conta uma página como aberta por 150 segundos depois do último aviso e, enquanto houver uma, não emite código e passa a sessão para essa página. O atalho do Linux é um arquivo `~/.local/share/applications/ai-chat-center.desktop` (com o ícone em `~/.local/share/icons/hicolor/512x512/apps/`) que roda `dist/open.mjs` com o mesmo Node do hook; todo `/cc` com a opção ligada o atualiza, porque a pasta do plugin muda a cada versão. Ele declara `StartupWMClass=chrome-127.0.0.1__-Default`, o nome que o Chrome dá a uma janela `--app` do app no perfil Default, para o GNOME juntar a janela ao ícone. Falhas do atalho ficam em `~/.ai-chat-center/logs/launcher.log`. O navegador é iniciado desacoplado, sem shell; se algo falhar, o `/cc` conecta e mostra o link do mesmo jeito, e a falha fica registrada em `~/.ai-chat-center/logs/hook.log`.
-
-O hub roda a partir da sua pasta pessoal e herda o ambiente da sessão que o iniciou, então ele enxerga as sessões que usam a mesma pasta de configuração do Claude (`CLAUDE_CONFIG_DIR`) dessa sessão. Ele se encerra sozinho depois de 2 horas sem nenhuma aba visível do app e sem nenhuma sessão conectada (uma aba oculta fecha a conexão, então não conta, a menos que as notificações do navegador estejam ligadas); o próximo `/cc` o inicia de novo. Uma sessão cujo processo não pôde ser identificado só conta como conectada enquanto a transcrição dela mudou nas últimas 24 horas. O `/cc` espera até cerca de 5 segundos por um hub em execução que demora a responder, em vez de iniciar um segundo, e um hub que o `~/.ai-chat-center/hub.json` não cita mais (outro hub o substituiu, ou a pasta foi apagada) se encerra em até um minuto, para que um token antigo não continue funcionando. Uma sessão que você fechou sem `/cc off` deixa de contar como conectada quando o processo dela termina: o hub verifica a cada 5 minutos, mesmo sem nenhum navegador aberto, e a marca como encerrada depois de três verificações seguidas que não a encontram mais. O `claude agents` só lista as sessões de uma pasta de configuração, então uma sessão conectada a partir de outro `CLAUDE_CONFIG_DIR` nunca é marcada como encerrada por essa verificação, nem desconectada por um `/clear` numa sessão de outra pasta. Cada waiter pertence ao processo do Claude Code que o iniciou: quando esse processo termina, ou a sessão é retomada em outro processo (outro terminal), ele para sem pegar nenhuma mensagem.
+- **O hub.** O `/cc` sobe um servidor local (o hub) em 127.0.0.1 se ele não estiver rodando. Ele lê as transcrições que o Claude Code já grava em `~/.claude/projects` e as entrega ao app. Para o estado de cada sessão ele roda `claude agents`: a cada 5 segundos, mais ou menos, enquanto algo está mudando, e a cada 30 segundos com tudo parado. Uma janela do app escondida interrompe essas consultas, a não ser que as notificações do navegador estejam ligadas; uma verificação a cada 5 minutos continua percebendo as sessões que terminaram. O hub sai sozinho depois de 2 horas sem app visível e sem sessão conectada; o próximo `/cc` o sobe de novo.
+- **Mensagens do app.** O hub assina cada mensagem e a coloca na caixa de entrada da sessão, em `~/.ai-chat-center`. Um pequeno processo em segundo plano, o waiter (`dist/waiter.mjs`, iniciado por hooks `asyncRewake`), observa essa caixa. Quando chega uma mensagem e nenhum turno está rodando, ele acorda a sessão e entrega a mensagem ao Claude como retorno de hook, entre marcadores com uma chave por conexão. Mensagens mandadas durante um turno esperam ele terminar, por mais longo que seja.
+- **Perguntas.** Com `answers on`, o hook da AskUserQuestion (`dist/ask.mjs`) manda a pergunta para o app quando o turno começou pelo app e o app está aberto, e espera até 24 horas pela sua resposta. Em qualquer outro caso, o diálogo de sempre aparece no terminal.
+- **A janela.** No `/cc`, o hook procura o Chrome, o Chromium ou o Edge e abre o app como janela `--app`. Sem eles, abre uma aba do navegador padrão (no macOS, o `/cc` explica como adicioná-lo ao Dock com o Safari). O token nunca vai na linha de comando do navegador: o hook pede ao hub um código de pareamento de uso único, válido por 60 segundos. Só fica uma janela do app aberta: com o app já aberto, o `/cc` mostra a sessão nele.
+- **Fim.** Uma sessão fechada sem `/cc off` é marcada como encerrada quando o processo dela some. `/clear`, `/resume` de outra conversa e forks desconectam a conversa anterior.
 
 ## Privacidade e confiança
 
-Tudo fica no seu computador. O hub escuta apenas em 127.0.0.1. O plugin não lê nenhuma credencial e não envia nada pela rede.
+Tudo fica no seu computador. O hub escuta só em 127.0.0.1. O plugin não lê credenciais e não manda nada pela rede.
 
-- **As mensagens do app têm a mesma autoridade que digitar no terminal, com um limite.** O Claude as trata como suas, inclusive pedidos para rodar comandos ou editar arquivos, com as mesmas regras de permissão. Elas nunca valem como a sua resposta a algo que o Claude perguntou no terminal, como um pedido de permissão ou um "posso continuar?" antes de uma ação destrutiva ou irreversível: responda a esses no terminal.
-- **Isso depende do comportamento do modelo.** O Claude Code rotula a saída do waiter como uma notificação do sistema, "não é entrada do usuário". O comando `/cc` pede ao Claude que trate os blocos com a chave que chegam do hook do AI Chat Center como digitados por você. Isso depende de como o modelo segue essa instrução e pode mudar numa versão futura do Claude Code ou do modelo; se mudar, o Claude pode recusar as mensagens do app. Nesse caso, digite o pedido no terminal e, por favor, relate o problema.
-- **O link do app carrega um token.** Um token novo é criado sempre que o hub inicia. Ele fica na parte do link depois do `#`, que o navegador nunca envia ao hub, e o app o tira da barra de endereço assim que a página carrega. O navegador o guarda só naquela aba (armazenamento de sessão), então, depois de reiniciar o hub, ou em uma nova aba ou outro navegador, abra de novo o link do `/cc`. Antes de reconectar e antes de enviar uma mensagem, o app pede ao hub que prove que conhece o token (uma resposta assinada a um desafio novo): se outro programa ocupou a porta depois que o hub saiu, o app não envia nada a ele e pede o link do `/cc` de novo. O token é mostrado só para você; ele não é enviado ao Claude.
-- **O link do app fica salvo na transcrição da sessão.** O plugin o mostra para você como uma mensagem de hook, e o Claude Code grava essa mensagem no arquivo de transcrição da sessão (em `~/.claude/projects`), então um `/export`, uma transcrição compartilhada ou um backup o levam junto. O token dele deixa de funcionar assim que o hub reinicia, já que cada início cria um novo, e o hub se encerra sozinho depois de 2 horas sem nenhum navegador e sem nenhuma sessão conectada. Com o Remote Control ou o compartilhamento de sessão, o Claude Code pode repassar mensagens de hook também para o outro dispositivo, então o link pode sair deste computador por esse caminho (ele só funciona neste computador, onde o hub escuta).
-- **A chave de cada conexão** permite ao Claude distinguir mensagens reais do app de textos que só se parecem com uma. O Claude só confia em um bloco de mensagem quando ele chega como retorno de hook do waiter, nunca quando aparece em um arquivo, numa página web ou na saída de um comando, mesmo com a chave certa.
-- **O hub assina cada mensagem do app** com um segredo criado uma vez por instalação (`~/.ai-chat-center/install-secret`, legível só por você), e o waiter só entrega mensagens cuja assinatura confere: um arquivo simplesmente gravado na caixa de entrada fica separado como `.unsigned`, nunca é entregue (e é registrado no `waiter.log`). A assinatura cobre a sessão, o id da mensagem, o horário e o texto, então uma mensagem não pode ser movida para outra sessão nem ter a data trocada; um id já entregue, uma mensagem com data no futuro ou anterior à conexão da sessão é descartada. Qualquer coisa que consiga ler esse segredo com o seu usuário ainda pode assinar mensagens, como o app faz. A pasta é criada com acesso só para você (0700 no macOS e no Linux); mantenha assim.
-- **Respostas à janela de múltipla escolha.** Depois do `/ai-chat-center:cc answers on`, uma resposta que você dá no app à janela de múltipla escolha do Claude vale como resposta sua, inclusive para confirmar ações destrutivas ou irreversíveis. Mensagens de texto comuns do app continuam sem valer como aprovação de algo perguntado no terminal.
-- **Recomendado: mantenha as ferramentas do próprio Claude fora da pasta de estado.** Acrescente regras de negação às configurações do Claude Code (`~/.claude/settings.json`, em `permissions.deny`): `"Read(~/.ai-chat-center/**)"`, `"Edit(~/.ai-chat-center/**)"`. Assim, um texto injetado numa sessão (uma página web, um arquivo) não consegue fazer o Claude ler o segredo ou o token com as ferramentas de arquivo. A regra `Edit` também impede o Claude de ligar as respostas pelo app editando o `config.json`, onde o `/cc answers on` grava a liberação. Elas não cobrem comandos de shell, que continuam seguindo as suas regras de permissão do Bash.
+- **Mensagens do app têm a mesma autoridade que digitar no terminal, com um limite.** O Claude as trata como suas, inclusive pedidos para rodar comandos ou editar arquivos, com as mesmas regras de permissão. Elas nunca contam como sua resposta a algo que o Claude perguntou no terminal, como um pedido de permissão ou um "posso seguir?" antes de uma ação destrutiva: responda essas no terminal.
+- **Isso depende do comportamento do modelo.** O Claude Code marca a saída dos hooks como "not user input", e o `/cc` pede ao Claude que confie mesmo assim nos blocos com chave vindos do waiter do AI Chat Center. Uma versão futura do Claude Code ou do modelo pode recusar as mensagens do app; se acontecer, digite o pedido no terminal e, por favor, avise.
+- **O link do app leva um token.** Ele é novo a cada vez que o hub sobe, fica depois do `#` (o navegador nunca o manda ao hub) e sai da barra de endereço quando a página carrega. A aba o guarda no armazenamento da sessão. Antes de conectar ou mandar qualquer coisa, o app pede ao hub que prove que conhece o token, então outro programa na porta não recebe nada.
+- **O link fica salvo na transcrição da sessão**, porque o Claude Code grava ali as mensagens dos hooks. Um `/export` ou uma transcrição compartilhada o carrega. Ele para de funcionar quando o hub reinicia.
+- **Mensagens assinadas.** O hub assina toda mensagem do app com um segredo criado uma vez por instalação (`~/.ai-chat-center/install-secret`, legível só por você). O waiter só entrega mensagens com assinatura válida, para aquela sessão, não repetidas, não datadas no futuro e não mais antigas que a conexão. Um arquivo apenas gravado na caixa de entrada fica separado como `.unsigned`.
+- **A chave por conexão** permite ao Claude distinguir mensagens reais do app de um texto que só se parece com uma. O Claude só confia num bloco quando ele chega como retorno de hook do waiter, nunca vindo de um arquivo, de uma página da web ou da saída de um comando.
+- **Recomendado:** mantenha as ferramentas de arquivo do próprio Claude fora da pasta de estado. Adicione `"Read(~/.ai-chat-center/**)"` e `"Edit(~/.ai-chat-center/**)"` em `permissions.deny` no `~/.claude/settings.json`. Comandos de shell continuam seguindo as suas regras de permissão do Bash.
 
 ## Limitações
 
-- Pedidos de permissão só podem ser aprovados no terminal.
-- O `/cc window on` precisa do Chrome, Chromium ou Edge instalado onde o hook procura (veja "Como funciona"); sem um navegador compatível (Firefox, Safari), o `/cc` só mostra o link, como antes.
-- Uma pergunta de múltipla escolha feita num turno que você começou pelo terminal só é respondida no terminal; o app a mostra só para leitura.
-- Enquanto uma pergunta espera a sua resposta no app, o terminal mostra que o hook está rodando. O Esc no terminal cancela a espera: ele interrompe o turno, e você pode repetir o pedido.
-- Sem nenhuma aba do app aberta (uma aba oculta conta como fechada, a menos que as notificações do navegador estejam ligadas), a pergunta de múltipla escolha vai para o terminal em vez do app.
-- `/clear`, `/resume` de outra conversa e forks desconectam a conversa anterior; rode `/cc` de novo.
-- Depois que uma sessão fica ociosa por mais de 24 horas, as mensagens do app deixam de ser entregues: o Claude Code encerra o waiter após 24 horas e nada o reinicia até o próximo turno. Digite qualquer coisa no terminal ou rode `/cc` de novo.
-- Se nenhum waiter estiver rodando para uma sessão (ele atingiu o limite de 24 horas ou foi encerrado) enquanto há mensagens do app esperando, o app avisa: "envie qualquer mensagem no terminal para retomar a entrega". Qualquer prompt que você digitar inicia um novo waiter.
-- Depois que você interrompe um turno (Esc), as mensagens enviadas pelo app são entregues de 10 a 25 segundos depois, quando o `claude agents` informa que a sessão está ociosa. Sem o `claude` no PATH que os hooks enxergam, elas esperam o seu próximo prompt no terminal.
-- Ao retomar uma sessão antiga, as mensagens do app enfileiradas mais de 30 minutos antes são descartadas em vez de entregues (o log do waiter registra isso); o app as marca como não entregues. Mensagens enviadas durante um turno longo são entregues quando o turno termina, qualquer que seja a idade delas.
+- Pedidos de permissão só podem ser aprovados no terminal (numa sessão em segundo plano, abra pelo ⋮ > Abrir no terminal).
+- Uma pergunta de múltipla escolha feita num turno que você começou pelo terminal é respondida no terminal; o app a mostra só para leitura. Sem janela do app aberta, as perguntas também vão para o terminal.
+- Depois de uma sessão ficar parada mais de 24 horas, as mensagens do app deixam de ser entregues até o próximo turno: o Claude Code encerra o waiter depois de 24 horas. O app avisa para mandar qualquer prompt no terminal.
+- Depois de interromper um turno (Esc), as mensagens do app chegam 10 a 25 segundos depois, quando o `claude agents` mostra a sessão parada.
+- Ao retomar uma sessão antiga, mensagens do app que estavam na fila há mais de 30 minutos são descartadas; o app as marca como não entregues.
 - Depois de um `/compact`, o Claude pode esquecer a conexão; se ele recusar uma mensagem do app, rode `/cc` de novo.
-- O trabalho de subagentes não aparece como mensagens: ele aparece como ação da sessão principal.
-- As mensagens enviadas pelo app aparecem no terminal como retorno de hook.
-- O Claude age sobre as mensagens do app só porque o `/cc` pede isso, acima do rótulo "não é entrada do usuário" que o Claude Code põe na saída dos hooks (veja Privacidade e confiança). Uma versão futura do Claude Code ou do modelo pode recusá-las.
-- Por enquanto, só o Claude Code.
+- O trabalho de subagentes aparece como ação da sessão principal, não como mensagens.
+- O app só é acessível deste computador (127.0.0.1).
+- Só o Claude Code, por enquanto.
 
 ## Solução de problemas
 
-- **O app diz que não consegue falar com o hub, ou pede o link do `/cc`.** Digite `/cc` em qualquer sessão; ele reinicia o hub se precisar e mostra um link novo. O token muda sempre que o hub reinicia, e cada aba do navegador precisa do link uma vez.
-- **Porta.** O hub usa 127.0.0.1:7777. Se essa porta estiver ocupada, ele tenta de 7778 a 7787; o link do `/cc` sempre mostra a porta real.
-- **Variáveis de ambiente.** `AI_CHAT_CENTER_PORT` define a primeira porta a tentar. `AI_CHAT_CENTER_HOME` muda a pasta de estado (padrão `~/.ai-chat-center`). Defina-as no ambiente em que o Claude Code é iniciado.
-- **Logs** ficam em `~/.ai-chat-center/logs/`: `hub.log` (o hub), `hook.log` (o `/cc` e o hook de prompt) e `waiter.log` (entrega de mensagens, inclusive as antigas descartadas).
-- **Parar o hub.** Apague `~/.ai-chat-center/hub.json`: o hub se encerra sozinho em até um minuto. Para pará-lo na hora, encerre o processo cujo pid está nesse arquivo, mas só depois de conferir que ele é o hub (depois de reiniciar o computador ou de uma falha, o arquivo pode apontar para outro processo). Ele volta a iniciar no próximo `/cc`.
-  - macOS e Linux: `pid=$(node -p "require(process.argv[1]).pid" ~/.ai-chat-center/hub.json) && ps -p "$pid" -o args= | grep -q hub.mjs && kill "$pid"`
-  - Windows PowerShell: `$p = (Get-Content "$HOME\.ai-chat-center\hub.json" | ConvertFrom-Json).pid; if ((Get-CimInstance Win32_Process -Filter "ProcessId=$p").CommandLine -like '*hub.mjs*') { Stop-Process -Id $p }`
-- **Depois de atualizar o plugin**, reinicie toda sessão do Claude Code que estava aberta durante a atualização (saia dela e rode `claude --resume`): até lá ela continua rodando a cópia antiga do plugin. Depois rode `/cc` uma vez em uma sessão conectada: esse `/cc` substitui o hub antigo. Só um hub mais antigo é substituído. Um hub da versão 0.2.0 ou anterior não consegue se provar, então ele só é parado quando tudo o identifica como nosso (o pid do hub.json está vivo, o hub informa esse mesmo pid e uma versão mais antiga, recusa um token aleatório e aceita o token gravado no disco; um hub que não informa o pid nunca é parado). Caso contrário, o `/cc` avisa que não conseguiu verificá-lo e o deixa rodando; reinicie o computador ou pare-o (veja acima). Até esse `/cc`, um hub que continua rodando segue aceitando mensagens da aba dele. Uma sessão que você não reiniciou não funciona por completo: a partir da 0.2.4, o app se recusa a enviar para uma sessão que roda outra versão do plugin e pede para reiniciá-la, e em uma sessão que ainda roda a 0.2.3 ou anterior o `/cc` pode dizer que o hub não iniciou (0.1.0) ou ficar substituindo o hub (0.2.0). Mensagens na fila de um hub anterior à 0.2.3 não são assinadas do jeito que a 0.2.3 confere, então nunca são entregues: elas ficam separadas na caixa de entrada da sessão como `.unsigned` (registradas no `waiter.log`), e o app mostra que uma mensagem de uma versão anterior não foi entregue. Envie-as de novo.
+- **O app não alcança o hub ou pede o link do `/cc`.** Digite `/cc` em qualquer sessão: ele sobe o hub se precisar e mostra um link novo.
+- **Todo prompt mostra um erro de hook.** Falta o Node.js no PATH que o Claude Code enxerga. Instale-o e reinicie o Claude Code (no Windows, feche antes todos os terminais e editores).
+- **Porta.** O hub usa 127.0.0.1:7777, ou a próxima livre até a 7787; o link sempre mostra a porta real. `AI_CHAT_CENTER_PORT` define a primeira porta a tentar.
+- **Pasta de estado.** `~/.ai-chat-center` (defina `AI_CHAT_CENTER_HOME` para mudar). Os logs ficam na pasta `logs/` dela: `hub.log`, `hook.log`, `waiter.log` e `launcher.log`.
+- **Parar o hub.** Apague `~/.ai-chat-center/hub.json`: o hub sai em até um minuto. Ele sobe de novo no próximo `/cc`.
 
 ## Desinstalação
 
-1. Desinstale o plugin: `/plugin uninstall ai-chat-center@ai-chat-center`.
-2. Remova o marketplace: `/plugin marketplace remove ai-chat-center`.
-3. Apague o estado (token, segredo da instalação, registros, logs). Um hub que ainda esteja rodando se encerra sozinho em até um minuto, porque o `hub.json` deixou de existir:
+1. Se você ligou o `usage`, rode `/ai-chat-center:cc usage off` para devolver a sua status line.
+2. `/plugin uninstall ai-chat-center@ai-chat-center` e depois `/plugin marketplace remove ai-chat-center`.
+3. Apague a pasta de estado (token, segredo da instalação, sessões, logs). Um hub rodando sai em até um minuto.
    - macOS e Linux: `rm -rf ~/.ai-chat-center`
    - Windows PowerShell: `Remove-Item -Recurse -Force "$HOME\.ai-chat-center"`
+4. No Linux, se você usou `window on`, o `window off` remove o ícone do menu; ou apague `~/.local/share/applications/ai-chat-center.desktop`.
 
 ## Desenvolvimento
 
+Precisa do Node.js `^22.22.2 || >=24.15` (o jsdom, nos testes do app).
+
 ```
 npm install
-npm test            # testes unitários (rápidos; não rodam o build)
-npm -w ui test      # testes da interface web
-npm run build       # empacota o plugin em plugin/dist (versionado no git)
-npm run test:build  # lento: faz o build e testa os bundles
-node scripts/smoke-runtime.mjs .   # teste de fumaça do plugin, com Node 18+ puro
-node scripts/smoke-flow.mjs .      # /cc, hub, mensagem do app, entrega pelo waiter, /cc off, com Node 18+ puro
+npm test            # testes do hub, dos hooks e do núcleo
+npm -w ui test      # testes do app web
+npm run build       # empacota o plugin em plugin/dist (vai para o git)
+npm run test:build  # lento: faz o build e testa os pacotes
+node scripts/smoke-runtime.mjs .   # teste rápido do plugin empacotado, Node 18+ puro
+node scripts/smoke-flow.mjs .      # /cc, hub, mensagem do app, entrega, /cc off
 ```
 
-A pasta `plugin/dist` fica no repositório para que o plugin funcione direto do marketplace; refaça o build e faça commit dela depois de mudar o código-fonte. A CI falha se ela estiver desatualizada. O build também gera `plugin/LICENSE` e `plugin/THIRD-PARTY-NOTICES.md`.
+O `plugin/dist` vai para o git para o plugin funcionar direto do marketplace: refaça o build depois de mudar o código. O CI falha se ele estiver desatualizado. As notas de trabalho do projeto estão no [CLAUDE.md](CLAUDE.md) e as pendências no [docs/backlog.md](docs/backlog.md).
 
-## Publicação de versões
+## Lançamento de versão
 
-As cópias instaladas só são atualizadas quando a versão do plugin muda.
+As cópias instaladas só atualizam quando a versão do plugin muda.
 
-1. Aumente a versão em `package.json`, `plugin/.claude-plugin/plugin.json` e `src/core/version.ts` (um teste mantém as três iguais). Se o formato das mensagens do app ou da assinatura delas mudou, aumente também o `PROTOCOL` em `src/core/version.ts`: o hub passa a recusar envios para sessões que ainda rodam o formato antigo (um teste amarra os dois).
-2. Rode `npm run build` e faça commit de `plugin/dist`.
-3. Siga o [docs/testing/release-checklist.md](docs/testing/release-checklist.md), incluindo a verificação ao vivo de que o modelo padrão atual ainda age sobre uma mensagem do app.
-4. Crie a tag `vX.Y.Z` no commit da versão e envie a tag (`git push origin vX.Y.Z`). A CI busca as tags, e um teste falha quando `plugin/dist` difere da última tag `v*` sem mudança de versão (até existir a primeira tag, esse teste é pulado).
+1. Suba a versão em `package.json`, `plugin/.claude-plugin/plugin.json` e `src/core/version.ts` (um teste mantém as três iguais) e em `ui/package.json`. Se o formato das mensagens do app ou da assinatura mudou, suba também o `PROTOCOL` em `src/core/version.ts`.
+2. `npm run build` e commit do `plugin/dist`.
+3. Siga o [docs/testing/release-checklist.md](docs/testing/release-checklist.md), inclusive a verificação ao vivo de que o modelo padrão atual ainda age sobre uma mensagem do app.
+4. Crie a tag `vX.Y.Z` no commit e faça o push da tag. Um teste falha quando o `plugin/dist` difere da última tag `v*` sem mudança de versão.
 
 ## Licença
 
-MIT. Veja [LICENSE](LICENSE). O software de terceiros incluído na interface web está listado em [plugin/THIRD-PARTY-NOTICES.md](plugin/THIRD-PARTY-NOTICES.md).
+MIT. Veja [LICENSE](LICENSE). Os softwares de terceiros incluídos no app web estão listados em [plugin/THIRD-PARTY-NOTICES.md](plugin/THIRD-PARTY-NOTICES.md).
 
-Projeto independente, sem afiliação com a Anthropic nem endosso dela.
+Projeto independente, sem vínculo com a Anthropic nem endosso dela.
