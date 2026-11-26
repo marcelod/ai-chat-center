@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { buildSync } from 'esbuild';
+import { VERSION } from '../../src/core/version.js';
 import { compareVersions, newerScript } from '../../src/hooks/delegate.js';
 
 let root: string;
@@ -110,9 +111,12 @@ describe('delegateToNewer end to end', () => {
     const cache = path.join(root, 'cache');
     const delegateSrc = path.resolve('src/hooks/delegate.ts');
     // The newer copy only prints what it got; the old entry is a tiny script calling delegateToNewer.
-    const fresh = install(cache, '0.6.6', "console.log('new', process.argv[2]);\n");
-    const old = install(cache, '0.6.5');
-    fs.writeFileSync(record(), JSON.stringify({ version: '0.6.6', dist: fresh }));
+    // The old entry is bundled with the real version.ts: it is VERSION, the newer copy one patch above.
+    const [maj, min, pat] = VERSION.split('.').map(Number);
+    const newer = `${maj}.${min}.${pat + 1}`;
+    const fresh = install(cache, newer, "console.log('new', process.argv[2]);\n");
+    const old = install(cache, VERSION);
+    fs.writeFileSync(record(), JSON.stringify({ version: newer, dist: fresh }));
     // The old copy's entry, bundled like plugin/dist (the real delegate.ts inside).
     const entry = path.join(old, 'waiter.mjs');
     buildSync({
@@ -133,7 +137,7 @@ describe('delegateToNewer end to end', () => {
     const r = spawnSync(process.execPath, [entry, 'stop'], { env: { ...process.env, AI_CHAT_CENTER_HOME: path.join(root, 'state') }, encoding: 'utf8' });
     expect(r.stdout.trim()).toBe('new stop');
     // without a newer copy it runs itself
-    fs.writeFileSync(record(), JSON.stringify({ version: '0.6.5', dist: old }));
+    fs.writeFileSync(record(), JSON.stringify({ version: VERSION, dist: old }));
     expect(spawnSync(process.execPath, [entry, 'stop'], { env: { ...process.env, AI_CHAT_CENTER_HOME: path.join(root, 'state') }, encoding: 'utf8' }).stdout.trim()).toBe('old');
   });
 });

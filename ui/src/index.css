@@ -149,6 +149,8 @@ body {
   font-family: var(--font-sans);
 }
 
+/* Before the first/last-child rules, so a code block that opens or closes a message has no outer margin. */
+.md [data-code-block] { margin: 0.5em 0; }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
 .md p, .md ul, .md ol, .md pre, .md blockquote, .md table { margin: 0.5em 0; }
@@ -159,8 +161,8 @@ body {
 .md pre { overflow-x: auto; background: var(--c-field); border-radius: 8px; padding: 10px 12px; }
 .md pre code { background: none; padding: 0; white-space: pre; }
 .md pre[data-wrap="on"] code { white-space: pre-wrap; overflow-wrap: anywhere; }
-.md [data-code-block] { margin: 0.5em 0; }
-.md [data-code-block] pre { margin: 0; }
+/* Room above the first line for the Copy and wrap buttons (a utility class would lose to .md pre). */
+.md [data-code-block] pre { margin: 0; padding-top: 2.4em; }
 .md table { display: block; overflow-x: auto; border-collapse: collapse; }
 .md th, .md td { border: 1px solid var(--c-border); padding: 4px 8px; }
 .md blockquote { border-left: 3px solid var(--c-border); padding-left: 10px; color: var(--c-muted); }

@@ -47,7 +47,7 @@ export function CodeBlock({ children }: { children?: ReactNode }) {
           {copy === 'copied' ? t('ui.chat.code.copied') : copy === 'failed' ? t('ui.chat.code.copyFailed') : t('ui.chat.code.copy')}
         </button>
       </div>
-      <pre ref={pre} data-wrap={wrap ? 'on' : 'off'} className="pt-8">
+      <pre ref={pre} data-wrap={wrap ? 'on' : 'off'}>
         {children}
       </pre>
     </div>

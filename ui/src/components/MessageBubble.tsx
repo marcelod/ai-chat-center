@@ -90,7 +90,7 @@ export function AssistantBubble({ text }: { text: string }) {
         remarkPlugins={[remarkGfm]}
         components={{
           a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
-        pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+          pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
         }}
       >
         {text}
