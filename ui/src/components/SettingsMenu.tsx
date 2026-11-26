@@ -42,13 +42,13 @@ export function SettingsMenu({
   }, [open]);
 
   return (
-    <div className="relative" ref={root}>
+    <div className="relative shrink-0" ref={root}>
       <button
         type="button"
         aria-label={t('ui.settings')}
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex h-11 w-11 items-center justify-center rounded-xl text-muted hover:bg-field"
+        className="flex h-11 w-10 shrink-0 items-center justify-center rounded-xl text-muted hover:bg-field"
       >
         <GearIcon />
       </button>

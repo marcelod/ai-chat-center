@@ -76,18 +76,18 @@ export function SessionList({ connected, others, usage, hubVersion, unread, sele
 
   return (
     <div className="flex h-full flex-col bg-surface">
-      <header className={`flex items-center gap-3 pb-2 pt-4 ${collapsed ? 'justify-center px-2' : 'px-4'}`}>
+      <header className={`flex items-center gap-2 pb-2 pt-4 ${collapsed ? 'justify-center px-2' : 'px-4'}`}>
         {!collapsed && (
           <>
-            <Logo size={34} />
-            <h1 className="min-w-0 flex-1 truncate whitespace-nowrap font-display text-xl font-semibold">{t('ui.title')}</h1>
+            <Logo size={32} />
+            <h1 className="min-w-0 flex-1 truncate whitespace-nowrap font-display text-lg font-semibold">{t('ui.title')}</h1>
             {onNewSession && (
               <button
                 type="button"
                 onClick={onNewSession}
                 aria-label={t('ui.newSession.open')}
                 title={t('ui.newSession.open')}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[10px] text-2xl leading-none text-muted hover:bg-field"
+                className="flex h-11 w-10 shrink-0 items-center justify-center rounded-[10px] text-2xl leading-none text-muted hover:bg-field"
               >
                 <span aria-hidden="true">+</span>
               </button>
@@ -101,7 +101,7 @@ export function SessionList({ connected, others, usage, hubVersion, unread, sele
             onClick={onToggleCollapsed}
             aria-label={collapsed ? t('ui.expandList') : t('ui.collapseList')}
             title={collapsed ? t('ui.expandList') : t('ui.collapseList')}
-            className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-[10px] text-muted hover:bg-field md:flex"
+            className="hidden h-11 w-10 shrink-0 items-center justify-center rounded-[10px] text-muted hover:bg-field md:flex"
           >
             <PanelIcon width={20} height={20} className={collapsed ? 'rotate-180' : ''} />
           </button>
