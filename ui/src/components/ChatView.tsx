@@ -16,6 +16,7 @@ import { BackgroundPicker } from './BackgroundPicker';
 import { ChatBackground } from './ChatBackground';
 import { useCommandProgress } from '../useCommandProgress';
 import { SessionControls } from './SessionControls';
+import { ContextMeter } from './ContextMeter';
 import { AgentBubble, RecapCard, AssistantBubble, ToAgentBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
 
 type Props = {
@@ -104,12 +105,13 @@ function VersionInfo({ session, hubVersion }: { session: SessionView; hubVersion
   );
 }
 
-/** Under the message field, right of the keyboard hint: model and effort chip, permission mode, plugin version. */
+/** Under the message field, right of the keyboard hint: context use, model and effort chip, permission mode, plugin version. */
 function SessionBar({ session, hubVersion, runCommand }: { session: SessionView; hubVersion?: string; runCommand?: (line: string) => Promise<void> }) {
   const t = useT();
   const live = session.state !== 'disconnected';
   return (
     <div data-testid="session-bar" className="flex min-w-0 items-center justify-end gap-1.5">
+      {live && session.context && <ContextMeter context={session.context} model={session.model} />}
       {live && session.bgId && runCommand && (
         <SessionControls key={session.sessionId} onCommand={runCommand} working={session.state !== 'idle'} model={session.model} effort={session.effort} />
       )}
