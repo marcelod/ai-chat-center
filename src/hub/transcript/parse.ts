@@ -109,6 +109,20 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+const isTokenCount = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0;
+
+/**
+ * The context an API response used: its input tokens, fresh, read from the cache and written to it (Claude Code's
+ * status line counts the same; output tokens are left out). Undefined when the usage has no valid count or sums to 0.
+ */
+function contextTokens(usage: unknown): number | undefined {
+  if (!isRecord(usage)) return undefined;
+  const parts = [usage.input_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens];
+  if (parts.some((v) => v !== undefined && v !== null && !isTokenCount(v))) return undefined;
+  const sum = parts.reduce<number>((a, v) => a + (isTokenCount(v) ? v : 0), 0);
+  return sum > 0 ? sum : undefined;
+}
+
 function summarize(name: string, input: unknown): string {
   if (!isRecord(input)) return '';
   let value: unknown;
@@ -203,6 +217,10 @@ export class TranscriptParser {
   model: string | undefined;
   /** `version` (Claude Code) of the latest main-thread entry that carries one. */
   claudeVersion: string | undefined;
+  /** Tokens in the context at the latest main-thread reply, or left by the latest compaction (unknown when it did not say). */
+  contextTokens: number | undefined;
+  /** The latest compaction (`compact_boundary`): when, and whether `/compact` or automatic. */
+  lastCompact: { at: string; trigger?: 'manual' | 'auto' } | undefined;
 
   /** @param keys trusted marker keys of the session; when given, other app-message blocks are ignored. */
   constructor(
@@ -224,12 +242,20 @@ export class TranscriptParser {
       this.open = null;
       return [{ kind: 'recap', id: uuid, ts, text }];
     }
+    if (entry.type === 'system' && entry.subtype === 'compact_boundary') {
+      this.compacted(ts, entry.compactMetadata);
+      return [];
+    }
     if (entry.type === 'attachment') return this.attachment(uuid, ts, entry.attachment);
     const message = isRecord(entry.message) ? entry.message : undefined;
     if (!message) return [];
     if (entry.type === 'assistant') {
       const model = message.model;
-      if (typeof model === 'string' && model && model !== '<synthetic>') this.model = model;
+      if (typeof model === 'string' && model && model !== '<synthetic>') {
+        this.model = model;
+        const used = contextTokens(message.usage);
+        if (used !== undefined) this.contextTokens = used;
+      }
       return this.assistant(uuid, ts, message.content);
     }
     if (entry.type === 'user') {
@@ -241,6 +267,14 @@ export class TranscriptParser {
       return this.user(uuid, ts, message.content, entry.toolUseResult);
     }
     return [];
+  }
+
+  /** A compaction: the context now holds what it left (`postTokens`), until the next reply says otherwise. */
+  private compacted(ts: string, meta: unknown): void {
+    const m = isRecord(meta) ? meta : {};
+    const trigger = m.trigger === 'manual' || m.trigger === 'auto' ? m.trigger : undefined;
+    this.lastCompact = { at: ts, ...(trigger ? { trigger } : {}) };
+    this.contextTokens = isTokenCount(m.postTokens) ? m.postTokens : undefined;
   }
 
   /** A prompt the user typed while Claude was busy is recorded only as a queued_command attachment. */
