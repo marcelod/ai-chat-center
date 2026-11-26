@@ -1,9 +1,10 @@
 import type { ChatEvent, ProviderChange, SessionsResponse } from '@shared/types';
 import type { BackgroundPreset } from '@shared/background';
 import type { SearchHit } from '@shared/search';
+import type { WindowSize } from '@shared/windowSize';
 
 export type Language = 'en' | 'pt-BR';
-export type UiConfig = { language: Language; answersFromApp: boolean };
+export type UiConfig = { language: Language; answersFromApp: boolean; windowSize?: WindowSize };
 
 const TOKEN_KEY = 'acc.token';
 
@@ -104,6 +105,11 @@ let pairingPending = pairing !== null;
 void pairing?.then(() => {
   pairingPending = false;
 });
+
+/** True when this page load came with `#pair=`: a window just opened by /cc or the launcher. */
+export function openedByPair(): boolean {
+  return pairing !== null;
+}
 
 /** True while the `#pair=` trade started at load has not finished (the App waits for `ready`). */
 export function isPairing(): boolean {
@@ -382,6 +388,11 @@ export async function getBackgroundImage(sid: string): Promise<Blob> {
 export const getConfig = () => request<UiConfig>('/api/config');
 export const setConfig = (c: Pick<UiConfig, 'language'>) =>
   request<UiConfig>('/api/config', { method: 'PUT', body: JSON.stringify(c) });
+
+/** Reports the app window's size; the next window /cc opens takes it (see useWindowSize). */
+export async function saveWindowSize(size: WindowSize): Promise<void> {
+  await request<unknown>('/api/window-size', { method: 'PUT', body: JSON.stringify(size) });
+}
 
 export type StreamHandlers = { onOpen?: () => void; onError?: () => void };
 

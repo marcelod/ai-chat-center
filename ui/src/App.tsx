@@ -7,6 +7,7 @@ import { NewSessionDialog } from './components/NewSessionDialog';
 import { notificationsSupported } from './notify';
 import { useLiveSessions } from './useLiveSessions';
 import { useAppWindow } from './useAppWindow';
+import { useWindowSize } from './useWindowSize';
 import { useCollapsedList } from './useCollapsedList';
 import { LangProvider, useT } from './i18n';
 
@@ -30,6 +31,7 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
   const { data, eventsById, pending, unread, selectedId, select, send, retry, error, loading } = live;
   const selected = data.connected.find((s) => s.sessionId === selectedId);
   useAppWindow(select);
+  useWindowSize();
   const [newOpen, setNewOpen] = useState(false);
   /** A message picked in the list search: its conversation opens with the search bar on that text. */
   const [hitSearch, setHitSearch] = useState<{ sid: string; q: string; n: number } | null>(null);
