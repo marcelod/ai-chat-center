@@ -70,6 +70,21 @@ export type LiveSession = {
   bgId?: string;
 };
 
+/**
+ * A background session Claude Code still lists but that no longer runs (stopped, or finished): what the app
+ * offers to remove with `claude rm` (spec 2026-11-26-stop-respawn-rm).
+ */
+export type StoppedBackground = {
+  bgId: string;
+  sessionId: string;
+  cwd: string;
+  name: string;
+  /** Claude Code's own state word (`done`, `blocked`...), shown as is; absent when it gives none. */
+  state?: string;
+  /** Epoch milliseconds the session started; absent when unknown. */
+  startedAt?: number;
+};
+
 export type SessionView = {
   sessionId: string;
   name: string;

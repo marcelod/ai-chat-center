@@ -27,6 +27,8 @@ export interface Provider {
   events(sid: string, opts?: { diffs?: boolean }): Promise<ChatEvent[]>;
   poll(): Promise<ProviderChange[]>;
   send(sid: string, text: string): Promise<{ id: string }>;
+  /** The session is being restarted (`claude respawn`): do not take its short absence for an exit. */
+  expectRestart?(sid: string): void;
 }
 
 export class SessionDisconnectedError extends Error {
@@ -76,6 +78,11 @@ const STALLED_AFTER_MS = 15_000;
 /** Claude Code creates the transcript with the /cc prompt: still missing this long after connecting, it is not written. */
 const TRANSCRIPT_MISSING_AFTER_MS = 15_000;
 const MISSES_TO_EXIT = 3;
+/**
+ * After `claude respawn` from the app, how long the session may be missing from `claude agents` (its process
+ * is being replaced) before the usual exit rule applies again (spec 2026-11-26-stop-respawn-rm).
+ */
+export const RESTART_GRACE_MS = 90_000;
 
 export type ProviderOptions = {
   now?: () => number;
@@ -92,6 +99,8 @@ export class ClaudeCodeProvider implements Provider {
   private lastEvents = new Map<string, ChatEvent | undefined>(); // disconnected sessions
   private lastModels = new Map<string, string | undefined>(); // disconnected sessions
   private misses = new Map<string, { connectedAt: string; count: number }>();
+  /** Sessions being restarted (`claude respawn`): until when their absence is not an exit. */
+  private restarting = new Map<string, number>();
   private liveCache: { at: number; value: LiveSession[] } | null = null;
   private lastGood: LiveSession[] | null = null;
   private lastSignature: string | null = null;
@@ -168,6 +177,14 @@ export class ClaudeCodeProvider implements Provider {
       this.misses.set(sid, m);
     }
     if (!live.ok) return false;
+    const until = this.restarting.get(sid);
+    if (until !== undefined) {
+      if (this.now() < until && !live.list.some((l) => l.sessionId === sid)) {
+        m.count = 0;
+        return false;
+      }
+      this.restarting.delete(sid);
+    }
     // Claude Code sometimes leaves a session out of `claude agents` for its whole life (its entry in
     // ~/.claude/sessions was never written). Its claude process, known from the hook's parent, still
     // runs and is listed under no other session: it is alive, not exited. Listed under another session
@@ -264,6 +281,11 @@ export class ClaudeCodeProvider implements Provider {
       if ((await busyAge(sid, this.now())) !== null || (await getWaiting(sid)) || (await getPending(sid))) return LIVE_TTL_MS;
     }
     return LIVE_IDLE_TTL_MS;
+  }
+
+  expectRestart(sid: string): void {
+    this.restarting.set(sid, this.now() + RESTART_GRACE_MS);
+    this.misses.delete(sid);
   }
 
   async listSessions(): Promise<SessionsResponse> {

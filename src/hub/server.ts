@@ -21,11 +21,15 @@ import { createPairing } from './pairing.js';
 import { AttachmentTooLargeError, storeAttachment } from '../core/attachments.js';
 import { MAX_ATTACHMENT_BYTES } from '../shared/attachments.js';
 import type { LiveSession } from '../shared/types.js';
-import { queryLiveSessions } from './status.js';
+import { queryLiveSessions, queryStoppedBackground } from './status.js';
+import type { StoppedBackground } from '../shared/types.js';
 import {
   CommandUnsupportedError,
+  isBgId,
   isEffort,
   isModel,
+  manageBackground,
+  type BgAction,
   isSessionName,
   isValidCommand,
   resumeInBackground,
@@ -57,6 +61,10 @@ export interface HubOptions {
     resume?: (reg: Registration) => Promise<ResumeResult>;
     type?: (id: string, text: string) => Promise<void>;
     start?: (s: NewSession) => Promise<StartResult>;
+    /** Background sessions that no longer run (default: `claude agents --json --all`). */
+    listStopped?: () => Promise<StoppedBackground[] | null>;
+    /** Runs `claude stop|respawn|rm <bgId>` (default: manageBackground). */
+    manage?: (action: BgAction, bgId: string, configDir: string | undefined) => Promise<ResumeResult>;
     /** Opens the system terminal running `claude attach <bgId>` (default: openTerminal). */
     openTerminal?: (t: TerminalTarget) => Promise<OpenTerminalResult>;
     /** Whether a folder exists (default: stat). */
@@ -185,6 +193,27 @@ export async function createHub(
   const type = opts.bg?.type ?? ((id: string, text: string) => typeCommand(id, text));
   const start = opts.bg?.start ?? ((s: NewSession) => startInBackground(s));
   const openTerm = opts.bg?.openTerminal ?? ((t: TerminalTarget) => openTerminal(t));
+  const listStopped = opts.bg?.listStopped ?? (() => queryStoppedBackground());
+  const manage = opts.bg?.manage ?? ((a: BgAction, id: string, configDir: string | undefined) => manageBackground(a, id, configDir));
+  /** Sessions (and stopped short ids, as `bg:<id>`) with a stop, respawn or rm under way: one at a time each. */
+  const managing = new Set<string>();
+  /** Runs one `claude stop|respawn|rm`; a refusal becomes a 502 carrying claude's own words. */
+  const runManage = async (key: string, action: BgAction, bgId: string, configDir: string | undefined) => {
+    if (managing.has(key)) throw new HttpError(409, 'another action is under way', 'busy');
+    managing.add(key);
+    let r: ResumeResult;
+    try {
+      r = await manage(action, bgId, configDir);
+    } catch (e) {
+      r = { ok: false, error: (e as Error).message };
+    } finally {
+      managing.delete(key);
+    }
+    if (!r.ok) {
+      log(`claude ${action} ${bgId} failed: ${r.error}`);
+      throw new HttpError(502, r.error, 'claude-failed');
+    }
+  };
   const folders = async () => knownFolders(await listRegistrations(), await listLive(), opts.bg?.folderExists);
   const bgPlatform = opts.bg?.platform ?? process.platform;
   /** Sessions with a command being typed: one at a time each. */
@@ -457,7 +486,35 @@ export async function createHub(
       await saveConfig({ language: body.language as Lang });
       return sendJson(res, 200, { language: body.language });
     }
-    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|pin|disconnect|remove|resume|command|open-terminal|background|background-image|attachments|questions\/([^/]+))$/.exec(p);
+    if (p === '/api/background/stopped' && method === 'GET') {
+      // Background sessions Claude Code lists that no longer run: the app offers to remove them (claude rm).
+      const list = await listStopped();
+      if (list === null) throw new HttpError(503, 'could not list background sessions');
+      return sendJson(res, 200, { sessions: list });
+    }
+    const bgRm = /^\/api\/background\/([^/]+)\/rm$/.exec(p);
+    if (bgRm && method === 'POST') {
+      req.resume();
+      const id = bgRm[1];
+      if (!isBgId(id)) throw new HttpError(400, 'invalid background session id');
+      // Only a session that no longer runs: a running one is removed from its own ⋮ menu, after a confirmation.
+      const list = await listStopped();
+      if (list === null) throw new HttpError(503, 'could not list background sessions');
+      const s = list.find((x) => x.bgId === id);
+      if (!s) throw new HttpError(409, 'not a stopped background session', 'not-stopped');
+      await runManage(`bg:${id}`, 'rm', id, undefined);
+      let reg: Registration | null = null;
+      try {
+        assertSessionId(s.sessionId);
+        reg = await getRegistration(s.sessionId);
+      } catch {
+        reg = null;
+      }
+      if (reg && !isRemoved(reg)) await markRemoved(s.sessionId);
+      fanOut({ type: 'sessions' });
+      return sendJson(res, 200, { ok: true });
+    }
+    const m = /^\/api\/sessions\/([^/]+)\/(events|messages|name|pin|disconnect|remove|resume|command|open-terminal|stop|respawn|rm|background|background-image|attachments|questions\/([^/]+))$/.exec(p);
     if (m) {
       let sid: string;
       try {
@@ -596,6 +653,36 @@ export async function createHub(
         } finally {
           typing.delete(sid);
         }
+        return sendJson(res, 200, { ok: true });
+      }
+      if ((m[2] === 'stop' || m[2] === 'respawn' || m[2] === 'rm') && method === 'POST') {
+        // claude stop | respawn | rm on a background session (spec 2026-11-26-stop-respawn-rm). The app asks
+        // to confirm stop and rm first.
+        req.resume();
+        const action: BgAction = m[2];
+        const reg = await getRegistration(sid);
+        if (!reg || isRemoved(reg)) throw new HttpError(404, 'no such session');
+        let bgId: string | undefined;
+        if (isActive(reg)) {
+          const live = await listLive();
+          if (live === null) throw new HttpError(503, 'could not list running sessions');
+          const l = live.find((x) => x.sessionId === sid);
+          if (l && l.kind === 'background' && l.bgId) bgId = l.bgId;
+          else if (action !== 'rm' || l) throw new HttpError(409, 'not a background session', 'not-background');
+        } else if (action !== 'rm') throw new HttpError(409, 'session is disconnected', 'session-disconnected');
+        if (!bgId) {
+          // rm also takes an ended session, while Claude Code still lists it (stopped or finished).
+          const stopped = await listStopped();
+          if (stopped === null) throw new HttpError(503, 'could not list background sessions');
+          bgId = stopped.find((x) => x.sessionId === sid)?.bgId;
+          if (!bgId) throw new HttpError(409, 'not a background session', 'not-background');
+        }
+        await runManage(sid, action, bgId, reg.configDir);
+        if (action === 'stop') await markDisconnected(sid, 'exited');
+        else if (action === 'rm') await markRemoved(sid);
+        // The restarted process comes back with the same session id: its waiter re-registers the new pid.
+        else provider.expectRestart?.(sid);
+        fanOut({ type: 'sessions' });
         return sendJson(res, 200, { ok: true });
       }
       if (m[2] === 'open-terminal' && method === 'POST') {

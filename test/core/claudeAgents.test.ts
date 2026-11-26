@@ -33,6 +33,15 @@ describe('runClaudeAgentsJson', () => {
     expect(args).toEqual([]);
     expect(opts).toMatchObject({ shell: true, windowsHide: true, cwd: (await import('node:os')).default.homedir() });
   });
+  it('with all: `claude agents --json --all` (exited background sessions too)', async () => {
+    execFile.mockReset();
+    execFile.mockImplementation((_c: string, _a: string[], _o: object, cb: (e: null, out: string) => void) => cb(null, '[]'));
+    const { runClaudeAgentsJson } = await import('../../src/core/claudeAgents.js');
+    await runClaudeAgentsJson('linux', true);
+    expect(execFile.mock.calls[0]![1]).toEqual(['agents', '--json', '--all']);
+    await runClaudeAgentsJson('win32', true);
+    expect(execFile.mock.calls[1]![0]).toBe('claude agents --json --all');
+  });
   it('rejects on error', async () => {
     execFile.mockImplementation((_c: string, _a: string[], _o: object, cb: (e: Error) => void) => cb(new Error('nope')));
     const { runClaudeAgentsJson } = await import('../../src/core/claudeAgents.js');

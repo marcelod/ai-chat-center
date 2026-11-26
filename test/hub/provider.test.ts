@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ClaudeCodeProvider, SessionDisconnectedError, SessionProtocolError } from '../../src/hub/provider.js';
+import { ClaudeCodeProvider, RESTART_GRACE_MS, SessionDisconnectedError, SessionProtocolError } from '../../src/hub/provider.js';
 import { PROTOCOL, VERSION } from '../../src/core/version.js';
 import { listLiveSessions } from '../../src/hub/status.js';
 import type { LiveSession } from '../../src/shared/types.js';
@@ -206,6 +206,25 @@ describe('provider', () => {
     const v = (await p.listSessions()).connected[0];
     expect(v.state).toBe('disconnected');
     expect((await getRegistration('s1'))!.disconnectReason).toBe('exited');
+  });
+  // Spec 2026-11-26-stop-respawn-rm: `claude respawn` restarts the process under the same session id.
+  it('a session being restarted is not marked exited for RESTART_GRACE_MS, then the usual rule applies', async () => {
+    await reg();
+    let t = Date.now() + 3600_000;
+    const p = new ClaudeCodeProvider(async () => [], { now: () => t, isAlive: () => false });
+    p.expectRestart('s1');
+    for (let i = 0; i < 8; i++) {
+      t += 6000;
+      expect(await p.detectExits()).toEqual([]);
+    }
+    expect((await getRegistration('s1'))!.disconnectedAt).toBeUndefined();
+    t += RESTART_GRACE_MS;
+    const gone: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      t += 6000;
+      gone.push(...(await p.detectExits()));
+    }
+    expect(gone).toEqual(['s1']);
   });
   // Audit S4-U3: the hub only sees sessions of its own Claude config dir: it never marks another one exited.
   it('a session of another Claude config dir is never marked exited', async () => {
