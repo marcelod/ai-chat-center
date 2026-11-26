@@ -28,6 +28,15 @@ Cuidados:
 - Reconhecer caminhos no texto sem transformar tudo em link: só caminhos que existem dentro da pasta da sessão.
 - Em tela estreita (celular, janela pequena), o painel ocupa a tela inteira, com um botão de voltar.
 
+### Abrir a janela do app maior
+
+Pedido em 2026-11-26. A janela do app abre estreita na horizontal; dá para usar, mas o ideal é abrir maior. Causa: o `/cc` e o atalho abrem o Chrome com `--app=<url> --new-window` (`src/hooks/openWindow.ts`), sem tamanho, e o Chrome usa o tamanho padrão dele para janelas de app. Ideias:
+
+- Passar `--window-size=L,A` (e talvez `--window-position`) ao abrir, por exemplo 1400×900, limitado ao tamanho da tela. O atalho do menu (Linux, Windows e macOS, `src/hooks/launcher.ts`) precisa do mesmo.
+- Melhor ainda: lembrar o último tamanho e a posição que a pessoa deixou. A página manda o tamanho ao hub ao fechar ou redimensionar, e o próximo `/cc` abre com ele.
+- Alternativa no próprio app: `window.resizeTo` na primeira abertura (funciona em janelas `--app` no Chrome; confirmar). No Safari (aba comum) não se aplica.
+- Confirmar se o Chrome já guarda sozinho o tamanho das janelas `--app` por endereço; a porta do hub pode mudar e fazer o Chrome "esquecer".
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
