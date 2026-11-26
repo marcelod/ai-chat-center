@@ -5,6 +5,7 @@ import { loadDraft, saveDraft } from '../drafts';
 import { PaperclipIcon, SendIcon } from './icons';
 import { PendingAttachments, type PendingFile } from './Attachments';
 import { classify, suggestions } from '../commands';
+import { QuickReplies } from './QuickReplies';
 
 type Props = {
   sessionId: string;
@@ -293,6 +294,11 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
     setPick(0);
     ref.current?.focus();
   };
+  /** A quick reply only fills the field (after what is typed); the user sends it with Enter. */
+  const pickQuickReply = (reply: string) => {
+    setText((cur) => (cur.trim() ? `${cur.replace(/\s+$/, '')} ${reply}` : reply));
+    ref.current?.focus();
+  };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (menu.length > 0 && !e.nativeEvent.isComposing) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -483,6 +489,7 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
         <p className="mt-2 rounded-lg bg-field px-3 py-2 text-[12.5px] text-muted">{t('ui.composer.disconnectedHint')}</p>
       ) : (
         <div className="mt-2 flex min-w-0 items-center gap-2">
+          <QuickReplies disabled={disabled || uploading} onPick={pickQuickReply} />
           <p className="min-w-0 flex-1 truncate text-[11.5px] text-muted" title={t('ui.composer.hint')}>
             {t('ui.composer.hint')}
           </p>
