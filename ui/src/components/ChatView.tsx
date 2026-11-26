@@ -139,19 +139,22 @@ function SessionBar({ session, hubVersion, runCommand }: { session: SessionView;
 }
 
 /** The session state; a button that opens the subagents in the side panel when `onOpen` is given. */
-function StatusPill({ state, asking, onOpen }: { state: SessionView['state']; asking: boolean; onOpen?: () => void }) {
+function StatusPill({ state, asking, agents = 0, onOpen }: { state: SessionView['state']; asking: boolean; agents?: number; onOpen?: () => void }) {
   const t = useT();
-  const label = asking ? t('ui.question.waiting') : t(`ui.status.${state}`);
+  // The turn ended but subagents still work: a state of its own, never "working" (spec 2026-11-26-side-panel).
+  const agentsOnly = state === 'idle' && agents > 0;
+  const label = asking ? t('ui.question.waiting') : agentsOnly ? t('ui.status.agents', { n: agents }) : t(`ui.status.${state}`);
   const style: Record<SessionView['state'], string> = {
     busy: 'bg-busy-bg text-busy-text',
     waiting: 'bg-warn-bg text-waiting-text',
     idle: 'bg-field text-muted',
     disconnected: 'bg-field text-muted',
   };
-  const cls = `ml-auto flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${style[state]}`;
+  const cls = `ml-auto flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${agentsOnly ? 'bg-busy-bg text-busy-text' : style[state]}`;
   const inner = (
     <>
       {state === 'busy' && <span className="h-2 w-2 rounded-full bg-busy" />}
+      {agentsOnly && <span aria-hidden="true" className="h-2 w-2 rounded-full border-2 border-busy" />}
       {state === 'waiting' && <WarningIcon width={14} height={14} />}
       {label}
     </>
@@ -160,7 +163,7 @@ function StatusPill({ state, asking, onOpen }: { state: SessionView['state']; as
     return (
       <button
         type="button"
-        data-state={state}
+        data-state={agentsOnly ? 'agents' : state}
         onClick={onOpen}
         aria-label={t('ui.panel.showSubagents')}
         title={t('ui.panel.showSubagents')}
@@ -171,7 +174,7 @@ function StatusPill({ state, asking, onOpen }: { state: SessionView['state']; as
     );
   }
   return (
-    <span data-state={state} className={cls}>
+    <span data-state={agentsOnly ? 'agents' : state} className={cls}>
       {inner}
     </span>
   );
@@ -615,6 +618,7 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
         <StatusPill
           state={state}
           asking={session.waitingKind === 'question'}
+          agents={session.agentsWorking}
           onOpen={panel?.subagents ? () => setPanelStack([{ kind: 'subagents' }]) : undefined}
         />
       </header>

@@ -153,7 +153,9 @@ export function SessionList({ connected, others, usage, hubVersion, unread, sele
                   <span aria-hidden="true">{initials(s.name)}</span>
                   <span
                     aria-hidden="true"
-                    className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface ${dotColor[s.state]}`}
+                    className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 ${
+                      s.state === 'idle' && (s.agentsWorking ?? 0) > 0 ? 'border-busy bg-surface' : `border-surface ${dotColor[s.state]}`
+                    }`}
                   />
                   {collapsed && <span className="sr-only">{s.name}. </span>}
                   {collapsed && n > 0 && (
@@ -162,7 +164,10 @@ export function SessionList({ connected, others, usage, hubVersion, unread, sele
                       <span className="sr-only">{t('ui.unread', { n })}. </span>
                     </span>
                   )}
-                  <span className="sr-only">{s.waitingKind === 'question' ? t('ui.question.statusAria') : t(`ui.state.${s.state}`)}</span>
+                  <span className="sr-only">
+                    {s.waitingKind === 'question' ? t('ui.question.statusAria') : t(`ui.state.${s.state}`)}
+                    {(s.agentsWorking ?? 0) > 0 && s.state !== 'disconnected' ? `, ${t('ui.panel.agentsWorking', { n: s.agentsWorking! })}` : ''}
+                  </span>
                 </span>
                 {!collapsed && (
                 <span className="min-w-0 flex-1">
@@ -184,6 +189,16 @@ export function SessionList({ connected, others, usage, hubVersion, unread, sele
                     >
                       {previewText(s, t)}
                     </span>
+                    {(s.agentsWorking ?? 0) > 0 && s.state !== 'disconnected' && (
+                      <span
+                        aria-hidden="true"
+                        title={t('ui.panel.agentsWorking', { n: s.agentsWorking! })}
+                        className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-busy px-1.5 text-[11px] font-semibold text-busy-text"
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-busy" />
+                        {s.agentsWorking}
+                      </span>
+                    )}
                     {n > 0 && (
                       <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-xs font-semibold text-accent-contrast">
                         <span aria-hidden="true">{n}</span>
