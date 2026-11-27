@@ -1464,3 +1464,28 @@ describe('search endpoint (spec 2026-11-25-app-batch)', () => {
     expect((await req(u, '/api/search?q=abc')).status).toBe(401);
   });
 });
+
+describe('quick reply suggestions (spec 2026-11-27-suggested-quick-replies)', () => {
+  it('suggests the messages repeated in the known transcripts, leaving out removed sessions', async () => {
+    const cfg = path.join(home, 'claude');
+    const dir = path.join(cfg, 'projects', 'p');
+    fs.mkdirSync(dir, { recursive: true });
+    const line = (text: string) =>
+      JSON.stringify({ type: 'user', uuid: crypto.randomUUID(), timestamp: new Date().toISOString(), message: { role: 'user', content: text } });
+    fs.writeFileSync(path.join(dir, 'a.jsonl'), ['go on', 'Go on!', 'go on'].map(line).join('\n') + '\n');
+    fs.writeFileSync(path.join(dir, 'b.jsonl'), ['hidden', 'hidden', 'hidden'].map(line).join('\n') + '\n');
+    await register({ sessionId: 's1', transcriptPath: path.join(dir, 'a.jsonl'), cwd: '/x', pid: null, configDir: cfg });
+    await register({ sessionId: 's2', transcriptPath: path.join(dir, 'b.jsonl'), cwd: '/x', pid: null, configDir: cfg });
+    await markRemoved('s2');
+    const u = await start(fakeProvider());
+    const r = await req(u, '/api/quick-replies/suggestions', { headers: auth });
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.body)).toEqual({ suggestions: [{ text: 'go on', count: 3 }] });
+  });
+
+  it('401 without the token; 403 from another origin', async () => {
+    const u = await start(fakeProvider());
+    expect((await req(u, '/api/quick-replies/suggestions')).status).toBe(401);
+    expect((await req(u, '/api/quick-replies/suggestions', { headers: { ...auth, origin: 'http://evil.example' } })).status).toBe(403);
+  });
+});
