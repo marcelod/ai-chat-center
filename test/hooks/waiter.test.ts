@@ -264,6 +264,19 @@ describe('waiter', () => {
     await markDisconnected('s1', 'off');
     expect(await p).toEqual({ exitCode: 0, stderr: '' });
   });
+  // Review 2026-11-27: the 30-minute cut is only for messages left from before the resume. A start waiter can
+  // hold the lock across a long terminal turn; a message sent during that turn is delivered, however old.
+  it('start on resume: a message sent after the resume, during a turn longer than 30 min, is delivered', async () => {
+    await reg('s1');
+    await setBusy('s1');
+    let t = Date.now();
+    const p = wait('start', { source: 'resume' }, { now: () => t, lookup: async () => ({ ok: true, pid: process.pid }) });
+    await sleep(30);
+    await enqueue('s1', 'sent during the turn');
+    t += 40 * 60_000;
+    fs.rmSync(paths().busyFile('s1')); // the turn ends
+    expect(unwrapMessages((await p).stderr).map((m) => m.text)).toEqual(['sent during the turn']);
+  });
   // Audit S2-N6 / R2-N2: a message sent during a turn longer than 30 min used to be dropped when it ended.
   it('stop delivers messages regardless of their age (a long turn)', async () => {
     await reg('s1');

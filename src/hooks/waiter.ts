@@ -214,6 +214,8 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
   const lookupFn = opts.lookup ?? ((id: string) => lookupClaudePid(id));
   const lookupFailMs = opts.lookupFailMs ?? LOOKUP_FAIL_EXIT_MS;
   const discardOld = event === 'start' && input.source === 'resume';
+  /** The 30-minute cut of a resume applies only to messages left from before this waiter started. */
+  const resumedAt = now();
   const statusFn = opts.status ?? liveStatus;
   const staleBusyMs = opts.staleBusyMs ?? STALE_BUSY_MS;
   const busyCheckMs = opts.busyCheckMs ?? BUSY_CHECK_MS;
@@ -464,7 +466,11 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
           let msgs = drained;
           if (discardOld) {
             const cutoff = now() - MAX_MESSAGE_AGE_MS;
-            msgs = drained.filter((m) => !(Date.parse(m.createdAt) < cutoff));
+            // Only messages left from before the resume: one sent during a long turn after it is delivered.
+            msgs = drained.filter((m) => {
+              const at = Date.parse(m.createdAt);
+              return !(at < cutoff && at < resumedAt);
+            });
             if (msgs.length < drained.length) {
               logError(`discarded ${drained.length - msgs.length} message(s) older than 30 min on resume of session ${sid}`);
             }
