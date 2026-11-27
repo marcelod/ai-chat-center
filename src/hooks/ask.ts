@@ -8,7 +8,8 @@ import { loadConfig } from '../core/config.js';
 import { getTurnOrigin } from '../core/turn.js';
 import { appPresent } from '../core/presence.js';
 import { clearWaiting, setWaiting } from '../core/waiting.js';
-import { assertToolUseId, parseQuestions, putPending, readAnswer, removeAnswer, removePending, removePendingSync, validAnswers } from '../core/questions.js';
+import { assertToolUseId, parseQuestions, putPending, readAnswer, removeAnswer, removePending, removePendingSync, validAnswers, verifyAnswer, type SignedAnswer } from '../core/questions.js';
+import { loadSecret } from '../core/secret.js';
 
 // PreToolUse hook on AskUserQuestion. Returns the decision JSON (allow + the answers given in the app) or
 // null: no decision, and Claude Code shows its own dialog in the terminal.
@@ -101,6 +102,17 @@ async function ask(input: AskInput, opts: AskOptions): Promise<string | null> {
       if (parentPid != null && !isAlive(parentPid)) return null;
       // null is also a file still being written: not yet.
       const a = await readAnswer(sid, id);
+      // Only an answer the hub signed for this question counts (review 0.6.11). Anything else (an old hub
+      // during an upgrade, a forged file) gives no decision: Claude Code shows its own dialog, and the app
+      // shows the question as waiting in the terminal. Fails closed: the dialog, never an "allow".
+      if (a && !(await signedByHub(a, sid, id, start))) {
+        logError(`ignored an answer for ${sid}/${id}: not signed by the hub for this question; the terminal dialog answers it`);
+        released = true;
+        mine.waiting = false;
+        await removeAnswer(sid, id);
+        await setWaiting(sid, 'question');
+        return null;
+      }
       if (a && 'release' in a && a.release === true) {
         released = true;
         mine.waiting = false;
@@ -128,6 +140,17 @@ async function ask(input: AskInput, opts: AskOptions): Promise<string | null> {
     if (active === mine) active = null;
     await cleanup(sid, id, released);
   }
+}
+
+/**
+ * The answer carries the hub's signature for this session and tool use, made after the question was published
+ * (its pending file is written at `start`; one second of slack for clock rounding). No secret: not signed.
+ */
+async function signedByHub(a: SignedAnswer, sid: string, id: string, start: number): Promise<boolean> {
+  const at = typeof a.createdAt === 'string' ? Date.parse(a.createdAt) : NaN;
+  if (!Number.isFinite(at) || at < start - 1000) return false;
+  const secret = await loadSecret();
+  return secret.ok && verifyAnswer(a, sid, id, secret.secret);
 }
 
 async function cleanup(sid: string, id: string, released: boolean): Promise<void> {

@@ -1,10 +1,12 @@
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import { rmSync } from 'node:fs';
 import path from 'node:path';
 import { paths } from './paths.js';
 import { isAlive } from './lock.js';
 import { clearWaiting, getWaiting } from './waiting.js';
 import { ensureDir, FILE_MODE, readJson, removeFile, writeJsonAtomic } from './fsAtomic.js';
+import { installSecret } from './secret.js';
 import type { PendingQuestion, Question } from '../shared/types.js';
 
 const TOOL_USE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -94,13 +96,59 @@ export async function removeAnswer(sid: string, toolUseId: string): Promise<void
 }
 
 export type AnswerFile = { answers: Record<string, string> } | { release: true };
+/** An answer file as written by the hub: the answer, when it was signed and its signature (see signAnswer). */
+export type SignedAnswer = AnswerFile & { createdAt?: string; sig?: string };
 
-/** Creates the answer file exclusively, so of two concurrent answers exactly one wins. Needs a pending question. */
+// An answer file approves the AskUserQuestion tool call (the hook returns permissionDecision "allow"), so,
+// like an inbox message, it is signed with the install secret: a file merely written into questions/<sid>/
+// (by another program, or by an action Claude was tricked into) is not an answer from the app (review 0.6.11).
+// v1: `ask1|sid|toolUseId|createdAt|payload`. Only the payload may contain `|`: session and tool use ids are
+// [A-Za-z0-9_-], and createdAt is checked. The payload is `release`, or `answers:` + the JSON of the
+// [question, answer] pairs sorted by question, so the signature does not depend on the key order in the file.
+const payloadOf = (a: AnswerFile): string =>
+  'release' in a ? 'release' : `answers:${JSON.stringify(Object.keys(a.answers).sort().map((k) => [k, a.answers[k]]))}`;
+const answerMac = (secret: string, sid: string, toolUseId: string, createdAt: string, a: AnswerFile) =>
+  crypto.createHmac('sha256', secret).update(`ask1|${sid}|${toolUseId}|${createdAt}|${payloadOf(a)}`).digest('hex');
+
+/** The answer with `createdAt` and `sig = HMAC-SHA256(secret, ask1|sid|toolUseId|createdAt|payload)`. */
+export function signAnswer(sid: string, toolUseId: string, a: AnswerFile, secret: string, createdAt = new Date().toISOString()): SignedAnswer {
+  if (sid.includes('|') || toolUseId.includes('|') || createdAt.includes('|')) throw new Error('invalid answer id or time');
+  const answer: AnswerFile = 'release' in a ? { release: true } : { answers: a.answers };
+  return { ...answer, createdAt, sig: answerMac(secret, sid, toolUseId, createdAt, answer) };
+}
+
+/**
+ * True only for an answer signed with `secret` for tool use `toolUseId` of session `sid`: exactly one of
+ * `answers` (an object of strings) or `release: true`, a createdAt and a matching signature (constant time).
+ */
+export function verifyAnswer(a: SignedAnswer, sid: string, toolUseId: string, secret: string): boolean {
+  if (!isObj(a) || typeof a.sig !== 'string' || typeof a.createdAt !== 'string' || a.createdAt.includes('|')) return false;
+  const hasRelease = Object.hasOwn(a, 'release');
+  if (hasRelease === Object.hasOwn(a, 'answers')) return false;
+  let answer: AnswerFile;
+  if (hasRelease) {
+    if ((a as { release?: unknown }).release !== true) return false;
+    answer = { release: true };
+  } else {
+    const ans = (a as { answers?: unknown }).answers;
+    if (!isObj(ans) || !Object.values(ans).every((v) => typeof v === 'string')) return false;
+    answer = { answers: ans as Record<string, string> };
+  }
+  const want = Buffer.from(answerMac(secret, sid, toolUseId, a.createdAt, answer));
+  const got = Buffer.from(a.sig);
+  return want.length === got.length && crypto.timingSafeEqual(want, got);
+}
+
+/**
+ * Creates the answer file exclusively, so of two concurrent answers exactly one wins. Needs a pending question.
+ * The answer is signed with the install secret (throws when the secret cannot be read: the hub's answer fails).
+ */
 export async function writeAnswer(sid: string, toolUseId: string, a: AnswerFile): Promise<'ok' | 'not-found' | 'conflict'> {
   if ((await readJson(pendingFile(sid, toolUseId))) === null) return 'not-found';
+  const signed = signAnswer(sid, toolUseId, a, await installSecret());
   await ensureDir(paths().questionsDir(sid));
   try {
-    await fs.writeFile(answerFile(sid, toolUseId), JSON.stringify(a, null, 2), { encoding: 'utf8', flag: 'wx', mode: FILE_MODE });
+    await fs.writeFile(answerFile(sid, toolUseId), JSON.stringify(signed, null, 2), { encoding: 'utf8', flag: 'wx', mode: FILE_MODE });
     return 'ok';
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'EEXIST') return 'conflict';
@@ -108,8 +156,8 @@ export async function writeAnswer(sid: string, toolUseId: string, a: AnswerFile)
   }
 }
 
-export async function readAnswer(sid: string, toolUseId: string): Promise<AnswerFile | null> {
-  return readJson<AnswerFile>(answerFile(sid, toolUseId));
+export async function readAnswer(sid: string, toolUseId: string): Promise<SignedAnswer | null> {
+  return readJson<SignedAnswer>(answerFile(sid, toolUseId));
 }
 
 /** Keys must be exactly the question texts; each value a trimmed string of 1-2000 chars (a label or free text). */

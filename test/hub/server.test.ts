@@ -14,7 +14,8 @@ import { PROTOCOL, VERSION } from '../../src/core/version.js';
 import { tmpDir } from '../helpers/tmp.js';
 import { fakePng } from '../helpers/png.js';
 import { saveConfig, loadConfig } from '../../src/core/config.js';
-import { putPending, readAnswer } from '../../src/core/questions.js';
+import { putPending, readAnswer, verifyAnswer } from '../../src/core/questions.js';
+import { installSecret } from '../../src/core/secret.js';
 import { paths } from '../../src/core/paths.js';
 import { getDisplayName } from '../../src/core/names.js';
 import { isPinned } from '../../src/core/pins.js';
@@ -306,7 +307,9 @@ describe('answers endpoint', () => {
     const r = await post(u, 'tu1', { answers: { 'Which?': 'A' } });
     expect(r.status).toBe(202);
     expect(JSON.parse(r.body)).toEqual({ ok: true });
-    expect(await readAnswer('s1', 'tu1')).toEqual({ answers: { 'Which?': 'A' } });
+    const a = (await readAnswer('s1', 'tu1'))!;
+    expect(a).toMatchObject({ answers: { 'Which?': 'A' } });
+    expect(verifyAnswer(a, 's1', 'tu1', await installSecret())).toBe(true); // signed for the ask hook
     expect((await post(u, 'tu1', { release: true })).status).toBe(409);
   });
   it('202 for release', async () => {
@@ -314,7 +317,9 @@ describe('answers endpoint', () => {
     await saveConfig({ answersFromApp: true });
     await seed();
     expect((await post(u, 'tu1', { release: true })).status).toBe(202);
-    expect(await readAnswer('s1', 'tu1')).toEqual({ release: true });
+    const a = (await readAnswer('s1', 'tu1'))!;
+    expect(a).toMatchObject({ release: true });
+    expect(verifyAnswer(a, 's1', 'tu1', await installSecret())).toBe(true);
   });
   it('400 for invalid tool use id, body or answers', async () => {
     const u = await start(fakeProvider());
