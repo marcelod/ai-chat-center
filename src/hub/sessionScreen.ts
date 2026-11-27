@@ -10,37 +10,18 @@ import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import os from 'node:os';
 import xtermHeadless from '@xterm/headless';
 import { cleanEnv, configDirFor, isBgId, type Spawn } from './bgSessions.js';
+import { redactAppSecrets, stripTerminalCodes } from '../shared/redact.js';
 
 export const MAX_SCREEN_CHARS = 200_000;
 const MAX_BYTES = 512 * 1024;
 const TIMEOUT_MS = 10_000;
 
-/* eslint-disable no-control-regex */
-const ANSI = [
-  /\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, // OSC (window title, hyperlinks)
-  /\x1b[P^_][\s\S]*?\x1b\\/g, // DCS, PM, APC
-  /\x1b\[[0-?]*[ -/]*[@-~]/g, // CSI (colours, cursor)
-  /\x1b[()*+][0-9A-Za-z]/g, // character sets
-  /\x1b[@-Z\\-_=>78]/g, // other two-byte escapes
-];
-const CONTROL = /[\x00-\x08\x0b-\x1f\x7f]/g;
-/* eslint-enable no-control-regex */
-/** Any address of the hub: the /cc link and anything else on this machine's loopback. */
-const APP_URL = /(?:[a-z][a-z0-9+.-]{0,31}:\/\/)?(?:127\.\d+\.\d+\.\d+|localhost|\[::1\]|0\.0\.0\.0)(?::\d+)?(?:[/?#]\S*)?/gi;
-/** Fragments of the link even without its address (`#token=…`, `#pair=…`). */
-const LINK_PARTS = /[#?&](?:token|pair)=\S*/gi;
-/** A long hex run: the token, the key, the secret, or a piece of one cut at the end of a line. */
-const HEX_RUN = /[0-9a-fA-F]{16,}/g;
-
 /** The screen text without terminal codes and without anything that could open the app. */
 export function cleanScreen(raw: string, secrets: string[]): string {
-  let s = raw;
-  for (const re of ANSI) s = s.replace(re, '');
-  s = s.replace(/\r\n?/g, '\n').replace(CONTROL, '');
+  let s = stripTerminalCodes(raw);
   for (const secret of secrets) if (secret && secret.length >= 8) s = s.split(secret).join('[redacted]');
   s = redactSecretPieces(s.split('\n').map((l) => l.trimEnd()).join('\n'), secrets);
-  s = s.replace(APP_URL, '[app link removed]').replace(LINK_PARTS, '[app link removed]').replace(HEX_RUN, '[redacted]');
-  s = s
+  s = redactAppSecrets(s, secrets)
     .split('\n')
     .map((l) => l.trimEnd())
     .join('\n')

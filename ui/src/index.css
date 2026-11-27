@@ -182,3 +182,33 @@ body {
 /* Find in the conversation (useFindInChat): every occurrence, and the one ↑/↓ is on. */
 ::highlight(acc-search) { background-color: #fde68a; color: #111827; }
 ::highlight(acc-search-current) { background-color: #f59e0b; color: #111827; }
+
+/* Conversation export as PDF (spec 2026-11-27-export-conversation): a print-only view, light whatever the theme. */
+.print-export { display: none; }
+@media print {
+  html:has(> body > .print-export), html:has(> body > .print-export) > body { height: auto; background: #fff !important; color: #111 !important; }
+  body:has(> .print-export) > :not(.print-export) { display: none !important; }
+  .print-export { display: block; color: #111; background: #fff; font-family: var(--font-sans); font-size: 11pt; line-height: 1.45; }
+  .print-export h1 { font-size: 18pt; font-weight: 600; margin: 0 0 4pt; }
+  .print-export .meta { color: #555; font-size: 9pt; margin: 0 0 12pt; padding-bottom: 8pt; border-bottom: 1px solid #ccc; }
+  .print-export h2.day { font-size: 10pt; font-weight: 600; color: #555; margin: 14pt 0 6pt; border-bottom: 1px solid #e3e3e3; }
+  .print-export .msg { margin: 8pt 0; padding-left: 8pt; border-left: 3px solid #bbb; }
+  .print-export .msg.user { border-left-color: #2e7d5b; }
+  .print-export .msg.agent, .print-export .msg.recap { border-left-color: #7a6bb0; }
+  .print-export .who { margin: 0 0 2pt; font-size: 9.5pt; color: #444; }
+  .print-export .note, .print-export .notice { font-size: 9pt; color: #666; font-style: italic; margin: 2pt 0; }
+  .print-export .notice { margin: 6pt 0; }
+  .print-export .actions { list-style: disc; padding-left: 18pt; margin: 4pt 0; font-size: 9pt; color: #555; }
+  .print-export .body p, .print-export .body ul, .print-export .body ol, .print-export .body pre, .print-export .body blockquote, .print-export .body table { margin: 4pt 0; }
+  .print-export .body ul { list-style: disc; padding-left: 18pt; }
+  .print-export .body ol { list-style: decimal; padding-left: 18pt; }
+  .print-export .body h1, .print-export .body h2, .print-export .body h3 { font-weight: 600; margin: 6pt 0 3pt; }
+  .print-export .body a { color: #0b57d0; text-decoration: underline; }
+  .print-export code { font-family: var(--font-mono); font-size: 9pt; background: #f2f2f2; border-radius: 3px; padding: 0 3px; }
+  .print-export pre { background: #f6f6f6; border: 1px solid #e3e3e3; border-radius: 4px; padding: 6pt 8pt; white-space: pre-wrap; overflow-wrap: anywhere; break-inside: avoid; }
+  .print-export pre code { background: none; padding: 0; }
+  .print-export table { border-collapse: collapse; }
+  .print-export th, .print-export td { border: 1px solid #ccc; padding: 2pt 6pt; }
+  .print-export blockquote { border-left: 3px solid #ccc; padding-left: 8pt; color: #555; }
+  .print-export .who, .print-export h2.day { break-after: avoid; }
+}

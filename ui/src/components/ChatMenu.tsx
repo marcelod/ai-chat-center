@@ -26,6 +26,8 @@ type Props = {
   onRmBackground?: () => Promise<void>;
   /** Shows the session's terminal screen in the side panel (background sessions). */
   onScreen?: () => void;
+  /** Exports the whole conversation as Markdown or PDF (absent: no Export item). Rejects when it failed. */
+  onExport?: (format: 'md' | 'pdf') => Promise<void>;
 };
 
 type Confirmable = 'disconnect' | 'remove' | 'stop' | 'rm';
@@ -42,7 +44,7 @@ function failText(t: T, key: string, e: unknown): string {
  * in place (a second click), never with window.confirm.
  */
 export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu(
-  { onRename, onRemove, onPin, pinned = false, onDisconnect, onBackground, onResume, onOpenTerminal, onStop, onRespawn, onRmBackground, onScreen },
+  { onRename, onRemove, onPin, pinned = false, onDisconnect, onBackground, onResume, onOpenTerminal, onStop, onRespawn, onRmBackground, onScreen, onExport },
   button,
 ) {
   const t = useT();
@@ -50,6 +52,8 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu(
   const [confirming, setConfirming] = useState<Confirmable | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const firstFormat = useRef<HTMLButtonElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const ownButton = useRef<HTMLButtonElement | null>(null);
@@ -64,6 +68,7 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu(
     setOpen(false);
     setConfirming(null);
     setFailed(null);
+    setExporting(false);
     if (refocus) ownButton.current?.focus();
   };
 
@@ -72,6 +77,10 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu(
   useLayoutEffect(() => {
     if (open) items()[0]?.focus();
   }, [open]);
+
+  useLayoutEffect(() => {
+    if (exporting) firstFormat.current?.focus();
+  }, [exporting]);
 
   useEffect(() => {
     if (!open) return;
@@ -92,7 +101,7 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu(
     };
   }, [open]);
 
-  if (!onRename && !onRemove && !onPin && !onDisconnect && !onBackground && !onResume && !onOpenTerminal && !onStop && !onRespawn && !onRmBackground && !onScreen) return null;
+  if (!onRename && !onRemove && !onPin && !onDisconnect && !onBackground && !onResume && !onOpenTerminal && !onStop && !onRespawn && !onRmBackground && !onScreen && !onExport) return null;
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Tab') {
@@ -163,6 +172,19 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu(
       close(false);
     } catch {
       setFailed(t('ui.chat.resume.error'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportAs = async (format: 'md' | 'pdf') => {
+    if (!onExport || busy) return;
+    setBusy(true);
+    try {
+      await onExport(format);
+      close(false);
+    } catch {
+      setFailed(t('ui.export.failed'));
     } finally {
       setBusy(false);
     }
@@ -252,6 +274,36 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu(
             >
               {t('ui.background.menu')}
             </button>
+          )}
+          {onExport && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                tabIndex={-1}
+                aria-haspopup="menu"
+                aria-expanded={exporting}
+                className={itemCls}
+                onClick={() => setExporting((v) => !v)}
+              >
+                {t('ui.export.menu')}
+              </button>
+              {exporting &&
+                (['md', 'pdf'] as const).map((f) => (
+                  <button
+                    key={f}
+                    ref={f === 'md' ? firstFormat : undefined}
+                    type="button"
+                    role="menuitem"
+                    tabIndex={-1}
+                    aria-disabled={busy || undefined}
+                    className={`${itemCls} pl-7`}
+                    onClick={() => void exportAs(f)}
+                  >
+                    {t(f === 'md' ? 'ui.export.markdown' : 'ui.export.pdf')}
+                  </button>
+                ))}
+            </>
           )}
           {onPin && (
             <button type="button" role="menuitem" tabIndex={-1} aria-disabled={busy || undefined} className={itemCls} onClick={() => void pin()}>

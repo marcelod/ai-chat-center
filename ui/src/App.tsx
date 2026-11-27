@@ -10,7 +10,8 @@ import { useSystemNotifications } from './useSystemNotifications';
 import { useAppWindow } from './useAppWindow';
 import { useWindowSize } from './useWindowSize';
 import { useCollapsedList } from './useCollapsedList';
-import { LangProvider, useT } from './i18n';
+import { LangProvider, useLang, useT } from './i18n';
+import { exportConversation } from './components/PrintConversation';
 
 function NoToken() {
   const t = useT();
@@ -26,6 +27,7 @@ function NoToken() {
 
 function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
   const t = useT();
+  const lang = useLang();
   const [answersFromApp, setAnswersFromApp] = useState(false);
   const [collapsed, toggleCollapsed] = useCollapsedList();
   const live = useLiveSessions();
@@ -155,6 +157,11 @@ function Shell({ onLanguage }: { onLanguage: (l: Language) => void }) {
               await live.refresh();
             }}
             onRmBackground={() => live.remove(selected.sessionId, api.rmSession)}
+            onExport={async (format, name) => {
+              // The whole conversation, fresh from the hub; what the app holds when the hub does not answer.
+              const all = await api.getEvents(selected.sessionId).catch(() => eventsById[selected.sessionId] ?? []);
+              exportConversation(format, { ...selected, name }, all, lang);
+            }}
             panel={panel}
             onBack={() => select(null)}
           />
