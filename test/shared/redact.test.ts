@@ -5,6 +5,14 @@ describe('stripTerminalCodes', () => {
   it('removes colours, OSC titles, carriage returns and control characters, keeps tabs and newlines', () => {
     expect(stripTerminalCodes('\x1b[31mred\x1b[0m\x1b]0;title\x07 a\r\nb\tc\x07')).toBe('red a\nb\tc');
   });
+  it('stays linear on many OSC or DCS openers without a terminator', () => {
+    for (const s of ['\x1b]a'.repeat(50_000), '\x1bPa'.repeat(50_000)]) {
+      const t = performance.now();
+      expect(stripTerminalCodes(s)).toBe('a'.repeat(50_000));
+      expect(performance.now() - t).toBeLessThan(300);
+    }
+    expect(stripTerminalCodes('\x1b]8;;http://x\x1b\\link\x1b]8;;\x1b\\ \x1bPq#0\x1b\\ok')).toBe('link ok');
+  });
 });
 
 describe('redactAppSecrets', () => {
@@ -22,6 +30,14 @@ describe('redactAppSecrets', () => {
     const t = Date.now();
     redactAppSecrets('x'.repeat(200_000));
     expect(Date.now() - t).toBeLessThan(2000);
+  });
+  it('stays linear on long runs where a scheme could start at every letter (hex, a1a1…, a-a-…, dotted names)', () => {
+    const hex = Array.from({ length: 100_000 }, (_, i) => '0123456789abcdef'[(i * 7) % 16]).join('');
+    for (const s of [hex, 'a1'.repeat(50_000), 'a-'.repeat(50_000), 'a+'.repeat(50_000), 'pkg1.'.repeat(20_000)]) {
+      const t = performance.now();
+      redactAppSecrets(s);
+      expect(performance.now() - t).toBeLessThan(300);
+    }
   });
   it('ignores short secrets and keeps ordinary text', () => {
     expect(redactAppSecrets('see https://example.com and abc123', ['abc'])).toBe('see https://example.com and abc123');

@@ -4,8 +4,10 @@
 
 /* eslint-disable no-control-regex */
 const ANSI = [
-  /\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, // OSC (window title, hyperlinks)
-  /\x1b[P^_][\s\S]*?\x1b\\/g, // DCS, PM, APC
+  // OSC, DCS, PM, APC end at the next ESC: a lazy match across ESCs rescanned the rest of the text from every
+  // opener without a terminator (quadratic). An opener left alone is removed by the two-byte rule below.
+  /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, // OSC (window title, hyperlinks)
+  /\x1b[P^_][^\x1b]*\x1b\\/g, // DCS, PM, APC
   /\x1b\[[0-?]*[ -/]*[@-~]/g, // CSI (colours, cursor)
   /\x1b[()*+][0-9A-Za-z]/g, // character sets
   /\x1b[@-Z\\-_=>78]/g, // other two-byte escapes
@@ -15,9 +17,10 @@ const CONTROL = /[\x00-\x08\x0b-\x1f\x7f]/g;
 /**
  * Any address of the hub: the /cc link and anything else on this machine's loopback. A scheme starts only
  * after a non-letter (the leftmost match is the same), so a long run of letters is not rescanned from every
- * position.
+ * position, and is at most 32 characters, so a run like `a1a1…` or a hex blob (a scheme could start at every
+ * letter) costs a bounded scan per position, not one to its end.
  */
-const APP_URL = /(?:(?<![a-z])[a-z][a-z0-9+.-]*:\/\/)?(?:127\.\d+\.\d+\.\d+|localhost|\[::1\]|0\.0\.0\.0)(?::\d+)?(?:[/?#]\S*)?/gi;
+const APP_URL = /(?:(?<![a-z])[a-z][a-z0-9+.-]{0,31}:\/\/)?(?:127\.\d+\.\d+\.\d+|localhost|\[::1\]|0\.0\.0\.0)(?::\d+)?(?:[/?#]\S*)?/gi;
 /** Fragments of the link even without its address (`#token=…`, `#pair=…`). */
 const LINK_PARTS = /[#?&](?:token|pair)=\S*/gi;
 /** A long hex run: the token, the key, the secret, or a piece of one cut at the end of a line. */
