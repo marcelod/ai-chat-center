@@ -32,7 +32,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ### Sessões em segundo plano
 1. ★ ✅ 0.6.0 **Nova sessão pelo app:** botão "+" com a pasta (das já usadas), o nome, o modelo e o esforço. O hub roda `claude --bg -n <nome> --model … --effort … "/ai-chat-center:cc"`, e a sessão já nasce conectada.
-2. ★ ✅ 0.6.7 **Ver a tela da sessão no app:** `claude logs <id>` mostra a tela da sessão. Resolve `/status`, `/cost` e `/context`: depois do comando, o app mostra o trecho da tela. Cuidado visto em 2026-11-25: a tela guarda o link do `/cc` com o token do app; o trecho precisa ser filtrado antes de aparecer.
+2. ★ ✅ 0.6.7 **Ver a tela da sessão no app:** `claude logs <id>` mostra a tela da sessão. Com ela, `/status`, `/cost` e `/context` foram liberados na 0.6.8: depois do comando, o app abre a tela no painel. Cuidado visto em 2026-11-25: a tela guarda o link do `/cc` com o token do app; o trecho precisa ser filtrado antes de aparecer.
 3. ✅ 0.6.7 **Parar, reiniciar e remover pelo menu ⋮:** `claude stop`, `claude respawn` (roda a versão nova do Claude Code depois de um update) e `claude rm`. Também limpar sessões paradas que sobraram.
 4. ✅ 0.6.0 **Lista de comandos ao digitar `/`.**
 5. ✅ 0.6.0 **Aviso de que o comando terminou.**
@@ -52,7 +52,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 ### Avisos e visão geral
 16. ★ ✅ 0.6.7 **Notificação do sistema:** quando uma sessão termina o turno, pede permissão ou faz uma pergunta, mesmo com o app minimizado.
 17. **Painel geral:** todas as sessões numa grade, com estado, tempo trabalhando e uso de contexto.
-18. **Uso e custo por sessão:** tokens, contexto ocupado (ver "Tamanho do contexto da conversa" em "A fazer") e o histórico do uso de 5 horas.
+18. **Uso e custo por sessão:** tokens, contexto ocupado (a pizza da 0.6.7 já mostra o da conversa) e o histórico do uso de 5 horas.
 19. ✅ 0.6.8 **Agrupar sessões por projeto ou pasta** na lista. Desenho combinado com o autor (2026-11-27):
     - Opcional, **desligado por padrão** ("Agrupar por projeto" nas configurações); desligado, a lista fica como hoje (mais recentes no topo).
     - Um grupo por pasta da sessão, com o nome da última parte do caminho e a contagem ("ai-chat-center (3)"); o caminho completo ao passar o mouse.
@@ -92,10 +92,10 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
   - Contexto: ✅ ok no uso (2026-11-27). Pizza "◔ N%" na barra; balão com tokens, modelo, quanto falta e o último compact; com `usage on` o total passa a ser exato (1M numa sessão 1M); `/compact` derruba o percentual na hora; amarelo ≥80% e vermelho ≥90%; no celular o balão não sai da tela.
   - Respostas rápidas (⚡): escolher preenche o campo sem enviar; editar a lista e recarregar mantém.
   - Notificações do sistema: ✅ fim do turno com o app sem foco mostra a notificação no Linux (2026-11-27). Clicar no corpo da notificação abre a conversa ✅ (o botão "Configurações" é do Chrome). Pergunta ✅ (a notificação diz "Fez uma pergunta" e leva ao app, onde a pergunta aparece). Falta: permissão (numa sessão fora do modo auto), Windows e macOS. (Configurações, desligadas por padrão): fim do turno, pedido de permissão e pergunta, só com o app escondido ou sem foco; clicar abre a conversa. Linux, Windows e macOS/Safari.
-  - Painel lateral: ✅ `.md` e imagem citados abrem no painel (2026-11-27); o autor quer usar o painel para mais coisas com o tempo (ver "Painel lateral: próximos tipos de arquivo"). Caminho de `.md` ou imagem citado vira link só se existir; painel abre à direita (tela cheia no celular), X/Esc fecham, links relativos e "Voltar"; anexo de imagem clicável. Imagens remotas nas mensagens agora mostram só o texto alternativo: confirmar se é o desejado.
+  - Painel lateral: ✅ `.md` e imagem citados abrem no painel (2026-11-27); o autor quer usar o painel para mais coisas com o tempo (código, PDF e diff vieram na 0.6.8 e 0.6.9). Caminho de `.md` ou imagem citado vira link só se existir; painel abre à direita (tela cheia no celular), X/Esc fecham, links relativos e "Voltar"; anexo de imagem clicável. Imagens remotas nas mensagens agora mostram só o texto alternativo: confirmar se é o desejado.
   - Subagentes e "agentes trabalhando (N)": ✅ (2026-11-27) cabeçalho mostra "agents working (1)", a lista mostra o contador, o painel lista os subagentes com tipo, modelo, tempo, última ferramenta e Working/Finished. Achado: um `Agent` que o modo auto bloqueou ainda aparece na conversa como "Claude → Teste B…", como se tivesse sido lançado; mostrar como bloqueado (ou esconder) quando o resultado da ferramenta for um erro. Subagentes: clicar no estado do cabeçalho abre a lista (descrição, tipo, modelo, tempo, última ferramenta) e a transcrição de cada um.
   - "Agentes trabalhando (N)": lançar 2 subagentes em segundo plano e encerrar o turno; cabeçalho e lista mostram o estado; volta para "parada" em até ~5 s quando terminam; sessão morta não prende (no máximo 10 min).
-  - Tela da sessão: ✅ abre pelo ⋮ e o filtro funciona: o link do `/cc` aparece como `[app link removed]`, sem 127.0.0.1 nem token (2026-11-27), mas o conteúdo vem como quadros soltos da animação (ver "Tela da sessão mostra cada quadro da animação" em "A fazer"). Outro achado em 2026-11-27: o app ainda **bloqueia** `/status` ("only shows its result on the session's screen, so the app would show nothing. Use it in a terminal"), regra da 0.6.0 de antes da tela da sessão existir. Agora que a tela existe, liberar `/status`, `/cost`, `/context` e afins nas sessões em segundo plano e, depois do comando, abrir a tela da sessão no painel sozinho (ou mostrar "ver o resultado na tela da sessão"). (⋮, só em segundo plano): depois de `/status`, o texto aparece sem link 127.0.0.1, sem token e sem a chave (`[app link removed]`/`[redacted]`); conferir a largura das linhas.
+  - Tela da sessão: ✅ abre pelo ⋮ e o filtro funciona: o link do `/cc` aparece como `[app link removed]`, sem 127.0.0.1 nem token (2026-11-27), mas o conteúdo vinha como quadros soltos da animação (corrigido na 0.6.8, ver o bloco 0.6.8). Outro achado em 2026-11-27: o app ainda **bloqueia** `/status` ("only shows its result on the session's screen, so the app would show nothing. Use it in a terminal"), regra da 0.6.0 de antes da tela da sessão existir. Liberados na 0.6.8 (ver o bloco 0.6.8). (⋮, só em segundo plano): depois de `/status`, o texto aparece sem link 127.0.0.1, sem token e sem a chave (`[app link removed]`/`[redacted]`); conferir a largura das linhas.
   - Parar / reiniciar / remover: ✅ aparentemente ok no teste do autor com uma sessão criada pelo "+" (2026-11-27). (⋮ em sessão de segundo plano viva) e "Limpar sessões paradas" nas configurações. Testar com uma sessão de teste criada pelo "+": parar (confirmação no menu), reiniciar (deve reconectar sozinha em até ~1 min, sem `/cc`; anotar se não), remover (some da lista e de `claude agents --json --all`).
 
 - 0.6.6:
@@ -125,7 +125,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 - 0.5.0, sessões em segundo plano: retomar pelo app e comandos `/…` (`docs/testing/background-sessions.md`). Comandos no Windows ficam para depois (sem `script`; o node-pty traz ~30 MB); macOS não testado.
 
-- 0.6.0 (`docs/superpowers/specs/2026-11-25-app-batch-design.md`), na branch `feat/app-batch` até o merge:
+- 0.6.0 (`docs/superpowers/specs/2026-11-25-app-batch-design.md`):
   - Nova sessão pelo app: testada ao vivo pelo hub do worktree; falta testar pelo botão "+" no app.
   - Lista de comandos ao digitar `/`: conferir se os comandos marcados como "rodam pelo app" rodam mesmo, um por um.
   - Aviso de comando terminado: conferir com um `/compact` real.
