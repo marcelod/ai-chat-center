@@ -68,4 +68,14 @@ describe('agents working', () => {
     const other = document.querySelector('[data-session="s2"]') as HTMLElement;
     expect(within(other).queryByTitle(/subagents working/)).toBeNull();
   });
+
+  it('one subagent is said in the singular', () => {
+    render(
+      <LangProvider lang="en">
+        <SessionList connected={[session({ agentsWorking: 1 })]} others={[]} unread={{}} selectedId={null} onSelect={() => {}} onLanguage={() => {}} />
+      </LangProvider>,
+    );
+    const row = document.querySelector('[data-session="s1"]') as HTMLElement;
+    expect(within(row).getByTitle('1 subagent working')).toHaveTextContent('1');
+  });
 });

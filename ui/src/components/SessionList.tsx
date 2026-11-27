@@ -3,7 +3,7 @@ import type { SearchHit } from '@shared/search';
 import { MIN_QUERY } from '@shared/search';
 import type { LiveSession, SessionView, Usage } from '@shared/types';
 import { formatTime, initials, previewText } from '../format';
-import { useLang, useT } from '../i18n';
+import { useLang, useT, type T } from '../i18n';
 import { Logo } from './Logo';
 import { avatarStyle } from './backgrounds';
 import { ChevronIcon, PanelIcon, PinIcon, SearchIcon } from './icons';
@@ -38,6 +38,9 @@ type Props = {
 
 /** Pause after the last key before searching the messages. */
 export const SEARCH_DEBOUNCE_MS = 300;
+
+/** "1 subagent working" / "{n} subagents working". */
+const agentsWorking = (t: T, n: number) => (n === 1 ? t('ui.panel.agentsWorkingOne') : t('ui.panel.agentsWorking', { n }));
 
 const dotColor: Record<SessionView['state'], string> = {
   busy: 'bg-busy',
@@ -87,13 +90,13 @@ function GroupHeader({ item: { group, open }, unread }: { item: GroupItem; unrea
           <>
             <span
               aria-hidden="true"
-              title={t('ui.panel.agentsWorking', { n: act.agents })}
+              title={agentsWorking(t, act.agents)}
               className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-busy px-1.5 text-[11px] font-semibold text-busy-text"
             >
               <span className="h-1.5 w-1.5 rounded-full bg-busy" />
               {act.agents}
             </span>
-            <span className="sr-only">, {t('ui.panel.agentsWorking', { n: act.agents })}</span>
+            <span className="sr-only">, {agentsWorking(t, act.agents)}</span>
           </>
         )}
         {!open && act.unread > 0 && (
@@ -236,7 +239,7 @@ export function SessionList({ connected, others, usage, hubVersion, unread, sele
                   )}
                   <span className="sr-only">
                     {s.waitingKind === 'question' ? t('ui.question.statusAria') : t(`ui.state.${s.state}`)}
-                    {(s.agentsWorking ?? 0) > 0 && s.state !== 'disconnected' ? `, ${t('ui.panel.agentsWorking', { n: s.agentsWorking! })}` : ''}
+                    {(s.agentsWorking ?? 0) > 0 && s.state !== 'disconnected' ? `, ${agentsWorking(t, s.agentsWorking!)}` : ''}
                   </span>
                 </span>
                 {!collapsed && (
@@ -262,7 +265,7 @@ export function SessionList({ connected, others, usage, hubVersion, unread, sele
                     {(s.agentsWorking ?? 0) > 0 && s.state !== 'disconnected' && (
                       <span
                         aria-hidden="true"
-                        title={t('ui.panel.agentsWorking', { n: s.agentsWorking! })}
+                        title={agentsWorking(t, s.agentsWorking!)}
                         className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-busy px-1.5 text-[11px] font-semibold text-busy-text"
                       >
                         <span className="h-1.5 w-1.5 rounded-full bg-busy" />

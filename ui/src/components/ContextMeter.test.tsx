@@ -17,6 +17,11 @@ describe('formatTokens', () => {
     expect(formatTokens(1_000_000)).toBe('1M');
     expect(formatTokens(1_250_000)).toBe('1.3M');
   });
+  it('uses the decimal mark of the language', () => {
+    expect(formatTokens(1_250_000, 'pt-BR')).toBe('1,3M');
+    expect(formatTokens(1_000_000, 'pt-BR')).toBe('1M');
+    expect(formatTokens(124_400, 'pt-BR')).toBe('124k');
+  });
 });
 
 describe('ContextMeter', () => {

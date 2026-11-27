@@ -59,6 +59,7 @@
         "hours": "{h} h {m} min"
       },
       "agentsWorking": "{n} subagents working",
+      "agentsWorkingOne": "1 subagent working",
       "screen": "Session screen",
       "refresh": "Refresh",
       "updatedAt": "Updated {time}",

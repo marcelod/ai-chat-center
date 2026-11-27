@@ -5,12 +5,12 @@ import { useLang, useT } from '../i18n';
 // How full the session's context is (spec 2026-11-26-context-quick-replies): a small pie with the percentage in
 // the bar under the message field; hover, focus or a tap shows the details.
 
-/** 950 → "950", 124400 → "124k", 1000000 → "1M", 1250000 → "1.3M". */
-export function formatTokens(n: number): string {
+/** 950 → "950", 124400 → "124k", 1000000 → "1M", 1250000 → "1.3M" ("1,3M" in pt-BR: the language's decimal mark). */
+export function formatTokens(n: number, lang = 'en'): string {
   if (n < 1000) return String(Math.round(n));
   if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
   const m = Math.round(n / 100_000) / 10;
-  return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+  return `${new Intl.NumberFormat(lang, { maximumFractionDigits: 1 }).format(m)}M`;
 }
 
 type Level = 'normal' | 'warn' | 'danger';
@@ -106,9 +106,9 @@ export function ContextMeter({ context, model }: { context: ContextUsage; model?
           <span className="text-[13px] font-semibold text-ink">
             {t('ui.context.label')} · {t('ui.context.summary', { pct })}
           </span>
-          <span className="text-ink">{t('ui.context.tokens', { used: formatTokens(context.used), size: formatTokens(context.size) })}</span>
+          <span className="text-ink">{t('ui.context.tokens', { used: formatTokens(context.used, lang), size: formatTokens(context.size, lang) })}</span>
           {model && <span>{t('ui.context.model', { model })}</span>}
-          <span>{t('ui.context.left', { pct: 100 - pct, tokens: formatTokens(leftTokens) })}</span>
+          <span>{t('ui.context.left', { pct: 100 - pct, tokens: formatTokens(leftTokens, lang) })}</span>
           <span>{t('ui.context.autoCompact')}</span>
           <span>{context.lastCompactAt ? t('ui.context.lastCompact', { time: when(context.lastCompactAt) }) : t('ui.context.noCompact')}</span>
           {!context.exact && <span className="italic">{t('ui.context.estimated')}</span>}
