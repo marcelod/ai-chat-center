@@ -29,8 +29,10 @@ function chat(s: SessionView, subagents = vi.fn(async () => [])) {
 describe('agents working', () => {
   it('an idle session with subagents working says so in the header; clicking opens the subagents', async () => {
     const subagents = chat(session({ agentsWorking: 5 }));
-    const pill = screen.getByRole('button', { name: 'Show subagents' });
+    const pill = screen.getByRole('button', { name: /Show subagents/ });
     expect(pill).toHaveTextContent('agents working (5)');
+    // The state is in the accessible name too, first (what a voice user says), then what the button does.
+    expect(pill).toHaveAccessibleName('agents working (5). Show subagents');
     expect(pill).toHaveAttribute('data-state', 'agents');
     await userEvent.click(pill);
     expect(await screen.findByTestId('side-panel')).toBeTruthy();
@@ -39,12 +41,12 @@ describe('agents working', () => {
 
   it('a busy session stays "working"; an idle one without agents stays idle', () => {
     chat(session({ state: 'busy', agentsWorking: 2 }));
-    expect(screen.getByRole('button', { name: 'Show subagents' })).toHaveTextContent('working…');
+    expect(screen.getByRole('button', { name: /Show subagents/ })).toHaveTextContent('working…');
   });
 
   it('idle without agents', () => {
     chat(session());
-    expect(screen.getByRole('button', { name: 'Show subagents' })).toHaveTextContent('idle');
+    expect(screen.getByRole('button', { name: /Show subagents/ })).toHaveTextContent('idle');
   });
 
   it('the session list shows a discreet sign with the count', () => {

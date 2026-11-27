@@ -66,7 +66,7 @@ describe('formatDuration', () => {
 describe('subagents in the side panel', () => {
   it('clicking the status opens the list: description, type, model, time, state and last tool', async () => {
     setup();
-    await userEvent.click(screen.getByRole('button', { name: 'Show subagents' }));
+    await userEvent.click(screen.getByRole('button', { name: /Show subagents/ }));
     const panel = await screen.findByTestId('side-panel');
     const items = await within(panel).findAllByTestId('subagent');
     expect(items).toHaveLength(1);
@@ -87,7 +87,7 @@ describe('subagents in the side panel', () => {
 
   it('clicking a subagent shows its transcript; Back returns to the list', async () => {
     const panel = setup();
-    await userEvent.click(screen.getByRole('button', { name: 'Show subagents' }));
+    await userEvent.click(screen.getByRole('button', { name: /Show subagents/ }));
     const side = await screen.findByTestId('side-panel');
     await userEvent.click((await within(side).findAllByTestId('subagent'))[0]);
     expect(await within(side).findByText('step 1')).toBeTruthy();
@@ -100,13 +100,13 @@ describe('subagents in the side panel', () => {
 
   it('an empty list says so', async () => {
     setup({ subagents: vi.fn(async () => []) });
-    await userEvent.click(screen.getByRole('button', { name: 'Show subagents' }));
+    await userEvent.click(screen.getByRole('button', { name: /Show subagents/ }));
     expect(await screen.findByText('No subagents in this conversation.')).toBeTruthy();
   });
 
   it('without the subagents loader the status is not a button', () => {
     setup({ subagents: undefined });
-    expect(screen.queryByRole('button', { name: 'Show subagents' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Show subagents/ })).toBeNull();
   });
 });
 
@@ -159,7 +159,7 @@ describe('lastUserMessageAt', () => {
 
 describe('subagents History', () => {
   const open = async () => {
-    await userEvent.click(screen.getByRole('button', { name: 'Show subagents' }));
+    await userEvent.click(screen.getByRole('button', { name: /Show subagents/ }));
     return screen.findByTestId('side-panel');
   };
 
