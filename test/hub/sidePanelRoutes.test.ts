@@ -149,6 +149,22 @@ describe('GET /api/sessions/:sid/file', () => {
     }
   });
 
+  it('a session in the home folder: its dot folders and secret names are refused with 403 file-private', async () => {
+    const fakeHome = path.dirname(cwd);
+    fs.mkdirSync(path.join(fakeHome, '.config', 'gh'), { recursive: true });
+    fs.writeFileSync(path.join(fakeHome, '.config', 'gh', 'hosts.yml'), 'oauth_token: t');
+    fs.writeFileSync(path.join(cwd, 'credentials.json'), '{}');
+    await register({ sessionId: 's2', transcriptPath: path.join(fakeHome, 's2.jsonl'), cwd: fakeHome, pid: 43 });
+    const u = await start({ home: fakeHome });
+    for (const p of ['.config/gh/hosts.yml', 'proj/credentials.json']) {
+      const r = await get(u, p, 's2');
+      expect(r.status, p).toBe(403);
+      expect(parse(r.body).code).toBe('file-private');
+      expect(r.body.toString()).not.toContain(fakeHome);
+    }
+    expect((await get(u, 'proj/docs/spec.md', 's2')).status).toBe(200);
+  });
+
   it('401 without the token, 404 for an unknown, invalid or removed session', async () => {
     const u = await start();
     expect((await get(u, 'docs/spec.md', 's1', {})).status).toBe(401);

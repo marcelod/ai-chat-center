@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import type { AddressInfo } from 'node:net';
 import type { Provider } from './provider.js';
 import { SessionDisconnectedError, SessionProtocolError, assertSameProtocol } from './provider.js';
@@ -135,7 +136,7 @@ const FOLDER_STATUS = { invalid: 400, outside: 403, 'not-found': 404, denied: 40
 const folderHttpError = (e: FolderError, status: number = FOLDER_STATUS[e.code]) => new HttpError(status, e.message, `folder-${e.code}`);
 
 /** A SessionFileError as an HTTP error (its message never carries a path). */
-const FILE_STATUS = { invalid: 400, type: 415, outside: 403, 'not-found': 404, 'too-large': 413, denied: 403 } as const;
+const FILE_STATUS = { invalid: 400, type: 415, outside: 403, 'not-found': 404, 'too-large': 413, denied: 403, private: 403 } as const;
 const fileHttpError = (e: SessionFileError) => new HttpError(FILE_STATUS[e.code], e.message, `file-${e.code}`);
 
 /** `claude --bg` refused the folder: it was never trusted in Claude Code ("Workspace not trusted"). */
@@ -561,7 +562,10 @@ export async function createHub(
         req.resume();
         throw new HttpError(404, 'no such session');
       }
-      const roots: FileRoots = { base: reg.cwd, roots: [reg.cwd, sessionAttachmentsDir(sid)] };
+      // A session in `~` must not open the home's dot folders (credentials, the app's keys); the app's own
+      // attachments are exempt from that rule.
+      const attachments = sessionAttachmentsDir(sid);
+      const roots: FileRoots = { base: reg.cwd, roots: [reg.cwd, attachments], home: opts.bg?.home ?? os.homedir(), open: [attachments] };
       if (sp[2] === 'file' && method === 'GET') {
         try {
           const f = await readSessionFile(url.searchParams.get('path') ?? '', roots);

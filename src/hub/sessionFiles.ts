@@ -31,7 +31,7 @@ const IMAGES: Record<string, FileType> = {
   '.webp': { kind: 'image', type: 'image/webp', max: MAX_IMAGE_BYTES, image: 'webp' },
 };
 
-export type SessionFileErrorCode = 'invalid' | 'type' | 'outside' | 'not-found' | 'too-large' | 'denied';
+export type SessionFileErrorCode = 'invalid' | 'type' | 'outside' | 'not-found' | 'too-large' | 'denied' | 'private';
 const MESSAGES: Record<SessionFileErrorCode, string> = {
   invalid: 'invalid file path',
   type: 'file type not supported',
@@ -39,6 +39,7 @@ const MESSAGES: Record<SessionFileErrorCode, string> = {
   'not-found': 'no such file',
   'too-large': 'file too large',
   denied: 'permission denied',
+  private: 'private file',
 };
 export class SessionFileError extends Error {
   constructor(public code: SessionFileErrorCode) {
@@ -47,8 +48,12 @@ export class SessionFileError extends Error {
   }
 }
 
-/** `base`: the folder a relative path is taken from (the session folder); `roots`: the folders files may be in. */
-export type FileRoots = { base: string; roots: string[] };
+/**
+ * `base`: the folder a relative path is taken from (the session folder); `roots`: the folders files may be in.
+ * `home`: the user's home, whose dot folders and dot files are never shown (a session may run in `~`);
+ * `open`: folders exempt from the private-file rules (the app's own attachments).
+ */
+export type FileRoots = { base: string; roots: string[]; home?: string; open?: string[] };
 export type SessionFile = { data: Buffer; type: string; kind: FileType['kind'] };
 
 const errCode = (e: unknown) => (e as NodeJS.ErrnoException | null)?.code;
@@ -71,9 +76,9 @@ function typeOf(p: string): FileType | undefined {
 const isPdf = (b: Buffer) => b.subarray(0, 5).toString('latin1') === '%PDF-';
 
 type Root = { given: string; real: string };
-async function realRoots(r: FileRoots): Promise<Root[]> {
+async function realRoots(folders: string[]): Promise<Root[]> {
   const out: Root[] = [];
-  for (const g of r.roots) {
+  for (const g of folders) {
     try {
       out.push({ given: path.resolve(g), real: await fs.realpath(g) });
     } catch {
@@ -81,6 +86,47 @@ async function realRoots(r: FileRoots): Promise<Root[]> {
     }
   }
   return out;
+}
+
+/**
+ * Names that hold secrets wherever they are: `.env*`, keys and certificates, SSH keys, credentials files,
+ * and the dot files with tokens of npm, pip and netrc.
+ */
+const SECRET_NAME = /^\.env(?:\.|$)|\.(?:pem|key)(?:\.|$)|^id_(?:rsa|dsa|ecdsa|ed25519)|credentials|^\.(?:netrc|npmrc|pypirc)(?:\.|$)/i;
+
+/**
+ * A file the panel never shows: anything in a dot folder right in the home (`~/.ssh`, `~/.config`, `~/.claude`,
+ * `~/.ai-chat-center`…), a dot file right in the home, or a file with a secret's name anywhere. `homes`: the
+ * home as given and as real path.
+ */
+function isPrivate(p: string, homes: string[]): boolean {
+  if (SECRET_NAME.test(path.basename(p))) return true;
+  for (const h of homes) {
+    if (!isInside(h, p)) continue;
+    const first = path.relative(h, p).split(path.sep)[0];
+    if (first.startsWith('.') && first !== '.' && first !== '..') return true;
+  }
+  return false;
+}
+
+type Ctx = { roots: Root[]; open: Root[]; homes: string[] };
+async function context(r: FileRoots): Promise<Ctx> {
+  const homes: string[] = [];
+  if (r.home) {
+    homes.push(path.resolve(r.home));
+    try {
+      homes.push(await fs.realpath(r.home));
+    } catch {
+      /* no home: only the given path */
+    }
+  }
+  return { roots: await realRoots(r.roots), open: await realRoots(r.open ?? []), homes };
+}
+
+/** Refuses a private file (see isPrivate), unless it is in an `open` folder. */
+function assertNotPrivate(p: string, ctx: Ctx, which: 'given' | 'real'): void {
+  if (insideAny(ctx.open, p, which)) return;
+  if (isPrivate(p, ctx.homes)) throw new SessionFileError('private');
 }
 
 const insideAny = (roots: Root[], p: string, which: 'given' | 'real' | 'both') =>
@@ -103,13 +149,15 @@ async function assertAncestorInside(given: string, roots: Root[]): Promise<void>
   }
 }
 
-async function resolve(p: unknown, r: FileRoots, roots: Root[]): Promise<{ real: string; ft: FileType; size: number }> {
+async function resolve(p: unknown, r: FileRoots, ctx: Ctx): Promise<{ real: string; ft: FileType; size: number }> {
+  const roots = ctx.roots;
   if (typeof p !== 'string' || !p || p.length > MAX_PATH || p.includes('\0')) throw new SessionFileError('invalid');
   const given = path.resolve(r.base, p);
   const ft = typeOf(given);
   if (!ft) throw new SessionFileError('type');
   // Nothing outside the folders is even looked at (the answer must not tell whether it exists).
   if (!insideAny(roots, given, 'both')) throw new SessionFileError('outside');
+  assertNotPrivate(given, ctx, 'given');
   let real: string;
   try {
     real = await fs.realpath(given);
@@ -121,6 +169,8 @@ async function resolve(p: unknown, r: FileRoots, roots: Root[]): Promise<{ real:
   if (!insideAny(roots, real, 'real')) throw new SessionFileError('outside');
   // A link named `x.md` that points to `.env` is still a `.env`.
   if (typeOf(real) !== ft) throw new SessionFileError('type');
+  // A link to a private file is private.
+  assertNotPrivate(real, ctx, 'real');
   let size: number;
   try {
     const st = await fs.stat(real);
@@ -154,7 +204,7 @@ async function readCapped(file: string, max: number): Promise<Buffer> {
 
 /** A file of the session the panel shows (Markdown, image, text, PDF). Rejects with SessionFileError. */
 export async function readSessionFile(p: unknown, r: FileRoots): Promise<SessionFile> {
-  const { real, ft, size } = await resolve(p, r, await realRoots(r));
+  const { real, ft, size } = await resolve(p, r, await context(r));
   let data: Buffer;
   try {
     // Never more than the size seen (a 20 MB buffer for a small PDF is not allocated).
@@ -175,12 +225,12 @@ export async function readSessionFile(p: unknown, r: FileRoots): Promise<Session
  */
 export async function existingSessionFiles(ps: unknown, r: FileRoots): Promise<string[]> {
   if (!Array.isArray(ps)) return [];
-  const roots = await realRoots(r);
+  const ctx = await context(r);
   const asked = [...new Set(ps.slice(0, MAX_EXISTS).filter((p): p is string => typeof p === 'string'))];
   const out: string[] = [];
   for (const p of asked) {
     try {
-      await resolve(p, r, roots);
+      await resolve(p, r, ctx);
       out.push(p);
     } catch {
       /* not a file the panel can show */
