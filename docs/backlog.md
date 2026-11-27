@@ -41,6 +41,15 @@ Pedido em 2026-11-27. Hoje as respostas rápidas (⚡, 0.6.7) começam com 3 sug
 
 Visto em 2026-11-27 (print do autor, 0.6.7): a "Tela da sessão" abre, mas mostra uma lista longa de linhas soltas ("Doodling…1", "Doodling…42thinking with low effort", "311", "3", "*4" …) em vez da tela como ela está. Causa provável: a saída do `claude logs` é o fluxo do terminal, com os códigos que movem o cursor e redesenham a mesma linha (cada quadro do "pensando"); o app tira os códigos de cor e de cursor e mostra tudo como texto, então cada redesenho vira uma linha nova. Correção: interpretar o fluxo como um terminal faria (por exemplo `@xterm/headless` no hub: escreve o fluxo, lê o buffer final) e mostrar só a tela resultante (as últimas N linhas), com o filtro do link e do token aplicado depois. Outro sinal da mesma causa: os espaços somem ("Falameurei!!!,mandaaioquetápegando…"), porque o terminal usa "avançar o cursor" no lugar de espaços e o app só apaga esse código. Conferir largura e altura iguais às do attach. Vale também para o item "/status bloqueado" (ver "A testar no uso", 0.6.7).
 
+### Painel de subagentes: antigos num "Histórico" fechado
+
+Pedido em 2026-11-27 (print do autor, 0.6.7). Ao clicar em "working" numa sessão longa, o painel de subagentes lista todos os que a sessão já lançou (frentes de rodadas antigas, revisões, correções), todos "Finished", e quem está rodando agora fica perdido no meio. Ideia, no estilo do "Other open sessions" da lista:
+
+- No topo, só os que estão rodando ("Working"); se nenhum, uma linha "Nenhum subagente rodando agora".
+- Embaixo, uma seção fechada por padrão: "Histórico (N)", com os terminados, do mais recente para o mais antigo; ▸/▾ abre e fecha.
+- Opcional: os terminados da rodada atual (desde a última mensagem da pessoa) ficam visíveis logo abaixo dos que rodam, e o resto vai para o Histórico.
+- Ao abrir o painel pelo "agentes trabalhando (N)", ele já mostra os que rodam em cima.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
