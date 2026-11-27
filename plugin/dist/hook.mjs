@@ -47,7 +47,7 @@ function paths() {
 }
 
 // src/core/version.ts
-var VERSION = "0.6.8";
+var VERSION = "0.6.9";
 var PROTOCOL = 2;
 
 // src/hooks/delegate.ts
@@ -779,6 +779,7 @@ var en_default = {
       openFile: "Open {name}",
       codeOf: "Code of {name}",
       pdfHint: "If the PDF does not show here, open it in a new tab or download it.",
+      pdfHintTouch: "Phones often show nothing here: open the PDF in a new tab or download it.",
       pdfOpenTab: "Open in a new tab",
       pdfDownload: "Download",
       diffTitle: "Changes \xB7 {name}",
@@ -796,7 +797,8 @@ var en_default = {
       status: {
         running: "Working",
         finished: "Finished",
-        stale: "No news"
+        stale: "No news",
+        waiting: "Waiting for task"
       },
       duration: {
         lessThanMinute: "less than a minute",
@@ -892,6 +894,7 @@ var en_default = {
     back: "Back",
     unread: "{n} unread",
     loadError: "Could not reach the hub. Retrying\u2026",
+    ended: { title: "The app was updated; this window can be closed", body: "This window lost its connection to the AI Chat Center hub, which was updated or restarted. Type /cc in a session to open the app again." },
     noToken: {
       title: "Open the link shown by /cc",
       body: "This page needs the access link printed by /cc in your terminal session. Open that link to continue."
@@ -1153,6 +1156,7 @@ var pt_BR_default = {
       openFile: "Abrir {name}",
       codeOf: "C\xF3digo de {name}",
       pdfHint: "Se o PDF n\xE3o aparecer aqui, abra numa nova aba ou baixe o arquivo.",
+      pdfHintTouch: "No celular o PDF costuma n\xE3o aparecer aqui: abra numa nova aba ou baixe o arquivo.",
       pdfOpenTab: "Abrir numa nova aba",
       pdfDownload: "Baixar",
       diffTitle: "Altera\xE7\xF5es \xB7 {name}",
@@ -1170,7 +1174,8 @@ var pt_BR_default = {
       status: {
         running: "Trabalhando",
         finished: "Terminado",
-        stale: "Sem novidade"
+        stale: "Sem novidade",
+        waiting: "Aguardando tarefa"
       },
       duration: {
         lessThanMinute: "menos de um minuto",
@@ -1266,6 +1271,7 @@ var pt_BR_default = {
     back: "Voltar",
     unread: "{n} n\xE3o lidas",
     loadError: "N\xE3o foi poss\xEDvel falar com o hub. Tentando de novo\u2026",
+    ended: { title: "O app foi atualizado; esta janela pode ser fechada", body: "Esta janela perdeu a conex\xE3o com o hub do AI Chat Center, que foi atualizado ou reiniciado. Digite /cc numa sess\xE3o para abrir o app de novo." },
     noToken: {
       title: "Abra o link mostrado pelo /cc",
       body: "Esta p\xE1gina precisa do link de acesso exibido pelo /cc na sess\xE3o do terminal. Abra esse link para continuar."

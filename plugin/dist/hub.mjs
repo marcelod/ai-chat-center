@@ -5837,7 +5837,7 @@ async function cleanupAttachments(alive, now = Date.now(), maxAgeMs = ATTACHMENT
 }
 
 // src/core/version.ts
-var VERSION = "0.6.8";
+var VERSION = "0.6.9";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -6722,7 +6722,8 @@ function parseMeta(raw) {
     agentType: str(m.agentType, 100) ?? "",
     model: str(m.model, 100) ? shortModel(str(m.model, 100)) : void 0,
     background: m.requestShape === "background",
-    finished: m.finished === true || m.stoppedByUser === true
+    finished: m.finished === true || m.stoppedByUser === true,
+    stopped: m.stoppedByUser === true
   };
 }
 async function readRange(file, start, length) {
@@ -6762,6 +6763,36 @@ function lastToolOf(lines2) {
   }
   return void 0;
 }
+var NOTIFIED_RE = /<tool-use-id>([^<\s]{1,200})<\/tool-use-id>/g;
+function userText(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map((b) => b && typeof b === "object" && b.type === "text" ? String(b.text ?? "") : "").join("\n");
+}
+function pendingTasks(lines2) {
+  const launched = /* @__PURE__ */ new Set();
+  for (const l of lines2) {
+    const content = l.message?.content;
+    if (l.type === "assistant" && Array.isArray(content)) {
+      for (const b of content) {
+        const u = b;
+        if (u?.type === "tool_use" && typeof u.id === "string" && u.input?.run_in_background === true) launched.add(u.id);
+      }
+    } else if (l.type === "user") {
+      if (Array.isArray(content)) {
+        for (const b of content) {
+          const r = b;
+          if (r?.type !== "tool_result" || typeof r.tool_use_id !== "string") continue;
+          const refused = r.is_error === true || typeof r.content === "string" && r.content.startsWith("<tool_use_error>");
+          if (refused) launched.delete(r.tool_use_id);
+        }
+      }
+      const text = userText(content);
+      if (text.includes("<task-notification>")) for (const m of text.matchAll(NOTIFIED_RE)) launched.delete(m[1]);
+    }
+  }
+  return launched.size;
+}
 async function readTail(file, size, prev, onRead) {
   onRead?.(file);
   let startedAt = prev?.startedAt;
@@ -6773,7 +6804,7 @@ async function readTail(file, size, prev, onRead) {
   const tail = jsonLines(await readRange(file, from, size - from), from > 0);
   let lastAt;
   for (let i = tail.length - 1; i >= 0 && !lastAt; i--) lastAt = str(tail[i].timestamp, 40);
-  return { startedAt, lastAt: lastAt ?? prev?.lastAt, lastTool: lastToolOf(tail) ?? prev?.lastTool };
+  return { startedAt, lastAt: lastAt ?? prev?.lastAt, lastTool: lastToolOf(tail) ?? prev?.lastTool, pending: pendingTasks(tail) };
 }
 async function readAgent(dir, id, onRead) {
   const metaFile = path10.join(dir, `agent-${id}.meta.json`);
@@ -6808,7 +6839,9 @@ function info(id, e, now) {
   if (!e.meta) return null;
   const lineAt = e.tail.lastAt ? Date.parse(e.tail.lastAt) : NaN;
   const last = Math.max(Number.isFinite(lineAt) ? lineAt : 0, e.mtimeMs);
-  const status = e.meta.finished ? "finished" : now - last < STALE_MS ? "running" : "stale";
+  const fresh = now - last < STALE_MS;
+  const waiting = e.meta.finished && !e.meta.stopped && (e.tail.pending ?? 0) > 0 && fresh;
+  const status = waiting ? "waiting" : e.meta.finished ? "finished" : fresh ? "running" : "stale";
   const out = { id, description: e.meta.description, agentType: e.meta.agentType, background: e.meta.background, status };
   if (e.meta.model) out.model = e.meta.model;
   if (e.tail.startedAt) out.startedAt = e.tail.startedAt;
@@ -6846,9 +6879,11 @@ async function runningSubagents(dir, now = Date.now) {
   const t = now();
   let n = 0;
   for (const id of await agentIds(dir)) {
-    if (cache.get(path10.join(dir, `agent-${id}.meta.json`))?.meta?.finished) continue;
+    const known = cache.get(path10.join(dir, `agent-${id}.meta.json`));
+    if (known?.meta?.finished && (known.meta.stopped || !known.tail.pending)) continue;
     const e = await readAgent(dir, id).catch(() => null);
-    if (e && info(id, e, t)?.status === "running") n++;
+    const status = e && info(id, e, t)?.status;
+    if (status === "running" || status === "waiting") n++;
   }
   return n;
 }
@@ -9414,7 +9449,7 @@ data: ${JSON.stringify(c)}
     close: () => new Promise((resolve2) => {
       closed = true;
       stopTimers();
-      for (const r of clients) r.end();
+      for (const r of clients) r.end('event: bye\ndata: {"reason":"stopped"}\n\n');
       clients.clear();
       writePresence(0).catch(() => {
       }).finally(() => {

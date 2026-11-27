@@ -1,6 +1,6 @@
 # Pendências
 
-Itens combinados e deixados para depois. Estado em 2026-11-27, versão 0.6.8. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
+Itens combinados e deixados para depois. Estado em 2026-11-27, versão 0.6.9. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
 
 ## A fazer
 
@@ -13,23 +13,6 @@ No primeiro teste no Windows (2026-11-24), o atalho funcionou, mas a pessoa teve
 ### Sugestão da próxima mensagem
 
 Pedido em 2026-11-25. Investigado na rodada 0.6.2 (Claude Code 2.1.332), **adiado**: a sugestão não fica na transcrição (só `promptSource: "suggestion_accepted"` quando aceita), não fica em `~/.claude` e nenhum hook a entrega. `--prompt-suggestions` só entrega a sugestão no modo `-p`/SDK (`stream-json`), o que exigiria outro modo de sessão (sem `--bg`, `/cc` e attach). Caminho possível depois da ideia 2 (ver a tela da sessão): ler a linha cinza do `claude logs <id>`, com o filtro de token; frágil a cada versão. Bônus barato, se o autor quiser: marcar no app as mensagens com `suggestion_accepted`. Cuidado registrado: `claude --bg --help` cria uma sessão de verdade; para ver a ajuda, use `claude --help`.
-
-### Painel lateral: o que ainda falta
-
-Na 0.6.8 o painel ganhou código com a linha citada, PDF e o diff das edições. Falta, quando o autor quiser: quebrar linhas no visualizador de código, realce de sintaxe melhor (hoje é aproximado e sem dependência) e PDF no celular (o frame costuma ficar vazio; "Abrir numa nova aba" e "Baixar" funcionam). PDF desenhado pelo próprio app exigiria o pdf.js (dependência nova).
-
-### Janela antiga do app fica aberta e vazia depois de um update
-
-Visto em 2026-11-27. Às vezes, depois de `/reload-plugins` e `/cc`, abre uma janela nova do app e a antiga continua aberta, mas vazia (sem conversas nem mensagens). Causa provável: com uma versão nova do plugin, o `/cc` encerra o hub da versão anterior e sobe um novo (`src/hooks/ensureHub.ts`, "stops a hub of another version"). O hub novo não conhece a janela antiga (a presença fica no hub), então abre outra; a antiga perde a conexão e, sem um pareamento válido no hub novo, fica vazia. Confirmar se o token muda ao reiniciar o hub.
-
-Ideias, da melhor para a mais simples:
-- A janela antiga se reconectar sozinha ao hub novo (volta a achar o hub e pede um novo pareamento) e o `/cc` reaproveitá-la em vez de abrir outra. Exige um jeito seguro de parear de novo sem o token na URL.
-- O hub antigo, antes de sair, avisar as páginas abertas ("o app foi atualizado") e elas se fecharem (`window.close()` funciona na janela `--app` aberta pelo hub; numa aba comum, mostrar "Atualizado: feche esta aba").
-- No mínimo, a janela sem conexão mostrar "O app foi atualizado; esta janela pode ser fechada" em vez de ficar vazia.
-
-### Subagente com tarefa própria em segundo plano aparece como terminado
-
-Visto em 2026-11-27 (teste com 3 subagentes de 5, 20 e 60 s): o de 60 s apareceu como terminado **primeiro**. Causa: ele rodou o `sleep 60` como tarefa em segundo plano dele e encerrou o turno depois de ~5 s ("waiting on its own background work"); o Claude Code marca o subagente como `finished` nesse momento, embora ele volte quando a tarefa termina e só então entregue o resultado. O app confia só no `finished` do `agent-<id>.meta.json`. Correção: considerar também as tarefas em segundo plano do próprio subagente (uma ferramenta com `run_in_background` sem a notificação de fim na transcrição dele, ou linhas novas depois do `finished`), mostrando "Aguardando tarefa" em vez de "Finished"; e o "agentes trabalhando (N)" contar esse caso.
 
 ### Entrada por voz
 
@@ -87,6 +70,11 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 22. **Remote Control oficial:** comparar o `claude --remote-control` (acesso pelo claude.ai) com a ideia 21 antes de construir.
 
 ## A testar no uso
+
+- 0.6.9 (specs `docs/superpowers/specs/2026-11-27-old-window-after-update-design.md`, `…-subagent-background-task-design.md`, `…-side-panel-leftovers-design.md`; reiniciar o hub depois do `/reload-plugins`):
+  - Janela antiga depois de um update: só dá para ver no update **seguinte** à 0.6.9 (a janela antiga roda o código da versão dela). Com a janela do app aberta, `/cc` com a versão nova: a antiga se fecha sozinha e a nova abre; numa aba comum aparece "O app foi atualizado; esta janela pode ser fechada"; no Windows, a mesma tela em poucos segundos (lá o hub não consegue avisar antes de sair). Reconectar sozinha ao hub novo ficou de fora (exigiria uma credencial que sobrevive ao reinício ou o token numa URL).
+  - Subagente com tarefa própria: pedir um subagente que rode `sleep 60` com `run_in_background`; enquanto espera, o painel mostra "◔ Aguardando tarefa" em cima e o cabeçalho "agentes trabalhando (1)"; quando ele entrega, "Terminado" e o contador some em ~5 s. Um subagente comum continua indo para "Terminado". Notificação com várias tarefas juntas não foi vista nem testada.
+  - Painel lateral: "Quebrar linhas" no código, lembrado depois de recarregar; cores em `.json`, `.yml`, `.py` com decorator e `.ts` com template string de várias linhas, nos dois temas; PDF no celular com os links em cima e dica própria.
 
 - 0.6.8 (rodada em paralelo; specs em `docs/superpowers/specs/2026-11-27-*`; reiniciar o hub depois do `/reload-plugins` para ele carregar o código novo):
   - Tela da sessão: ⋮ → "Tela da sessão" mostra só a tela atual (sem a lista de quadros "Doodling…"), com espaços entre as palavras e o link do `/cc` como `[app link removed]`. Com a sessão pensando, "Atualizar" algumas vezes mostra sempre um único quadro. Linhas de até 200 colunas, rolando para o lado; dois temas.
@@ -156,6 +144,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## Feito
 
+- 0.6.9: a janela antiga do app se fecha (ou diz "O app foi atualizado") quando o hub é trocado por uma versão nova, e não fica mais vazia ao perder a conexão; subagente esperando a própria tarefa em segundo plano aparece como "Aguardando tarefa" e conta em "agentes trabalhando"; painel lateral com "Quebrar linhas" no código, realce por linguagem e dica do PDF no celular.
 - 0.6.8: tela da sessão interpretada como terminal (só a tela final, com espaços); `/status`, `/cost`, `/context` e afins liberados em segundo plano, abrindo a tela no painel; "Abrir no terminal" com Ptyxis e Console do GNOME (e o terminal real atrás do `x-terminal-emulator`); chamada de agente bloqueada aparece como "Não executado"; painel de subagentes com os que rodam em cima e "Histórico (N)"; respostas rápidas sugeridas pelo uso; painel lateral com código na linha citada, PDF e diff; exportar conversa em Markdown ou PDF; agrupar sessões por projeto (opcional).
 - 0.6.7: janela do app abre maior e lembra o tamanho; tamanho do contexto em pizza na barra; respostas rápidas (⚡); notificações do sistema; painel lateral com Markdown e imagens citados, subagentes da sessão e a tela da sessão (filtrada); estado "agentes trabalhando (N)"; parar, reiniciar e remover sessões em segundo plano pelo ⋮ e limpeza das paradas.
 - 0.6.6: sessões abertas antes de uma atualização passam a rodar a versão mais nova instalada (a partir da próxima); o hub não encurta o intervalo do `claude agents` por um "trabalhando" que a tela mostra como parado; blocos de código com Copiar e Quebrar linhas (texto sem linguagem já quebra); balão com fundo na mensagem "Claude → agente"; a cor ou o degradê do fundo pinta o círculo das iniciais, com iniciais claras ou escuras conforme o contraste; o nome "AI Chat Center" cabe inteiro no topo da lista (título e botões um pouco menores); busca na conversa destaca cada ocorrência, com ↑/↓ (e Enter/Shift+Enter) e contador "i de n", sem esconder as outras mensagens; README revisado e CLAUDE.md criado.
