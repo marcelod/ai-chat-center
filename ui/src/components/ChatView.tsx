@@ -63,6 +63,8 @@ type Props = {
   onRespawn?: () => Promise<void>;
   /** `claude rm` on a running background session, also out of the app (⋮ menu, after a confirmation). */
   onRmBackground?: () => Promise<void>;
+  /** Exports the whole conversation (⋮ menu); `name` is the name shown in the header. Rejects when it failed. */
+  onExport?: (format: 'md' | 'pdf', name: string) => Promise<void>;
   /** The side panel's loaders for this session (spec 2026-11-26-side-panel); absent: no panel, no file links. */
   panel?: PanelApi;
   /** For tests: the clock of the subagent times. */
@@ -331,6 +333,7 @@ function SessionTitle({
   onRespawn,
   onRmBackground,
   onScreen,
+  onExport,
 }: {
   session: SessionView;
   name: string;
@@ -347,6 +350,7 @@ function SessionTitle({
   onRespawn?: () => Promise<void>;
   onRmBackground?: () => Promise<void>;
   onScreen?: () => void;
+  onExport?: (format: 'md' | 'pdf', name: string) => Promise<void>;
 }) {
   const t = useT();
   const [picking, setPicking] = useState(false);
@@ -453,6 +457,7 @@ function SessionTitle({
         onRespawn={onRespawn}
         onRmBackground={onRmBackground}
         onScreen={onScreen}
+        onExport={onExport ? (format) => onExport(format, name) : undefined}
       />
       {picking && onSetBackground && onUploadBackground && (
         <BackgroundPicker
@@ -469,7 +474,7 @@ function SessionTitle({
   );
 }
 
-export function ChatView({ hubVersion, initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, onOpenTerminal, onStop, onRespawn, onRmBackground, panel, now = Date.now, ...bg }: Props) {
+export function ChatView({ hubVersion, initialSearch, session, events, pending, loading, onSend, onUpload, onRetry, onBack, answersFromApp = false, onAnswer, onRelease, onRename, onRemove, onPin, onDisconnect, onResume, onCommand, onOpenTerminal, onStop, onRespawn, onRmBackground, onExport, panel, now = Date.now, ...bg }: Props) {
   const t = useT();
   const lang = useLang();
   const scroller = useRef<HTMLDivElement>(null);
@@ -633,6 +638,7 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
             onRespawn={liveBg ? respawn : undefined}
             onRmBackground={liveBg ? onRmBackground : undefined}
             onScreen={panel?.screen && session.bgId && state !== 'disconnected' ? () => setPanelStack([{ kind: 'screen' }]) : undefined}
+            onExport={onExport}
           />
           <div data-testid="session-info" className="flex min-w-0 flex-col overflow-hidden font-mono text-xs text-muted md:flex-row md:items-baseline md:gap-1.5">
             <span className="min-w-0 truncate md:min-w-[6ch]">{session.cwd}</span>

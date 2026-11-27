@@ -697,5 +697,44 @@ describe('ChatView', () => {
       setup();
       expect(screen.queryByRole('button', { name: 'Conversation actions' })).not.toBeInTheDocument();
     });
+
+    describe('export', () => {
+      const renderExport = (onExport: (format: 'md' | 'pdf', name: string) => Promise<void>) =>
+        render(
+          <LangProvider lang="en">
+            <ChatView session={session()} events={events} pending={[]} loading={false} onSend={vi.fn(async () => {})} onExport={onExport} onBack={() => {}} />
+          </LangProvider>,
+        );
+
+      it('Export conversation opens Markdown and PDF in place; each exports with the shown name and closes the menu', async () => {
+        const onExport = vi.fn(async () => {});
+        renderExport(onExport);
+        await userEvent.click(menuButton());
+        const item = screen.getByRole('menuitem', { name: 'Export conversation' });
+        expect(item).toHaveAttribute('aria-expanded', 'false');
+        expect(screen.queryByRole('menuitem', { name: 'Markdown (.md)' })).not.toBeInTheDocument();
+        await userEvent.click(item);
+        expect(item).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.getByRole('menuitem', { name: 'Markdown (.md)' })).toHaveFocus();
+        await userEvent.click(screen.getByRole('menuitem', { name: 'Markdown (.md)' }));
+        expect(onExport).toHaveBeenCalledWith('md', 'billing-api');
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+        await userEvent.click(menuButton());
+        await userEvent.click(screen.getByRole('menuitem', { name: 'Export conversation' }));
+        await userEvent.click(screen.getByRole('menuitem', { name: 'PDF' }));
+        expect(onExport).toHaveBeenLastCalledWith('pdf', 'billing-api');
+      });
+
+      it('a failed export is said in the menu, without a dialog', async () => {
+        const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+        renderExport(vi.fn(async () => { throw new Error('x'); }));
+        await userEvent.click(menuButton());
+        await userEvent.click(screen.getByRole('menuitem', { name: 'Export conversation' }));
+        await userEvent.click(screen.getByRole('menuitem', { name: 'PDF' }));
+        expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't export");
+        expect(alert).not.toHaveBeenCalled();
+        alert.mockRestore();
+      });
+    });
   });
 });
