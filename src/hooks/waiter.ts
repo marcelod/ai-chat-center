@@ -83,7 +83,7 @@ export interface WaiterOptions {
   lookup?: (sid: string) => Promise<PidLookup>;
   /** How often a waiter with an unknown pid looks it up again. Default 60 s. */
   reresolveMs?: number;
-  /** Time budget, after which the waiter exits 0. Default WAITER_BUDGET_MS. */
+  /** Time budget, after which the waiter exits 0 (checked after each pass: there is always one). Default WAITER_BUDGET_MS. */
   deadlineMs?: number;
   /** Clock for message ages and for the lookup-failure limit. Default Date.now. */
   now?: () => number;
@@ -356,7 +356,6 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
       logError(e);
     }
     for (;;) {
-      if (Date.now() - startedAt >= deadlineMs) return NOTHING;
       // Never exit on a transient fs error: log it, wait, try again.
       try {
         const lockLost = async () => {
@@ -484,6 +483,9 @@ export async function runWaiter(event: WaiterEvent, input: WaiterInput, opts: Wa
       } catch (e) {
         logError(e);
       }
+      // Checked after a pass, never before the first: a slow start (lookups, the sweep) must not end the
+      // waiter before it has looked at the inbox once.
+      if (Date.now() - startedAt >= deadlineMs) return NOTHING;
       await sleep(pollMs);
     }
   } finally {
