@@ -43,8 +43,12 @@ export type ChatEvent =
   | { kind: 'assistant'; id: string; ts: string; text: string }
   /** A message from a teammate or a subagent of the session (not typed by the user): who sent it and what it says. */
   | { kind: 'agent'; id: string; ts: string; from: string; text: string }
-  /** What Claude asked a subagent or sent a teammate (Agent, SendMessage): to whom, and the request. */
-  | { kind: 'toAgent'; id: string; ts: string; to: string; text: string }
+  /**
+   * What Claude asked a subagent or sent a teammate (Agent, SendMessage): to whom, and the request. `blocked`:
+   * the tool result was an error (auto mode or the user denied it), so the agent never ran or got the message;
+   * `blockedReason` is the first line of that error, short and without paths.
+   */
+  | { kind: 'toAgent'; id: string; ts: string; to: string; text: string; blocked?: true; blockedReason?: string }
   /** The "while you were away" summary Claude Code writes (`away_summary`), without its settings hint. */
   | { kind: 'recap'; id: string; ts: string; text: string }
   | { kind: 'actions'; id: string; ts: string; items: ToolAction[] }
