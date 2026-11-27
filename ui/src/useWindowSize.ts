@@ -29,25 +29,30 @@ export function useWindowSize(): void {
     let stopped = false;
     /** The size the hub already has (or the one this page set itself): not sent again. */
     let known: WindowSize | null = null;
-    if (api.openedByPair()) {
-      void api
-        .getConfig()
-        .then((c) => {
-          if (stopped) return;
-          const saved = normalizeWindowSize(c?.windowSize);
-          const target = fitWindowSize(saved ?? DEFAULT_WINDOW_SIZE, { width: window.screen.availWidth, height: window.screen.availHeight });
-          known = target;
-          if (window.outerWidth === target.width && window.outerHeight === target.height) return;
-          try {
-            window.resizeTo(target.width, target.height);
-          } catch {
-            /* the browser may refuse */
-          }
-        })
-        .catch(() => {
-          /* no config: the window keeps the browser's size */
-        });
-    }
+    const paired = api.openedByPair();
+    void api
+      .getConfig()
+      .then((c) => {
+        if (stopped) return;
+        const saved = normalizeWindowSize(c?.windowSize);
+        // A reload (no pairing code): the window is left as it is, but the saved size is known, so a resize
+        // event that leaves it unchanged is not sent again.
+        if (!paired) {
+          if (saved && !known) known = saved;
+          return;
+        }
+        const target = fitWindowSize(saved ?? DEFAULT_WINDOW_SIZE, { width: window.screen.availWidth, height: window.screen.availHeight });
+        known = target;
+        if (window.outerWidth === target.width && window.outerHeight === target.height) return;
+        try {
+          window.resizeTo(target.width, target.height);
+        } catch {
+          /* the browser may refuse */
+        }
+      })
+      .catch(() => {
+        /* no config: the window keeps the browser's size */
+      });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const save = () => {
       const { availWidth, availHeight } = window.screen;
