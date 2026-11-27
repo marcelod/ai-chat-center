@@ -79,8 +79,8 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 ## A testar no uso
 
 - 0.6.7 (rodada em paralelo; specs em `docs/superpowers/specs/2026-11-26-*`):
-  - Janela maior: com o Chrome aberto, `/cc` abre a janela e ela cresce para 1280×860 (ou o último tamanho); redimensionar e esperar 1 s grava `windowSize` em `~/.ai-chat-center/config.json`; maximizada não grava; F5 não muda o tamanho. Conferir no Windows e no macOS.
-  - Contexto: pizza "◔ N%" na barra; balão com tokens, modelo, quanto falta e o último compact; com `usage on` o total passa a ser exato (1M numa sessão 1M); `/compact` derruba o percentual na hora; amarelo ≥80% e vermelho ≥90%; no celular o balão não sai da tela.
+  - Janela maior: ✅ lembra o último tamanho (2026-11-27, `/cc` em outra sessão abriu no tamanho deixado). Falta: abrir sem tamanho guardado (tirar `windowSize` do `~/.ai-chat-center/config.json`) e ver se cresce para 1280×860. Com o Chrome aberto, `/cc` abre a janela e ela cresce para 1280×860 (ou o último tamanho); redimensionar e esperar 1 s grava `windowSize` em `~/.ai-chat-center/config.json`; maximizada não grava; F5 não muda o tamanho. Conferir no Windows e no macOS.
+  - Contexto: ✅ ok no uso (2026-11-27). Pizza "◔ N%" na barra; balão com tokens, modelo, quanto falta e o último compact; com `usage on` o total passa a ser exato (1M numa sessão 1M); `/compact` derruba o percentual na hora; amarelo ≥80% e vermelho ≥90%; no celular o balão não sai da tela.
   - Respostas rápidas (⚡): escolher preenche o campo sem enviar; editar a lista e recarregar mantém.
   - Notificações do sistema (configurações, desligadas por padrão): fim do turno, pedido de permissão e pergunta, só com o app escondido ou sem foco; clicar abre a conversa. Linux, Windows e macOS/Safari.
   - Painel lateral: caminho de `.md` ou imagem citado vira link só se existir; painel abre à direita (tela cheia no celular), X/Esc fecham, links relativos e "Voltar"; anexo de imagem clicável. Imagens remotas nas mensagens agora mostram só o texto alternativo: confirmar se é o desejado.
