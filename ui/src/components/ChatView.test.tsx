@@ -95,6 +95,22 @@ describe('ChatView', () => {
     expect(b.textContent).toContain('More detail. More detail.');
     expect(within(b).getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe('true');
   });
+  it('a blocked call to an agent stays, dimmed, marked "not run" with its reason', () => {
+    const { container } = setup({
+      events: [
+        { kind: 'toAgent', id: 'm1', ts: ts(1), to: 'Teste B', text: 'Do B', blocked: true, blockedReason: 'Permission for this tool use was denied.' },
+        { kind: 'toAgent', id: 'm2', ts: ts(2), to: 'Teste C', text: 'Do C' },
+      ],
+    });
+    const [b, ok] = [...container.querySelectorAll('[data-bubble="toAgent"]')] as HTMLElement[];
+    expect(within(b).getByText('Teste B')).toBeTruthy();
+    expect(b.getAttribute('data-blocked')).toBe('true');
+    expect(b.querySelector('.opacity-60')).toBeTruthy();
+    expect(within(b).getByText('Not run')).toBeTruthy();
+    expect(b.textContent).toContain('Permission for this tool use was denied.');
+    expect(ok.hasAttribute('data-blocked')).toBe(false);
+    expect(ok.textContent).not.toContain('Not run');
+  });
   it('a one-line agent message has nothing to expand', () => {
     const { container } = setup({ events: [{ kind: 'agent', id: 'g2', ts: ts(1), from: 'x', text: 'Feito.' }] });
     const b = container.querySelector('[data-bubble="agent"]') as HTMLElement;

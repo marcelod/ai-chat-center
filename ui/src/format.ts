@@ -35,7 +35,7 @@ function eventPreview(e: ChatEvent | undefined, t: T): string {
     case 'recap':
       return `${t('ui.chat.recap')}: ${e.text}`;
     case 'toAgent':
-      return `→ ${e.to || t('ui.chat.agent')}: ${e.text}`;
+      return `→ ${e.to || t('ui.chat.agent')}: ${e.blocked ? `(${t('ui.chat.notRun')}) ` : ''}${e.text}`;
     case 'actions':
       return e.items[e.items.length - 1]?.summary ?? '';
     case 'question':

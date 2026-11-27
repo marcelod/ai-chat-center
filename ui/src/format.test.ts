@@ -36,3 +36,15 @@ describe('previewText for a pending question', () => {
     expect(previewText(s, (k) => k)).toBe('ui.question.waiting');
   });
 });
+
+describe('previewText for a blocked call to an agent', () => {
+  it('tags it as not run', () => {
+    const s = (blocked: boolean) =>
+      ({
+        sessionId: 's', name: 'n', cwd: '/', state: 'idle', pendingAppMessageIds: [],
+        lastEvent: { kind: 'toAgent', id: 'a', ts: at(14), to: 'Teste B', text: 'Do B', ...(blocked ? { blocked: true } : {}) },
+      }) as SessionView;
+    expect(previewText(s(true), t)).toBe('→ Teste B: (Not run) Do B');
+    expect(previewText(s(false), t)).toBe('→ Teste B: Do B');
+  });
+});

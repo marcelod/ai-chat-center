@@ -167,21 +167,34 @@ export function AgentBubble({ event }: { event: Agent }) {
   );
 }
 
-/** What Claude asked an agent: "Claude → name", collapsed to its first line with a toggle to read it all. */
+/**
+ * What Claude asked an agent: "Claude → name", collapsed to its first line with a toggle to read it all. A blocked
+ * call (its tool result was an error) stays, so the attempt is seen, but dimmed with a "not run" tag and the reason.
+ */
 export function ToAgentBubble({ event }: { event: ToAgent }) {
   const t = useT();
   const name = event.to || t('ui.chat.agent');
+  const blocked = event.blocked === true;
   return (
     <div
       data-bubble="toAgent"
+      data-blocked={blocked ? 'true' : undefined}
       className="md min-w-0 max-w-[min(100%,720px)] self-start break-words rounded-[14px_14px_14px_4px] border border-dashed border-line bg-surface/90 px-3.5 py-2 text-sm leading-relaxed text-muted"
     >
-      <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold">
-        <span>{t('ui.chat.toAgent')}</span>
-        <AgentAvatarSmall name={name} />
-        <span style={{ color: agentIdentity(name).color }}>{name}</span>
+      <p className="mb-1 flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+        <span className={blocked ? 'flex items-center gap-1.5 opacity-60' : 'contents'}>
+          <span>{t('ui.chat.toAgent')}</span>
+          <AgentAvatarSmall name={name} />
+          <span style={{ color: agentIdentity(name).color }}>{name}</span>
+        </span>
+        {blocked && (
+          <span className="rounded border border-danger/60 px-1.5 text-[11px] font-semibold text-danger">{t('ui.chat.notRun')}</span>
+        )}
       </p>
-      <Collapsible text={event.text} />
+      <div className={blocked ? 'opacity-60' : undefined}>
+        <Collapsible text={event.text} />
+      </div>
+      {blocked && event.blockedReason && <p className="mt-1 text-xs italic">{event.blockedReason}</p>}
     </div>
   );
 }

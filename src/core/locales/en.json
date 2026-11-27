@@ -190,6 +190,7 @@
       "agent": "Agent",
       "agentFrom": "Agent {name}",
       "toAgent": "Claude →",
+      "notRun": "Not run",
       "code": {"copy": "Copy", "copied": "Copied", "copyFailed": "Could not copy", "wrap": "Wrap lines", "noWrap": "Don't wrap lines"},
       "showAll": "Show all",
       "recap": "Recap",
