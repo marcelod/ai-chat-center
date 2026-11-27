@@ -31,11 +31,14 @@ export function ScreenView({ load, after, refreshInMs = SCREEN_COMMAND_REFRESH_M
   const loadRef = useRef(load);
   loadRef.current = load;
   const box = useRef<HTMLDivElement>(null);
+  /** The latest load: an older answer that arrives after it (a timer and a manual refresh) is dropped. */
+  const seq = useRef(0);
   const refresh = useCallback(() => {
+    const mine = ++seq.current;
     setState((s) => ({ ...s, loading: true }));
     loadRef.current().then(
-      (text) => setState({ text, at: new Date().toISOString(), loading: false }),
-      (e: unknown) => setState((s) => ({ ...s, error: screenErrorKey(e), loading: false })),
+      (text) => mine === seq.current && setState({ text, at: new Date().toISOString(), loading: false }),
+      (e: unknown) => mine === seq.current && setState((s) => ({ ...s, error: screenErrorKey(e), loading: false })),
     );
   }, []);
   useEffect(refresh, [refresh]);
