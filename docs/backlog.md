@@ -80,7 +80,14 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 16. ★ ✅ 0.6.7 **Notificação do sistema:** quando uma sessão termina o turno, pede permissão ou faz uma pergunta, mesmo com o app minimizado.
 17. **Painel geral:** todas as sessões numa grade, com estado, tempo trabalhando e uso de contexto.
 18. **Uso e custo por sessão:** tokens, contexto ocupado (ver "Tamanho do contexto da conversa" em "A fazer") e o histórico do uso de 5 horas.
-19. **Agrupar sessões por projeto ou pasta** na lista.
+19. **Agrupar sessões por projeto ou pasta** na lista. Desenho combinado com o autor (2026-11-27):
+    - Opcional, **desligado por padrão** ("Agrupar por projeto" nas configurações); desligado, a lista fica como hoje (mais recentes no topo).
+    - Um grupo por pasta da sessão, com o nome da última parte do caminho e a contagem ("ai-chat-center (3)"); o caminho completo ao passar o mouse.
+    - Grupos ordenados pela conversa mais recente de cada um; dentro do grupo, também da mais recente para a mais antiga.
+    - ▾/▸ abre e fecha cada grupo; o app lembra o estado.
+    - Fixadas continuam no topo, fora dos grupos.
+    - Grupo fechado mostra se alguma conversa dele está trabalhando, agentes trabalhando ou tem mensagem nova.
+    - A busca ignora os grupos e mostra os resultados direto.
 
 ### Permissões
 20. **Responder permissões pelo app:** hoje proibido por segurança. Estudar uma versão restrita (só em segundo plano, só ferramentas de leitura, confirmação dupla). Exige decisão do autor antes.
