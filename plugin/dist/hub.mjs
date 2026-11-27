@@ -5080,7 +5080,7 @@ ${i3.join("\n")}
 import fs22 from "node:fs/promises";
 import fsSync from "node:fs";
 import path21 from "node:path";
-import crypto10 from "node:crypto";
+import crypto11 from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 // src/core/paths.ts
@@ -5837,7 +5837,7 @@ async function cleanupAttachments(alive, now = Date.now(), maxAgeMs = ATTACHMENT
 }
 
 // src/core/version.ts
-var VERSION = "0.6.11";
+var VERSION = "0.6.12";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -6011,6 +6011,7 @@ async function transcriptCwd(file) {
 
 // src/core/questions.ts
 import fs11 from "node:fs/promises";
+import crypto8 from "node:crypto";
 import path10 from "node:path";
 var TOOL_USE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 function assertToolUseId(id) {
@@ -6069,11 +6070,19 @@ async function removePending(sid, toolUseId) {
   await removeFile(pendingFile(sid, toolUseId));
   await removeFile(answerFile(sid, toolUseId));
 }
+var payloadOf = (a) => "release" in a ? "release" : `answers:${JSON.stringify(Object.keys(a.answers).sort().map((k) => [k, a.answers[k]]))}`;
+var answerMac = (secret, sid, toolUseId, createdAt, a) => crypto8.createHmac("sha256", secret).update(`ask1|${sid}|${toolUseId}|${createdAt}|${payloadOf(a)}`).digest("hex");
+function signAnswer(sid, toolUseId, a, secret, createdAt = (/* @__PURE__ */ new Date()).toISOString()) {
+  if (sid.includes("|") || toolUseId.includes("|") || createdAt.includes("|")) throw new Error("invalid answer id or time");
+  const answer = "release" in a ? { release: true } : { answers: a.answers };
+  return { ...answer, createdAt, sig: answerMac(secret, sid, toolUseId, createdAt, answer) };
+}
 async function writeAnswer(sid, toolUseId, a) {
   if (await readJson(pendingFile(sid, toolUseId)) === null) return "not-found";
+  const signed = signAnswer(sid, toolUseId, a, await installSecret());
   await ensureDir(paths().questionsDir(sid));
   try {
-    await fs11.writeFile(answerFile(sid, toolUseId), JSON.stringify(a, null, 2), { encoding: "utf8", flag: "wx", mode: FILE_MODE });
+    await fs11.writeFile(answerFile(sid, toolUseId), JSON.stringify(signed, null, 2), { encoding: "utf8", flag: "wx", mode: FILE_MODE });
     return "ok";
   } catch (e) {
     if (e.code === "EEXIST") return "conflict";
@@ -7250,14 +7259,61 @@ function toLive(x) {
   if (o.kind === "background" && isBgId(o.id)) live.bgId = o.id;
   return live;
 }
-async function queryLiveSessions(run = runClaudeAgentsJson) {
+function knownItem(x) {
+  if (!x || typeof x !== "object") return false;
+  const o = x;
+  return typeof o.sessionId === "string" && !!o.sessionId && (o.kind === "interactive" || o.kind === "background");
+}
+function commandFailure(e) {
+  const { code: code2, signal } = e ?? {};
+  if (typeof code2 === "string" && /^E[A-Z0-9_]{1,30}$/.test(code2)) return `command failed (${code2})`;
+  if (typeof code2 === "number" && Number.isInteger(code2)) return `command failed (exit ${code2})`;
+  if (typeof signal === "string" && /^SIG[A-Z0-9]{1,10}$/.test(signal)) return `command failed (${signal})`;
+  return "command failed";
+}
+async function queryLiveSessions(run = runClaudeAgentsJson, onFail) {
+  let out;
   try {
-    const parsed = JSON.parse(await run());
-    if (!Array.isArray(parsed)) return null;
-    return parsed.map(toLive).filter((s) => s !== null);
-  } catch {
+    out = await run();
+  } catch (e) {
+    onFail?.(commandFailure(e));
     return null;
   }
+  let parsed;
+  try {
+    parsed = JSON.parse(out);
+  } catch {
+    onFail?.("not JSON");
+    return null;
+  }
+  if (!Array.isArray(parsed)) {
+    onFail?.("not a list");
+    return null;
+  }
+  const live = parsed.map(toLive).filter((s) => s !== null);
+  if (parsed.length > 0 && !parsed.some(knownItem)) {
+    onFail?.("unknown item shape");
+    return null;
+  }
+  return live;
+}
+var FAILED_LOOKUP_LOG_MS = 5 * 6e4;
+function loggedLiveLookup(log, opts = {}) {
+  const everyMs = opts.everyMs ?? FAILED_LOOKUP_LOG_MS;
+  const now = opts.now ?? Date.now;
+  let lastAt = null;
+  let held = 0;
+  const note = (reason) => {
+    const t = now();
+    if (lastAt !== null && t - lastAt < everyMs) {
+      held++;
+      return;
+    }
+    log(`claude agents lookup failed: ${reason}${held ? ` (${held} more since the last note)` : ""}`);
+    lastAt = t;
+    held = 0;
+  };
+  return () => queryLiveSessions(opts.run, note);
 }
 function toStopped(x) {
   if (!x || typeof x !== "object") return null;
@@ -7818,7 +7874,7 @@ var ClaudeCodeProvider = class {
 import http from "node:http";
 import fs21 from "node:fs/promises";
 import path20 from "node:path";
-import crypto9 from "node:crypto";
+import crypto10 from "node:crypto";
 import os8 from "node:os";
 
 // src/shared/windowSize.ts
@@ -7856,7 +7912,7 @@ async function writePresence(clients) {
 }
 
 // src/hub/pairing.ts
-import crypto8 from "node:crypto";
+import crypto9 from "node:crypto";
 var PAIR_TTL_MS = 6e4;
 var MAX_PENDING = 5;
 var CODE_RE = /^[0-9a-f]{64}$/;
@@ -7870,7 +7926,7 @@ function createPairing(now = Date.now) {
     issue() {
       prune2();
       while (pending.size >= MAX_PENDING) pending.delete(pending.keys().next().value);
-      const code2 = crypto8.randomBytes(32).toString("hex");
+      const code2 = crypto9.randomBytes(32).toString("hex");
       pending.set(code2, now() + PAIR_TTL_MS);
       return code2;
     },
@@ -7880,7 +7936,7 @@ function createPairing(now = Date.now) {
       const given = Buffer.from(code2);
       let match = null;
       for (const c of pending.keys()) {
-        if (crypto8.timingSafeEqual(given, Buffer.from(c))) match = c;
+        if (crypto9.timingSafeEqual(given, Buffer.from(c))) match = c;
       }
       if (match === null) return false;
       pending.delete(match);
@@ -8882,7 +8938,7 @@ function tokenOk(given, expected) {
   const a = Buffer.from(given);
   const b = Buffer.from(expected);
   if (a.length !== b.length) return false;
-  return crypto9.timingSafeEqual(a, b);
+  return crypto10.timingSafeEqual(a, b);
 }
 function readRawBody(req, max) {
   return new Promise((resolve2, reject) => {
@@ -8989,7 +9045,7 @@ data: ${JSON.stringify(c)}
   };
   let pollGen = 0;
   let inFlight = null;
-  const POLL_TIMEOUT_MS = 1e4;
+  const pollTimeoutMs = opts.pollTimeoutMs ?? 1e4;
   const schedulePoll = (gen) => {
     pollTimer = setTimeout(async () => {
       if (gen !== pollGen) return;
@@ -8999,23 +9055,35 @@ data: ${JSON.stringify(c)}
       }
       let changes = [];
       let timer;
+      let settled = false;
+      let timedOut = false;
       try {
         const real = Promise.resolve().then(() => provider.poll());
         const tracked = real.then(
-          () => {
+          (late) => {
+            settled = true;
+            if (!timedOut || closed || gen !== pollGen) return;
+            log(`late poll ended with ${late.length} change(s)`);
+            for (const c of late) fanOut(c);
           },
-          () => {
+          (e) => {
+            settled = true;
+            if (timedOut) log(`late poll failed: ${e.message}`);
           }
         ).finally(() => {
           if (inFlight === tracked) inFlight = null;
         });
         inFlight = tracked;
         const timeout = new Promise((resolve2) => {
-          timer = setTimeout(() => resolve2(null), POLL_TIMEOUT_MS);
+          timer = setTimeout(() => {
+            if (settled) return;
+            timedOut = true;
+            resolve2(null);
+          }, pollTimeoutMs);
         });
         const r = await Promise.race([real, timeout]);
-        if (r === null) log("poll timed out");
-        else changes = r;
+        if (timedOut) log("poll timed out");
+        else if (r) changes = r;
       } catch (e) {
         log(`poll failed: ${e.message}`);
       } finally {
@@ -9436,7 +9504,8 @@ data: ${JSON.stringify(c)}
         if (live === null) throw new HttpError(503, "could not list running sessions");
         const l = live.find((x) => x.sessionId === sid);
         if (!l || l.kind !== "background" || !l.bgId) throw new HttpError(404, "not a background session");
-        if (l.status !== "idle" || typing.has(sid)) throw new HttpError(409, "session is busy");
+        const turnOn = l.status === "busy" ? await isBusy(sid) : l.status !== "idle";
+        if (turnOn || typing.has(sid)) throw new HttpError(409, "session is busy");
         typing.add(sid);
         try {
           await type(l.bgId, text);
@@ -9660,14 +9729,14 @@ async function prune(log) {
 async function rotateToken() {
   const file = paths().token;
   await ensureDir(path21.dirname(file));
-  const t = crypto10.randomBytes(32).toString("hex");
+  const t = crypto11.randomBytes(32).toString("hex");
   await writeFileAtomic600(file, t);
   await fs22.chmod(file, 384).catch(() => {
   });
   return t;
 }
 async function writeFileAtomic600(file, data) {
-  const tmp = `${file}.${process.pid}.${crypto10.randomUUID()}.tmp`;
+  const tmp = `${file}.${process.pid}.${crypto11.randomUUID()}.tmp`;
   try {
     await fs22.writeFile(tmp, data, { mode: 384 });
     await withFsRetry(() => fs22.rename(tmp, file));
@@ -9740,14 +9809,17 @@ async function startHub(opts = {}) {
     const base = pickPort();
     const tries = base === 0 ? 1 : 11;
     const staticDir = path21.join(path21.dirname(fileURLToPath(import.meta.url)), "ui");
-    const provider = opts.listLive ? new ClaudeCodeProvider(opts.listLive) : new ClaudeCodeProvider();
+    const listLive = opts.listLive ?? loggedLiveLookup(log);
+    const provider = new ClaudeCodeProvider(listLive);
+    const bind = opts.createHub ?? createHub;
     let lastErr;
     for (let i = 0; i < tries && !hub; i++) {
       try {
-        hub = await createHub({ provider, token, port: base + i, staticDir, log });
+        hub = await bind({ provider, token, port: base + i, staticDir, log, bg: { listLive } });
       } catch (e) {
         lastErr = e;
-        if (e.code !== "EADDRINUSE") throw e;
+        const code2 = e.code;
+        if (code2 !== "EADDRINUSE" && code2 !== "EACCES") throw e;
       }
     }
     if (!hub) throw lastErr;

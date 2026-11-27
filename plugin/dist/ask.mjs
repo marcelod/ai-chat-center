@@ -47,7 +47,7 @@ function paths() {
 }
 
 // src/core/version.ts
-var VERSION = "0.6.11";
+var VERSION = "0.6.12";
 
 // src/hooks/delegate.ts
 var FLAG = /* @__PURE__ */ Symbol.for("ai-chat-center.delegated");
@@ -132,7 +132,7 @@ async function delegateToNewer(entry, moduleUrl) {
 }
 
 // src/hooks/ask.ts
-import fs3 from "node:fs";
+import fs4 from "node:fs";
 import path6 from "node:path";
 
 // src/core/fsAtomic.ts
@@ -180,6 +180,30 @@ async function readJson(file) {
 
 // src/core/registry.ts
 import path4 from "node:path";
+
+// src/core/secret.ts
+import fs3 from "node:fs/promises";
+var SECRET_RE = /^[0-9a-f]{64}$/;
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function readOnce() {
+  try {
+    const s = (await fs3.readFile(paths().secret, "utf8")).trim();
+    return SECRET_RE.test(s) ? { ok: true, secret: s } : { ok: false, reason: "malformed" };
+  } catch (e) {
+    return { ok: false, reason: e.code === "ENOENT" ? "missing" : "unreadable" };
+  }
+}
+async function loadSecret(opts = {}) {
+  const tries = opts.tries ?? 5;
+  const delayMs = opts.delayMs ?? 250;
+  let r = { ok: false, reason: "unreadable" };
+  for (let i = 0; i < tries; i++) {
+    r = await readOnce();
+    if (r.ok || r.reason === "missing") return r;
+    if (i < tries - 1) await sleep(delayMs);
+  }
+  return r;
+}
 
 // src/core/lock.ts
 function isAlive(pid) {
@@ -255,6 +279,7 @@ async function appPresent(now = Date.now()) {
 }
 
 // src/core/questions.ts
+import crypto2 from "node:crypto";
 import { rmSync } from "node:fs";
 import path5 from "node:path";
 var TOOL_USE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -301,6 +326,25 @@ function removePendingSync(sid, toolUseId) {
 async function removeAnswer(sid, toolUseId) {
   await removeFile(answerFile(sid, toolUseId));
 }
+var payloadOf = (a) => "release" in a ? "release" : `answers:${JSON.stringify(Object.keys(a.answers).sort().map((k) => [k, a.answers[k]]))}`;
+var answerMac = (secret, sid, toolUseId, createdAt, a) => crypto2.createHmac("sha256", secret).update(`ask1|${sid}|${toolUseId}|${createdAt}|${payloadOf(a)}`).digest("hex");
+function verifyAnswer(a, sid, toolUseId, secret) {
+  if (!isObj(a) || typeof a.sig !== "string" || typeof a.createdAt !== "string" || a.createdAt.includes("|")) return false;
+  const hasRelease = Object.hasOwn(a, "release");
+  if (hasRelease === Object.hasOwn(a, "answers")) return false;
+  let answer;
+  if (hasRelease) {
+    if (a.release !== true) return false;
+    answer = { release: true };
+  } else {
+    const ans = a.answers;
+    if (!isObj(ans) || !Object.values(ans).every((v) => typeof v === "string")) return false;
+    answer = { answers: ans };
+  }
+  const want = Buffer.from(answerMac(secret, sid, toolUseId, a.createdAt, answer));
+  const got = Buffer.from(a.sig);
+  return want.length === got.length && crypto2.timingSafeEqual(want, got);
+}
 async function readAnswer(sid, toolUseId) {
   return readJson(answerFile(sid, toolUseId));
 }
@@ -339,12 +383,12 @@ function abortActiveSync() {
   }
   if (!a.waiting) return;
   try {
-    fs3.rmSync(paths().waitingFile(a.sid), { force: true });
+    fs4.rmSync(paths().waitingFile(a.sid), { force: true });
   } catch (e) {
     logError(e);
   }
 }
-var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
 async function runAsk(input, opts = {}) {
   try {
     return await ask(input, opts);
@@ -382,6 +426,14 @@ async function ask(input, opts) {
       if (!r || !isActive(r) || r.connectedAt !== reg.connectedAt) return null;
       if (parentPid != null && !isAlive2(parentPid)) return null;
       const a = await readAnswer(sid, id);
+      if (a && !await signedByHub(a, sid, id, start)) {
+        logError(`ignored an answer for ${sid}/${id}: not signed by the hub for this question; the terminal dialog answers it`);
+        released = true;
+        mine.waiting = false;
+        await removeAnswer(sid, id);
+        await setWaiting(sid, "question");
+        return null;
+      }
       if (a && "release" in a && a.release === true) {
         released = true;
         mine.waiting = false;
@@ -403,12 +455,18 @@ async function ask(input, opts) {
         await removeAnswer(sid, id);
       }
       if (Date.now() - start >= deadlineMs) return null;
-      await sleep(pollMs);
+      await sleep2(pollMs);
     }
   } finally {
     if (active === mine) active = null;
     await cleanup(sid, id, released);
   }
+}
+async function signedByHub(a, sid, id, start) {
+  const at = typeof a.createdAt === "string" ? Date.parse(a.createdAt) : NaN;
+  if (!Number.isFinite(at) || at < start - 1e3) return false;
+  const secret = await loadSecret();
+  return secret.ok && verifyAnswer(a, sid, id, secret.secret);
 }
 async function cleanup(sid, id, released) {
   try {
@@ -426,8 +484,8 @@ async function cleanup(sid, id, released) {
 function logError(e) {
   try {
     const dir = paths().logDir;
-    fs3.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
-    fs3.appendFileSync(path6.join(dir, "ask.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${e instanceof Error ? e.stack ?? e.message : String(e)}
+    fs4.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+    fs4.appendFileSync(path6.join(dir, "ask.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${e instanceof Error ? e.stack ?? e.message : String(e)}
 `);
   } catch {
   }

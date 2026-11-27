@@ -47,7 +47,7 @@ function paths() {
 }
 
 // src/core/version.ts
-var VERSION = "0.6.11";
+var VERSION = "0.6.12";
 var PROTOCOL = 2;
 
 // src/hooks/delegate.ts
@@ -666,9 +666,13 @@ async function lookupClaudePid(sessionId, opts = {}) {
   try {
     const list2 = JSON.parse(await (opts.run ?? runClaudeAgentsJson)());
     if (!Array.isArray(list2)) return { ok: false };
+    let known = 0;
     for (const a of list2) {
-      if (a?.sessionId === sessionId && typeof a.pid === "number") return { ok: true, pid: a.pid };
+      if (!a || typeof a.sessionId !== "string" || !a.sessionId) continue;
+      if (a.kind === "interactive" || a.kind === "background" || typeof a.pid === "number") known++;
+      if (a.sessionId === sessionId && typeof a.pid === "number") return { ok: true, pid: a.pid };
     }
+    if (list2.length > 0 && known === 0) return { ok: false };
     return { ok: true, pid: null };
   } catch {
     return { ok: false };
@@ -726,15 +730,45 @@ function toLive(x) {
   if (o.kind === "background" && isBgId(o.id)) live.bgId = o.id;
   return live;
 }
-async function queryLiveSessions(run = runClaudeAgentsJson) {
+function knownItem(x) {
+  if (!x || typeof x !== "object") return false;
+  const o = x;
+  return typeof o.sessionId === "string" && !!o.sessionId && (o.kind === "interactive" || o.kind === "background");
+}
+function commandFailure(e) {
+  const { code: code2, signal } = e ?? {};
+  if (typeof code2 === "string" && /^E[A-Z0-9_]{1,30}$/.test(code2)) return `command failed (${code2})`;
+  if (typeof code2 === "number" && Number.isInteger(code2)) return `command failed (exit ${code2})`;
+  if (typeof signal === "string" && /^SIG[A-Z0-9]{1,10}$/.test(signal)) return `command failed (${signal})`;
+  return "command failed";
+}
+async function queryLiveSessions(run = runClaudeAgentsJson, onFail) {
+  let out;
   try {
-    const parsed = JSON.parse(await run());
-    if (!Array.isArray(parsed)) return null;
-    return parsed.map(toLive).filter((s) => s !== null);
-  } catch {
+    out = await run();
+  } catch (e) {
+    onFail?.(commandFailure(e));
     return null;
   }
+  let parsed;
+  try {
+    parsed = JSON.parse(out);
+  } catch {
+    onFail?.("not JSON");
+    return null;
+  }
+  if (!Array.isArray(parsed)) {
+    onFail?.("not a list");
+    return null;
+  }
+  const live = parsed.map(toLive).filter((s) => s !== null);
+  if (parsed.length > 0 && !parsed.some(knownItem)) {
+    onFail?.("unknown item shape");
+    return null;
+  }
+  return live;
 }
+var FAILED_LOOKUP_LOG_MS = 5 * 6e4;
 
 // src/core/meta.ts
 var MODE_RE = /^[a-zA-Z]{1,24}$/;
@@ -843,6 +877,7 @@ async function runWaiter(event, input, opts = {}) {
   const lookupFn = opts.lookup ?? ((id) => lookupClaudePid(id));
   const lookupFailMs = opts.lookupFailMs ?? LOOKUP_FAIL_EXIT_MS;
   const discardOld = event === "start" && input.source === "resume";
+  const resumedAt = now();
   const statusFn = opts.status ?? liveStatus;
   const staleBusyMs = opts.staleBusyMs ?? STALE_BUSY_MS;
   const busyCheckMs = opts.busyCheckMs ?? BUSY_CHECK_MS;
@@ -953,7 +988,6 @@ async function runWaiter(event, input, opts = {}) {
       logError(e);
     }
     for (; ; ) {
-      if (Date.now() - startedAt >= deadlineMs) return NOTHING;
       try {
         const lockLost = async () => {
           if (await readLock(lock) === mine) return false;
@@ -1048,7 +1082,10 @@ async function runWaiter(event, input, opts = {}) {
           let msgs = drained;
           if (discardOld) {
             const cutoff = now() - MAX_MESSAGE_AGE_MS;
-            msgs = drained.filter((m) => !(Date.parse(m.createdAt) < cutoff));
+            msgs = drained.filter((m) => {
+              const at = Date.parse(m.createdAt);
+              return !(at < cutoff && at < resumedAt);
+            });
             if (msgs.length < drained.length) {
               logError(`discarded ${drained.length - msgs.length} message(s) older than 30 min on resume of session ${sid}`);
             }
@@ -1066,6 +1103,7 @@ async function runWaiter(event, input, opts = {}) {
       } catch (e) {
         logError(e);
       }
+      if (Date.now() - startedAt >= deadlineMs) return NOTHING;
       await sleep3(pollMs);
     }
   } finally {

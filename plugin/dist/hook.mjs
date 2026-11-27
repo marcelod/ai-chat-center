@@ -47,7 +47,7 @@ function paths() {
 }
 
 // src/core/version.ts
-var VERSION = "0.6.11";
+var VERSION = "0.6.12";
 var PROTOCOL = 2;
 
 // src/hooks/delegate.ts
@@ -1562,9 +1562,13 @@ async function lookupClaudePid(sessionId, opts = {}) {
   try {
     const list = JSON.parse(await (opts.run ?? runClaudeAgentsJson)());
     if (!Array.isArray(list)) return { ok: false };
+    let known = 0;
     for (const a of list) {
-      if (a?.sessionId === sessionId && typeof a.pid === "number") return { ok: true, pid: a.pid };
+      if (!a || typeof a.sessionId !== "string" || !a.sessionId) continue;
+      if (a.kind === "interactive" || a.kind === "background" || typeof a.pid === "number") known++;
+      if (a.sessionId === sessionId && typeof a.pid === "number") return { ok: true, pid: a.pid };
     }
+    if (list.length > 0 && known === 0) return { ok: false };
     return { ok: true, pid: null };
   } catch {
     return { ok: false };

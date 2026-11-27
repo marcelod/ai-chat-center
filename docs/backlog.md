@@ -1,6 +1,6 @@
 # Pendências
 
-Itens combinados e deixados para depois. Estado em 2026-11-27, versão 0.6.11. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
+Itens combinados e deixados para depois. Estado em 2026-11-27, versão 0.6.12. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
 
 ## A fazer
 
@@ -8,15 +8,7 @@ Itens combinados e deixados para depois. Estado em 2026-11-27, versão 0.6.11. S
 
 Revisão do app inteiro (funcionalidade, velocidade, segurança, arquitetura, outros sistemas), feita por cinco agentes só de leitura. ✔ = conferido no código pelo coordenador.
 
-**Na 0.6.12 (em andamento):**
-- ✔ CI vermelho no Windows: três testes da tela da sessão não fixam a plataforma (a rota responde 501 no Windows de propósito); testes do waiter com prazo de 150 ms falham em máquina lenta (`waiter.test.ts`, quatro testes).
-- ✔ Leitura do hub que passa de 10 s perde as mensagens daquela leitura até recarregar (`server.ts`, "poll timed out"; uma ocorrência no log em 2026-11-27).
-- ✔ Depois de `--resume`, mensagem do app que espera mais de 30 min por um turno longo é apagada sem entrega (`waiter.ts`, `discardOld` vale a vida toda do waiter).
-- ✔ Envio que falhou: mandar outra mensagem apaga o texto da que falhou (`Composer.tsx`, `deliver`).
-- ✔ Comandos (`/model`, `/effort`, `/compact`) recusados como "ocupada" enquanto o app mostra a sessão parada (tarefa em segundo plano); regra diferente da do app.
-- ✔ Porta reservada no Windows (Hyper-V/WSL) dá EACCES e o hub desiste em vez de tentar a próxima (`main.ts`).
-- ✔ `claude agents` com formato desconhecido vira "nenhuma sessão": no Windows ou sem pid conhecido, as sessões são marcadas encerradas e a fila apagada (`status.ts`, `claudePid.ts`).
-- Respostas da múltipla escolha (e seus arquivos de controle) não são assinadas: algo que escreva em `~/.ai-chat-center` forja uma resposta (`ask.ts`, `questions.ts`).
+Os oito itens corrigidos foram para a 0.6.12 (ver "Feito" e "A testar no uso").
 
 **Para depois:**
 - Velocidade do hub: a cada 0,5 s relê os arquivos de todas as sessões, inclusive as encerradas de 30 dias (5–12% de um núcleo medido); duas listagens por ciclo; meta lida 2–3 vezes.
@@ -114,6 +106,13 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## A testar no uso
 
+- 0.6.12 (correções da revisão geral; specs `docs/superpowers/specs/2026-11-27-review-fixes-{a,b,c}-design.md`):
+  - Múltipla escolha respondida no app: com `/cc answers on` e um turno mandado do app, pedir ao Claude uma pergunta de múltipla escolha e responder no app. O Claude recebe a resposta e o `ask.log` não ganha a linha "not signed by the hub". Na troca de versão, até o hub novo subir, a resposta vai para o diálogo do terminal (esperado).
+  - Envio que falhou: com o hub fora do ar, mandar "A" (aparece "não foi possível enviar / Tentar de novo"). Com o hub de volta, mandar "B": B chega e "A" volta para a caixa.
+  - Sessão em segundo plano com tarefa rodando depois do turno (o app mostra parada): `/model`, `/effort` e `/compact` passam, sem "sessão ocupada".
+  - Sessão retomada com turno longo no terminal (>30 min): a mensagem do app mandada durante o turno é entregue no fim.
+  - Log do hub: um "poll timed out" agora vem seguido de "late poll ended with N change(s)", e as respostas aparecem sem recarregar.
+  - CI no Windows verde depois do push.
 - 0.6.11 (spec `docs/superpowers/specs/2026-11-27-transcript-relocate-design.md`):
   - Sessão que entra num worktree: conectar com `/cc` na pasta do projeto, pedir para entrar num worktree e mandar um prompt. Em até ~10 s o app segue mostrando as respostas, sem o aviso "não salva o histórico"; pasta e branch passam a ser as do worktree; o painel de subagentes continua funcionando. O aviso que o autor viu depois do `/cc` na 0.6.10 não foi reproduzido: conferir se some.
   - Depois do arquivo mudar de lugar (ou de um novo `/cc`), o histórico não volta como mensagens novas nem não lidas.
@@ -201,6 +200,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## Feito
 
+- 0.6.12: correções da revisão geral: CI do Windows (testes da tela e do waiter); leitura lenta do hub não perde mensagens; mensagem do app não é descartada depois de retomar; texto de envio que falhou não se perde; comandos seguem a regra de ocupada do app; porta reservada no Windows; formato desconhecido do `claude agents` conta como falha; respostas da múltipla escolha assinadas pelo hub.
 - 0.6.11: sessão que entra num worktree continua no app (o hub acha a transcrição movida e atualiza caminho e pasta); histórico não é reenviado quando o arquivo muda; margens laterais e chips da barra inferior menores.
 - 0.6.10: correções da auditoria das 0.6.5–0.6.9: Markdown não remonta os blocos a cada atualização; regex de caminhos e filtro de link/token sem lentidão em textos longos; `claude.cmd` plantado na pasta do projeto não roda no Windows; painel recusa arquivos ocultos da home e nomes de segredo; bloco forjado em subagente aparece como texto; erros de parar/reiniciar/remover sem a saída do `claude`; limpeza de sessões paradas não esconde a viva; ajustes de interface (submenu no celular, links além de 200 caminhos, leitor de tela, plurais e números em pt-BR, polling com a aba oculta, Esc no diálogo) e testes que faltavam.
 - 0.6.9: a janela antiga do app se fecha (ou diz "O app foi atualizado") quando o hub é trocado por uma versão nova, e não fica mais vazia ao perder a conexão; subagente esperando a própria tarefa em segundo plano aparece como "Aguardando tarefa" e conta em "agentes trabalhando"; painel lateral com "Quebrar linhas" no código, realce por linguagem e dica do PDF no celular.
