@@ -181,6 +181,31 @@ describe('TranscriptParser with a session key', () => {
     expect(push(p, msg)).toEqual([{ kind: 'agent', id: 'u', ts: 't', from: 'Fix stuck busy status', text: 'Branch `fix/busy-status`, one commit.\n\n- **Fix:** done.' }]);
     expect(push(p, msg.replace('ac80710dab2f9dfc0', 'unknown1'))).toMatchObject([{ kind: 'agent', from: '' }]);
   });
+  it('an Agent call whose result is an error (blocked by auto mode) is marked not run, with a short reason and no paths', () => {
+    const p = new TranscriptParser([K]);
+    const call = (uuid: string, id: string, name = 'Agent') =>
+      p.push({ type: 'assistant', uuid, timestamp: 't', message: { content: [{ type: 'text', text: 'Launching.' }, { type: 'tool_use', id, name, input: { description: 'Teste B', prompt: 'Do B' } }] } });
+    const result = (uuid: string, id: string, content: unknown, isError = true) =>
+      p.push({ type: 'user', uuid, timestamp: 't', message: { content: [{ type: 'tool_result', tool_use_id: id, content, ...(isError ? { is_error: true } : {}) }] } });
+    // Live: the call shows first, as sent; the error result updates that same event.
+    expect(call('a1', 'tu1')).toMatchObject([{ kind: 'assistant' }, { kind: 'toAgent', id: 'a1#1', to: 'Teste B' }]);
+    const denied =
+      '<tool_use_error>Permission for this tool use was denied. The auto mode classifier blocked writing to /home/me/secret/project/.env and ~/.ssh/id_rsa.</tool_use_error>\nIf you have other tasks, continue with them.';
+    const upd = result('r1', 'tu1', [{ type: 'text', text: denied }]);
+    expect(upd).toHaveLength(1);
+    const ev = upd[0]!;
+    expect(ev).toMatchObject({ kind: 'toAgent', id: 'a1#1', to: 'Teste B', text: 'Do B', blocked: true });
+    if (ev.kind !== 'toAgent') throw new Error('not toAgent');
+    expect(ev.blockedReason).toMatch(/^Permission for this tool use was denied\./);
+    expect(ev.blockedReason).not.toMatch(/\/home|\.ssh|<tool_use_error>|other tasks/);
+    expect(ev.blockedReason!.length).toBeLessThanOrEqual(200);
+    // Task (older name) too, with a string result; a long reason is cut.
+    call('a2', 'tu2', 'Task');
+    expect(result('r2', 'tu2', 'x'.repeat(500))).toMatchObject([{ kind: 'toAgent', id: 'a2#1', blocked: true }]);
+    // A launched agent (no error) is left as it was: no update event.
+    call('a3', 'tu3');
+    expect(result('r3', 'tu3', 'Async agent launched successfully.\nagentId: abc123 (internal ID)', false)).toEqual([]);
+  });
   it('a newer peer entry (isMeta, origin.kind peer) is shown with the origin name and report', () => {
     const p = new TranscriptParser([K]);
     const content = 'Another Claude session sent a message:\n<agent-message from="afac8">\n[Subagent hand-back] frame. The report follows:\n  Sources: docs\n</agent-message>\n\nThat "other Claude session" is an agent.';

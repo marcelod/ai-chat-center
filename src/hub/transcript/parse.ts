@@ -7,6 +7,7 @@ import { toolDiff } from '../../shared/diff.js';
 
 type ActionsEvent = Extract<ChatEvent, { kind: 'actions' }>;
 type QuestionEvent = Extract<ChatEvent, { kind: 'question' }>;
+type ToAgentEvent = Extract<ChatEvent, { kind: 'toAgent' }>;
 
 const RESULT_MAX = 2000;
 /** An older Claude Code also wrote a queued prompt as a user entry when it ran: shown once. */
@@ -103,6 +104,24 @@ function toAgentMessage(name: string, input: unknown): { to: string; text: strin
     return { to: str(input.to), text: truncate(text, RESULT_MAX * 4) };
   }
   return null;
+}
+
+/** Longest reason shown on a blocked agent message. */
+const BLOCKED_REASON_MAX = 200;
+const PATH_RE = /(?<=^|[\s"'`(=:,])(?:~|[A-Za-z]:)?[\\/][^\s"'`),;]+/g;
+
+/**
+ * Why an agent call did not run, for the chat: the first line of the error with its tags taken out, paths
+ * replaced by "…" (they may name private files), and cut to BLOCKED_REASON_MAX.
+ */
+export function blockedReason(full: string): string {
+  const line = full
+    .replace(/<\/?[\w-]+>/g, '\n')
+    .split('\n')
+    .map((l) => l.trim())
+    .find(Boolean) ?? '';
+  const clean = line.replace(PATH_RE, '…');
+  return clean.length > BLOCKED_REASON_MAX ? `${clean.slice(0, BLOCKED_REASON_MAX - 1).trimEnd()}…` : clean;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -209,6 +228,8 @@ export class TranscriptParser {
   private agentNames = new Map<string, string>();
   /** Agent tool_use id → the name shown for that agent, until its result gives the agent id. */
   private agentCalls = new Map<string, string>();
+  /** Agent/SendMessage tool_use id → its toAgent event, until its result says whether it ran. */
+  private toAgentCalls = new Map<string, ToAgentEvent>();
   /** Queued prompts already shown, to skip a later identical user entry. */
   private queued: { text: string; at: number }[] = [];
   /** The last `!` command, for the output entry that follows it. */
@@ -330,7 +351,9 @@ export class TranscriptParser {
         const toAgent = toAgentMessage(name, block.input);
         if (toAgent) {
           this.open = null; // a message to an agent closes the group, like text
-          created.push({ kind: 'toAgent', id: uuid, ts, ...toAgent });
+          const ev: ToAgentEvent = { kind: 'toAgent', id: uuid, ts, ...toAgent };
+          created.push(ev);
+          this.toAgentCalls.set(block.id, ev);
           if (name !== 'SendMessage') this.agentCalls.set(block.id, toAgent.to);
           continue;
         }
@@ -460,6 +483,17 @@ export class TranscriptParser {
         this.questions.delete(block.tool_use_id);
         out.set(q.id, { ...q });
         continue;
+      }
+      const sent = this.toAgentCalls.get(block.tool_use_id);
+      if (sent) {
+        this.toAgentCalls.delete(block.tool_use_id);
+        if (block.is_error === true) {
+          // Denied (auto mode, the user) or failed: the agent never ran; the same event is shown as blocked.
+          sent.blocked = true;
+          const reason = blockedReason(resultText(block.content));
+          if (reason) sent.blockedReason = reason;
+          out.set(sent.id, { ...sent });
+        }
       }
       const call = this.agentCalls.get(block.tool_use_id);
       if (call !== undefined) {
