@@ -1,6 +1,6 @@
 # Pendências
 
-Itens combinados e deixados para depois. Estado em 2026-11-27, versão 0.6.9. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
+Itens combinados e deixados para depois. Estado em 2026-11-27, versão 0.6.10. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
 
 ## A fazer
 
@@ -70,6 +70,16 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 22. **Remote Control oficial:** comparar o `claude --remote-control` (acesso pelo claude.ai) com a ideia 21 antes de construir.
 
 ## A testar no uso
+
+- 0.6.10 (correções da auditoria das 0.6.5–0.6.9; spec `docs/superpowers/specs/2026-11-27-audit-fixes-design.md`):
+  - Blocos de código: ligar "Quebrar linhas" e "Copiar" enquanto outra sessão trabalha; a escolha não some. Com a busca aberta, ↑/↓ continua destacando dentro de código.
+  - Painel numa sessão rodando em `~`: `~/.claude/.credentials.json` ou `~/.config/gh/hosts.yml` citados não viram link e, abertos direto, mostram "não pode ser mostrado"; arquivos comuns e anexos abrem; um `.log` sendo escrito abre sem "grande demais". Efeito colateral: sessão numa pasta `~/.algo` (ex. `~/.dotfiles`) não abre arquivos no painel.
+  - Celular (390 px): chip do modelo → Esforço; a lista de esforço fica inteira na tela.
+  - Limpar sessões paradas: parar, retomar e depois limpar a entrada antiga; a conversa viva continua.
+  - Recusa do `claude rm`: o app mostra só "Não foi possível remover…" e o motivo vai para `~/.ai-chat-center/logs/`. Decisão pendente: voltar a mostrar o motivo sem caminhos e sem token (recomendado).
+  - Painel de subagentes aberto com a aba oculta: sem consultas a cada 3 s; ao voltar, atualiza na hora.
+  - pt-BR: "1 subagente trabalhando", tokens como "1,3M".
+  - Windows: criar ou retomar uma sessão numa pasta com um `claude.cmd` falso; o falso não roda.
 
 - 0.6.9 (specs `docs/superpowers/specs/2026-11-27-old-window-after-update-design.md`, `…-subagent-background-task-design.md`, `…-side-panel-leftovers-design.md`; reiniciar o hub depois do `/reload-plugins`):
   - Janela antiga depois de um update: só dá para ver no update **seguinte** à 0.6.9 (a janela antiga roda o código da versão dela). Com a janela do app aberta, `/cc` com a versão nova: a antiga se fecha sozinha e a nova abre; numa aba comum aparece "O app foi atualizado; esta janela pode ser fechada"; no Windows, a mesma tela em poucos segundos (lá o hub não consegue avisar antes de sair). Reconectar sozinha ao hub novo ficou de fora (exigiria uma credencial que sobrevive ao reinício ou o token numa URL).
@@ -144,6 +154,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## Feito
 
+- 0.6.10: correções da auditoria das 0.6.5–0.6.9: Markdown não remonta os blocos a cada atualização; regex de caminhos e filtro de link/token sem lentidão em textos longos; `claude.cmd` plantado na pasta do projeto não roda no Windows; painel recusa arquivos ocultos da home e nomes de segredo; bloco forjado em subagente aparece como texto; erros de parar/reiniciar/remover sem a saída do `claude`; limpeza de sessões paradas não esconde a viva; ajustes de interface (submenu no celular, links além de 200 caminhos, leitor de tela, plurais e números em pt-BR, polling com a aba oculta, Esc no diálogo) e testes que faltavam.
 - 0.6.9: a janela antiga do app se fecha (ou diz "O app foi atualizado") quando o hub é trocado por uma versão nova, e não fica mais vazia ao perder a conexão; subagente esperando a própria tarefa em segundo plano aparece como "Aguardando tarefa" e conta em "agentes trabalhando"; painel lateral com "Quebrar linhas" no código, realce por linguagem e dica do PDF no celular.
 - 0.6.8: tela da sessão interpretada como terminal (só a tela final, com espaços); `/status`, `/cost`, `/context` e afins liberados em segundo plano, abrindo a tela no painel; "Abrir no terminal" com Ptyxis e Console do GNOME (e o terminal real atrás do `x-terminal-emulator`); chamada de agente bloqueada aparece como "Não executado"; painel de subagentes com os que rodam em cima e "Histórico (N)"; respostas rápidas sugeridas pelo uso; painel lateral com código na linha citada, PDF e diff; exportar conversa em Markdown ou PDF; agrupar sessões por projeto (opcional).
 - 0.6.7: janela do app abre maior e lembra o tamanho; tamanho do contexto em pizza na barra; respostas rápidas (⚡); notificações do sistema; painel lateral com Markdown e imagens citados, subagentes da sessão e a tela da sessão (filtrada); estado "agentes trabalhando (N)"; parar, reiniciar e remover sessões em segundo plano pelo ⋮ e limpeza das paradas.

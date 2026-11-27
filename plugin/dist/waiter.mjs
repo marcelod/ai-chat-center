@@ -47,7 +47,7 @@ function paths() {
 }
 
 // src/core/version.ts
-var VERSION = "0.6.9";
+var VERSION = "0.6.10";
 var PROTOCOL = 2;
 
 // src/hooks/delegate.ts
@@ -647,7 +647,15 @@ function runClaudeAgentsJson(platform = process.platform, all = false) {
     execFile(
       win ? `claude ${argv.join(" ")}` : "claude",
       win ? [] : argv,
-      { cwd: os3.homedir(), shell: win, windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
+      {
+        cwd: os3.homedir(),
+        // Windows: never a claude.cmd from the current folder, the PATH only (see bgSessions.runClaude).
+        ...win ? { env: { ...process.env, NoDefaultCurrentDirectoryInExePath: "1" } } : {},
+        shell: win,
+        windowsHide: true,
+        timeout: 5e3,
+        maxBuffer: 10 * 1024 * 1024
+      },
       (err, stdout) => err ? reject(err) : resolve(String(stdout))
     );
   });

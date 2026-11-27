@@ -5837,7 +5837,7 @@ async function cleanupAttachments(alive, now = Date.now(), maxAgeMs = ATTACHMENT
 }
 
 // src/core/version.ts
-var VERSION = "0.6.9";
+var VERSION = "0.6.10";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -6167,6 +6167,42 @@ function toolDiff(edits) {
   return { lines: kept, added, removed, ...truncated ? { truncated: true } : {} };
 }
 
+// src/shared/redact.ts
+var ANSI = [
+  // OSC, DCS, PM, APC end at the next ESC: a lazy match across ESCs rescanned the rest of the text from every
+  // opener without a terminator (quadratic). An opener left alone is removed by the two-byte rule below.
+  /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g,
+  // OSC (window title, hyperlinks)
+  /\x1b[P^_][^\x1b]*\x1b\\/g,
+  // DCS, PM, APC
+  /\x1b\[[0-?]*[ -/]*[@-~]/g,
+  // CSI (colours, cursor)
+  /\x1b[()*+][0-9A-Za-z]/g,
+  // character sets
+  /\x1b[@-Z\\-_=>78]/g
+  // other two-byte escapes
+];
+var CONTROL = /[\x00-\x08\x0b-\x1f\x7f]/g;
+var APP_URL = /(?:(?<![a-z])[a-z][a-z0-9+.-]{0,31}:\/\/)?(?:127\.\d+\.\d+\.\d+|localhost|\[::1\]|0\.0\.0\.0)(?::\d+)?(?:[/?#]\S*)?/gi;
+var LINK_PARTS = /[#?&](?:token|pair)=\S*/gi;
+var HEX_RUN = /[0-9a-fA-F]{16,}/g;
+function stripTerminalCodes(raw) {
+  let s = raw;
+  for (const re of ANSI) s = s.replace(re, "");
+  return s.replace(/\r\n?/g, "\n").replace(CONTROL, "");
+}
+function redactAppSecrets(text, secrets = []) {
+  let s = text;
+  for (const secret of secrets) if (secret && secret.length >= 8) s = s.split(secret).join("[redacted]");
+  return s.replace(APP_URL, "[app link removed]").replace(LINK_PARTS, "[app link removed]").replace(HEX_RUN, "[redacted]");
+}
+var APP_BLOCK = /\[AI Chat Center message id=[^\]\s]+(?: key=[^\]\s]+)?\]\n([\s\S]*?)\n\[\/AI Chat Center message\]|\[AI Chat Center message(?: [^\]\n]*)?\]|\[\/AI Chat Center message\]/g;
+var unescapeBody2 = (t) => t.replace(/\[(\\*)\\\/AI Chat Center message\]/g, "[$1/AI Chat Center message]");
+function stripAppBlocks(text) {
+  if (!text.includes("AI Chat Center message")) return text;
+  return text.replace(APP_BLOCK, (_m, body2) => body2 === void 0 ? "" : unescapeBody2(body2)).trim();
+}
+
 // src/hub/transcript/parse.ts
 var RESULT_MAX = 2e3;
 var QUEUED_DEDUP_MS = 30 * 6e4;
@@ -6455,7 +6491,8 @@ var TranscriptParser = class {
     if (created.length > 1) created.forEach((e, i) => e.id = `${uuid}#${i}`);
     return [...updated, ...created].map((e) => e.kind === "actions" ? snapshot(e) : e);
   }
-  user(uuid, ts, content, toolUseResult) {
+  user(uuid, ts, input, toolUseResult) {
+    const content = this.opts.sidechain && typeof input === "string" ? stripAppBlocks(input) : input;
     if (Array.isArray(content)) {
       const out = this.toolResults(content, toolUseResult);
       const parts = promptParts(content);
@@ -6468,7 +6505,7 @@ var TranscriptParser = class {
       return out;
     }
     if (typeof content !== "string") return [];
-    const msgs = unwrapMessages(content, this.keys);
+    const msgs = this.opts.sidechain ? [] : unwrapMessages(content, this.keys);
     if (msgs.length > 0) {
       this.open = null;
       return withIndex(
@@ -6707,6 +6744,16 @@ function subagentsDir(transcriptPath, sid) {
   return path10.join(path10.dirname(transcriptPath), sid, "subagents");
 }
 var cache = /* @__PURE__ */ new Map();
+var MAX_CACHE = 2e3;
+var cacheLimit = MAX_CACHE;
+function remember(key, e) {
+  cache.delete(key);
+  cache.set(key, e);
+  for (const k of cache.keys()) {
+    if (cache.size <= cacheLimit) break;
+    cache.delete(k);
+  }
+}
 var str = (v, max = 300) => typeof v === "string" ? v.slice(0, max) : void 0;
 function parseMeta(raw) {
   let j;
@@ -6819,7 +6866,10 @@ async function readAgent(dir, id, onRead) {
   const metaKey = `${metaSt.size}:${metaSt.mtimeMs}`;
   const logKey = logSt ? `${logSt.size}:${logSt.mtimeMs}` : "";
   const prev = cache.get(metaFile);
-  if (prev && prev.metaKey === metaKey && prev.logKey === logKey) return prev;
+  if (prev && prev.metaKey === metaKey && prev.logKey === logKey) {
+    remember(metaFile, prev);
+    return prev;
+  }
   let meta = prev?.meta ?? null;
   if (!prev || prev.metaKey !== metaKey) {
     meta = null;
@@ -6832,7 +6882,7 @@ async function readAgent(dir, id, onRead) {
   if (logSt && (!prev || prev.logKey !== logKey)) tail = await readTail(logFile, logSt.size, prev?.tail, onRead).catch(() => tail);
   if (!tail.startedAt && logSt && logSt.birthtimeMs > 0) tail = { ...tail, startedAt: new Date(logSt.birthtimeMs).toISOString() };
   const entry = { metaKey, meta, logKey, tail, mtimeMs: logSt?.mtimeMs ?? metaSt.mtimeMs };
-  cache.set(metaFile, entry);
+  remember(metaFile, entry);
   return entry;
 }
 function info(id, e, now) {
@@ -6910,7 +6960,15 @@ function runClaudeAgentsJson(platform = process.platform, all = false) {
     execFile(
       win ? `claude ${argv.join(" ")}` : "claude",
       win ? [] : argv,
-      { cwd: os3.homedir(), shell: win, windowsHide: true, timeout: 5e3, maxBuffer: 10 * 1024 * 1024 },
+      {
+        cwd: os3.homedir(),
+        // Windows: never a claude.cmd from the current folder, the PATH only (see bgSessions.runClaude).
+        ...win ? { env: { ...process.env, NoDefaultCurrentDirectoryInExePath: "1" } } : {},
+        shell: win,
+        windowsHide: true,
+        timeout: 5e3,
+        maxBuffer: 10 * 1024 * 1024
+      },
       (err, stdout) => err ? reject(err) : resolve2(String(stdout))
     );
   });
@@ -6968,10 +7026,12 @@ function runClaude(argv, cwd, configDir, deps, timeoutMs) {
       resolve2(r);
     };
     let child;
+    const env = cleanEnv(deps.env ?? process.env, configDirFor(configDir, deps.home, platform));
+    if (win) env.NoDefaultCurrentDirectoryInExePath = "1";
     try {
       child = spawn(cmd, args, {
         cwd,
-        env: cleanEnv(deps.env ?? process.env, configDirFor(configDir, deps.home, platform)),
+        env,
         shell: win,
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"]
@@ -7589,6 +7649,7 @@ var ClaudeCodeProvider = class {
     for (const m of [this.readers, this.pending, this.lastEvents, this.lastModels, this.misses, this.agentCounts]) {
       for (const sid of [...m.keys()]) if (!known.has(sid)) m.delete(sid);
     }
+    for (const [sid, until] of [...this.restarting]) if (!known.has(sid) || this.now() >= until) this.restarting.delete(sid);
     const { connected, others, usage } = await this.listSessions();
     const signature = JSON.stringify({
       others,
@@ -7648,6 +7709,7 @@ import http from "node:http";
 import fs20 from "node:fs/promises";
 import path19 from "node:path";
 import crypto9 from "node:crypto";
+import os8 from "node:os";
 
 // src/shared/windowSize.ts
 var MIN_WINDOW_SIZE = { width: 480, height: 480 };
@@ -8183,7 +8245,8 @@ var MESSAGES2 = {
   outside: "file outside the session folder",
   "not-found": "no such file",
   "too-large": "file too large",
-  denied: "permission denied"
+  denied: "permission denied",
+  private: "private file"
 };
 var SessionFileError = class extends Error {
   constructor(code2) {
@@ -8210,15 +8273,40 @@ function typeOf(p) {
   }
 }
 var isPdf = (b) => b.subarray(0, 5).toString("latin1") === "%PDF-";
-async function realRoots(r) {
+async function realRoots(folders) {
   const out = [];
-  for (const g of r.roots) {
+  for (const g of folders) {
     try {
       out.push({ given: path17.resolve(g), real: await fs18.realpath(g) });
     } catch {
     }
   }
   return out;
+}
+var SECRET_NAME = /^\.env(?:\.|$)|\.(?:pem|key)(?:\.|$)|^id_(?:rsa|dsa|ecdsa|ed25519)|credentials|^\.(?:netrc|npmrc|pypirc)(?:\.|$)/i;
+function isPrivate(p, homes) {
+  if (SECRET_NAME.test(path17.basename(p))) return true;
+  for (const h of homes) {
+    if (!isInside(h, p)) continue;
+    const first = path17.relative(h, p).split(path17.sep)[0];
+    if (first.startsWith(".") && first !== "." && first !== "..") return true;
+  }
+  return false;
+}
+async function context(r) {
+  const homes = [];
+  if (r.home) {
+    homes.push(path17.resolve(r.home));
+    try {
+      homes.push(await fs18.realpath(r.home));
+    } catch {
+    }
+  }
+  return { roots: await realRoots(r.roots), open: await realRoots(r.open ?? []), homes };
+}
+function assertNotPrivate(p, ctx, which) {
+  if (insideAny(ctx.open, p, which)) return;
+  if (isPrivate(p, ctx.homes)) throw new SessionFileError("private");
 }
 var insideAny = (roots, p, which) => roots.some((r) => which !== "real" && isInside(r.given, p) || which !== "given" && isInside(r.real, p));
 async function assertAncestorInside2(given, roots) {
@@ -8236,12 +8324,14 @@ async function assertAncestorInside2(given, roots) {
     }
   }
 }
-async function resolve(p, r, roots) {
+async function resolve(p, r, ctx) {
+  const roots = ctx.roots;
   if (typeof p !== "string" || !p || p.length > MAX_PATH2 || p.includes("\0")) throw new SessionFileError("invalid");
   const given = path17.resolve(r.base, p);
   const ft = typeOf(given);
   if (!ft) throw new SessionFileError("type");
   if (!insideAny(roots, given, "both")) throw new SessionFileError("outside");
+  assertNotPrivate(given, ctx, "given");
   let real;
   try {
     real = await fs18.realpath(given);
@@ -8252,6 +8342,7 @@ async function resolve(p, r, roots) {
   }
   if (!insideAny(roots, real, "real")) throw new SessionFileError("outside");
   if (typeOf(real) !== ft) throw new SessionFileError("type");
+  assertNotPrivate(real, ctx, "real");
   let size;
   try {
     const st = await fs18.stat(real);
@@ -8267,13 +8358,12 @@ async function resolve(p, r, roots) {
 async function readCapped(file, max) {
   const fh = await fs18.open(file, "r");
   try {
-    const buf = Buffer.alloc(max + 1);
+    const buf = Buffer.alloc(max);
     let n = 0;
-    for (; ; ) {
-      const { bytesRead } = await fh.read(buf, n, buf.length - n, n);
+    while (n < max) {
+      const { bytesRead } = await fh.read(buf, n, max - n, n);
       if (bytesRead === 0) break;
       n += bytesRead;
-      if (n > max) throw new SessionFileError("too-large");
     }
     return buf.subarray(0, n);
   } finally {
@@ -8281,7 +8371,7 @@ async function readCapped(file, max) {
   }
 }
 async function readSessionFile(p, r) {
-  const { real, ft, size } = await resolve(p, r, await realRoots(r));
+  const { real, ft, size } = await resolve(p, r, await context(r));
   let data;
   try {
     data = await readCapped(real, Math.min(ft.max, size));
@@ -8296,12 +8386,12 @@ async function readSessionFile(p, r) {
 }
 async function existingSessionFiles(ps, r) {
   if (!Array.isArray(ps)) return [];
-  const roots = await realRoots(r);
+  const ctx = await context(r);
   const asked = [...new Set(ps.slice(0, MAX_EXISTS).filter((p) => typeof p === "string"))];
   const out = [];
   for (const p of asked) {
     try {
-      await resolve(p, r, roots);
+      await resolve(p, r, ctx);
       out.push(p);
     } catch {
     }
@@ -8313,36 +8403,6 @@ async function existingSessionFiles(ps, r) {
 var import_headless = __toESM(require_xterm_headless(), 1);
 import { spawn as nodeSpawn3 } from "node:child_process";
 import os7 from "node:os";
-
-// src/shared/redact.ts
-var ANSI = [
-  /\x1b\][\s\S]*?(?:\x07|\x1b\\)/g,
-  // OSC (window title, hyperlinks)
-  /\x1b[P^_][\s\S]*?\x1b\\/g,
-  // DCS, PM, APC
-  /\x1b\[[0-?]*[ -/]*[@-~]/g,
-  // CSI (colours, cursor)
-  /\x1b[()*+][0-9A-Za-z]/g,
-  // character sets
-  /\x1b[@-Z\\-_=>78]/g
-  // other two-byte escapes
-];
-var CONTROL = /[\x00-\x08\x0b-\x1f\x7f]/g;
-var APP_URL = /(?:(?<![a-z])[a-z][a-z0-9+.-]*:\/\/)?(?:127\.\d+\.\d+\.\d+|localhost|\[::1\]|0\.0\.0\.0)(?::\d+)?(?:[/?#]\S*)?/gi;
-var LINK_PARTS = /[#?&](?:token|pair)=\S*/gi;
-var HEX_RUN = /[0-9a-fA-F]{16,}/g;
-function stripTerminalCodes(raw) {
-  let s = raw;
-  for (const re of ANSI) s = s.replace(re, "");
-  return s.replace(/\r\n?/g, "\n").replace(CONTROL, "");
-}
-function redactAppSecrets(text, secrets = []) {
-  let s = text;
-  for (const secret of secrets) if (secret && secret.length >= 8) s = s.split(secret).join("[redacted]");
-  return s.replace(APP_URL, "[app link removed]").replace(LINK_PARTS, "[app link removed]").replace(HEX_RUN, "[redacted]");
-}
-
-// src/hub/sessionScreen.ts
 var MAX_SCREEN_CHARS = 2e5;
 var MAX_BYTES = 512 * 1024;
 var TIMEOUT_MS = 1e4;
@@ -8704,7 +8764,7 @@ var HttpError = class extends Error {
 };
 var FOLDER_STATUS = { invalid: 400, outside: 403, "not-found": 404, denied: 403 };
 var folderHttpError = (e, status = FOLDER_STATUS[e.code]) => new HttpError(status, e.message, `folder-${e.code}`);
-var FILE_STATUS = { invalid: 400, type: 415, outside: 403, "not-found": 404, "too-large": 413, denied: 403 };
+var FILE_STATUS = { invalid: 400, type: 415, outside: 403, "not-found": 404, "too-large": 413, denied: 403, private: 403 };
 var fileHttpError = (e) => new HttpError(FILE_STATUS[e.code], e.message, `file-${e.code}`);
 var isUntrustedError = (error) => /not trusted|trust (this|the) folder|trust dialog/i.test(error);
 function tokenOk(given, expected) {
@@ -8774,7 +8834,8 @@ async function createHub(opts) {
   const listStopped = opts.bg?.listStopped ?? (() => queryStoppedBackground());
   const manage = opts.bg?.manage ?? ((a, id, configDir) => manageBackground(a, id, configDir));
   const managing = /* @__PURE__ */ new Set();
-  const runManage = async (key, action, bgId, configDir) => {
+  const runManage = async (action, bgId, configDir) => {
+    const key = `bg:${bgId}`;
     if (managing.has(key)) throw new HttpError(409, "another action is under way", "busy");
     managing.add(key);
     let r;
@@ -8786,8 +8847,8 @@ async function createHub(opts) {
       managing.delete(key);
     }
     if (!r.ok) {
-      log(`claude ${action} ${bgId} failed: ${r.error}`);
-      throw new HttpError(502, r.error, "claude-failed");
+      log(`claude ${action} ${bgId} failed: ${redactAppSecrets(r.error)}`);
+      throw new HttpError(502, `claude ${action} failed`, "claude-failed");
     }
   };
   const folders = async () => knownFolders(await listRegistrations(), await listLive(), opts.bg?.folderExists);
@@ -9063,7 +9124,7 @@ data: ${JSON.stringify(c)}
       if (list2 === null) throw new HttpError(503, "could not list background sessions");
       const s = list2.find((x) => x.bgId === id);
       if (!s) throw new HttpError(409, "not a stopped background session", "not-stopped");
-      await runManage(`bg:${id}`, "rm", id, void 0);
+      await runManage("rm", id, void 0);
       let reg = null;
       try {
         assertSessionId(s.sessionId);
@@ -9071,7 +9132,7 @@ data: ${JSON.stringify(c)}
       } catch {
         reg = null;
       }
-      if (reg && !isRemoved(reg)) await markRemoved(s.sessionId);
+      if (reg && !isRemoved(reg) && !isActive(reg)) await markRemoved(s.sessionId);
       fanOut({ type: "sessions" });
       return sendJson(res, 200, { ok: true });
     }
@@ -9090,7 +9151,8 @@ data: ${JSON.stringify(c)}
         req.resume();
         throw new HttpError(404, "no such session");
       }
-      const roots = { base: reg.cwd, roots: [reg.cwd, sessionAttachmentsDir(sid)] };
+      const attachments = sessionAttachmentsDir(sid);
+      const roots = { base: reg.cwd, roots: [reg.cwd, attachments], home: opts.bg?.home ?? os8.homedir(), open: [attachments] };
       if (sp[2] === "file" && method === "GET") {
         try {
           const f = await readSessionFile(url.searchParams.get("path") ?? "", roots);
@@ -9296,7 +9358,7 @@ data: ${JSON.stringify(c)}
           bgId = stopped.find((x) => x.sessionId === sid)?.bgId;
           if (!bgId) throw new HttpError(409, "not a background session", "not-background");
         }
-        await runManage(sid, action, bgId, reg.configDir);
+        await runManage(action, bgId, reg.configDir);
         if (action === "stop") await markDisconnected(sid, "exited");
         else if (action === "rm") await markRemoved(sid);
         else provider.expectRestart?.(sid);
