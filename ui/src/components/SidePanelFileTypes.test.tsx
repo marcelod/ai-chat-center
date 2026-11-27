@@ -25,6 +25,7 @@ const files: Record<string, BlobPart> = {
   'docs/spec.md': '# Spec\nsecond line\n',
   'docs/a.pdf': '%PDF-1.7\n%%EOF\n',
   'docs/fake.pdf': '<html><script>alert(1)</script>',
+  '/home/me/.ai-chat-center/attachments/s1/0123456789abcdef-report.pdf': '%PDF-1.4\n',
 };
 
 function api(): PanelApi & { file: ReturnType<typeof vi.fn> } {
@@ -117,6 +118,13 @@ describe('side panel: PDF', () => {
     expect(made.at(-1)?.type).toBe('application/pdf');
     expect(within(panel).getByRole('link', { name: 'Download' })).toHaveAttribute('download', 'a.pdf');
     expect(within(panel).getByRole('link', { name: 'Open in a new tab' })).toHaveAttribute('href', frame.getAttribute('src'));
+  });
+
+  it('a PDF attachment opens in the panel', async () => {
+    const att = '/home/me/.ai-chat-center/attachments/s1/0123456789abcdef-report.pdf';
+    setup([{ kind: 'user', id: 'u1', ts, text: 'read this', origin: 'app', attachments: ['report.pdf'], attachmentPaths: [att] }]);
+    await userEvent.click(await screen.findByRole('button', { name: 'Open report.pdf' }));
+    expect(await within(screen.getByTestId('side-panel')).findByTitle('0123456789abcdef-report.pdf')).toBeTruthy();
   });
 
   it('refuses bytes that are not a PDF', async () => {
