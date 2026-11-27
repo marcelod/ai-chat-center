@@ -4,6 +4,12 @@ Itens combinados e deixados para depois. Estado em 2026-11-27, versão 0.6.10. S
 
 ## A fazer
 
+### Sessão que entra num worktree some do app ("não salva o histórico")
+
+Visto em 2026-11-27 (0.6.10), sessão `856fd72f` do meetaone-v4. A sessão se conectou com `/cc` na pasta do projeto e depois entrou num worktree (`.claude/worktrees/site-publico`). O Claude Code move a transcrição para a pasta de projeto do worktree (`~/.claude/projects/<projeto>--claude-worktrees-<nome>/<id>.jsonl`), mas o registro no hub (`~/.ai-chat-center/sessions/<id>.json`) continua com o `transcriptPath` e o `cwd` antigos. O hub não acha mais o arquivo, mostra o aviso "Esta sessão não salva o histórico" (cujo texto fala de variáveis `CLAUDE_CODE_*`, que não é o caso aqui) e deixa de mostrar as respostas novas. O que já tinha sido lido continua na tela. As mensagens do app continuam chegando ao terminal.
+
+Correção sugerida: quando o `transcriptPath` registrado sumir, procurar `<id>.jsonl` nas outras pastas de `~/.claude/projects` (ou nas pastas `*--claude-worktrees-*` do mesmo projeto), atualizar o registro (`transcriptPath` e `cwd`) e seguir lendo. Os subagentes ficam junto, em `<id>/subagents/`. O aviso só aparece se o arquivo não estiver em lugar nenhum. Contorno até lá: `/cc` de novo na sessão. Ainda não testado se ele grava o caminho novo.
+
 ### Instalação mais fácil no Windows
 
 Em avaliação pelo autor (2026-11-24).
