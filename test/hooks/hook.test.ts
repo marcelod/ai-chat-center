@@ -316,6 +316,14 @@ describe('hook', () => {
     expect(fs.readFileSync(path.join(paths().logDir, 'hook.log'), 'utf8')).toContain('hub did not start');
   });
 
+  it('/cc re-run records the transcript path and folder Claude Code reports now (session moved into a worktree)', async () => {
+    await register({ sessionId: 's1', transcriptPath: '/p/-x/s1.jsonl', cwd: '/x', pid: 42, connectedAt: '2020-01-01T00:00:00.000Z' });
+    await handleHook('prompt-submit', inp({ prompt: '/cc', transcript_path: '/p/-x--claude-worktrees-w/s1.jsonl', cwd: '/x/.claude/worktrees/w' }), ctx());
+    const r = await getRegistration('s1');
+    expect(r?.transcriptPath).toBe('/p/-x--claude-worktrees-w/s1.jsonl');
+    expect(r?.cwd).toBe('/x/.claude/worktrees/w');
+    expect(r?.connectedAt).toBe('2020-01-01T00:00:00.000Z');
+  });
   it('/cc re-run keeps connectedAt; after /cc off it starts fresh', async () => {
     await register({ sessionId: 's1', transcriptPath: '/t', cwd: '/x', pid: 42, connectedAt: '2020-01-01T00:00:00.000Z' });
     await handleHook('prompt-submit', inp({ prompt: '/cc' }), ctx());
