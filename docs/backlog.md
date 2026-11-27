@@ -37,6 +37,12 @@ Os oito itens corrigidos foram para a 0.6.12 (ver "Feito" e "A testar no uso").
 - `scripts/smoke-flow.mjs` reescreve o atalho real do app de quem roda.
 - Node 18.0–18.1: `closeAllConnections` não existe (README promete 18+).
 
+### Chip de modelo e esforço só atualiza depois da próxima resposta
+
+Visto em 2026-11-27 (0.6.11). O autor trocou o modelo e o esforço pelo chip do app. Apareceu "✓ /model finished", mas o chip continuou mostrando o modelo antigo ("Opus 5.5"). Só mostrou o valor certo depois que ele mandou uma pergunta e o Claude respondeu. Provável causa: o chip lê o modelo da última resposta na transcrição, que só muda no turno seguinte.
+
+Melhoria: quando o app recebe a confirmação de que `/model` ou `/effort` terminou, o chip já passa a mostrar o valor escolhido. Se a resposta seguinte mostrar outro modelo, vale o que veio da transcrição. Se o comando falhar, o chip volta ao valor anterior.
+
 ### Instalação mais fácil no Windows
 
 Em avaliação pelo autor (2026-11-24).
