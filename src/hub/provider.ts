@@ -466,6 +466,8 @@ export class ClaudeCodeProvider implements Provider {
     for (const m of [this.readers, this.pending, this.lastEvents, this.lastModels, this.misses, this.agentCounts] as Map<string, unknown>[]) {
       for (const sid of [...m.keys()]) if (!known.has(sid)) m.delete(sid);
     }
+    // A restart mark ends with its grace, whether or not the session ever left the list.
+    for (const [sid, until] of [...this.restarting]) if (!known.has(sid) || this.now() >= until) this.restarting.delete(sid);
 
     const { connected, others, usage } = await this.listSessions();
     const signature = JSON.stringify({
