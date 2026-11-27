@@ -10,6 +10,8 @@ import { ChevronIcon, PanelIcon, PinIcon, SearchIcon } from './icons';
 import { SettingsMenu } from './SettingsMenu';
 import { UsageMeter } from './UsageMeter';
 import type { Language } from '../api';
+import { groupActivity, groupByFolder, type SessionGroup } from '../groups';
+import { toggleClosedGroup, useClosedGroups, useGroupByProject } from '../prefs';
 
 type Props = {
   connected: SessionView[];
@@ -44,6 +46,67 @@ const dotColor: Record<SessionView['state'], string> = {
   disconnected: 'bg-disconnected',
 };
 
+type GroupItem = { group: SessionGroup; open: boolean };
+
+/** Pinned rows, then each group's header followed by its rows when open. */
+function groupedItems(sessions: SessionView[], closed: string[]): (SessionView | GroupItem)[] {
+  const { pinned, groups } = groupByFolder(sessions);
+  const out: (SessionView | GroupItem)[] = [...pinned];
+  for (const group of groups) {
+    const open = !closed.includes(group.key);
+    out.push({ group, open });
+    if (open) out.push(...group.sessions);
+  }
+  return out;
+}
+
+function GroupHeader({ item: { group, open }, unread }: { item: GroupItem; unread: Record<string, number> }) {
+  const t = useT();
+  const act = groupActivity(group, unread);
+  return (
+    <li>
+      <button
+        type="button"
+        aria-expanded={open}
+        data-group={group.key}
+        title={group.path}
+        onClick={() => toggleClosedGroup(group.key)}
+        className="flex min-h-11 w-full items-center gap-2 px-4 text-left text-sm font-semibold text-muted hover:bg-field"
+      >
+        <ChevronIcon width={16} height={16} className={`shrink-0 ${open ? 'rotate-90' : ''}`} />
+        <span className="min-w-0 flex-1 truncate">
+          {group.name} <span className="font-normal">({group.sessions.length})</span>
+        </span>
+        {!open && act.busy && (
+          <>
+            <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full bg-busy" />
+            <span className="sr-only">, {t('ui.group.busy')}</span>
+          </>
+        )}
+        {!open && act.agents > 0 && (
+          <>
+            <span
+              aria-hidden="true"
+              title={t('ui.panel.agentsWorking', { n: act.agents })}
+              className="flex h-5 shrink-0 items-center gap-1 rounded-full border border-busy px-1.5 text-[11px] font-semibold text-busy-text"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-busy" />
+              {act.agents}
+            </span>
+            <span className="sr-only">, {t('ui.panel.agentsWorking', { n: act.agents })}</span>
+          </>
+        )}
+        {!open && act.unread > 0 && (
+          <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-accent px-1.5 text-xs font-semibold text-accent-contrast">
+            <span aria-hidden="true">{act.unread > 99 ? '99+' : act.unread}</span>
+            <span className="sr-only">, {t('ui.unread', { n: act.unread })}</span>
+          </span>
+        )}
+      </button>
+    </li>
+  );
+}
+
 export function SessionList({ connected, others, usage, hubVersion, unread, selectedId, onSelect, onLanguage, error, collapsed = false, onToggleCollapsed, onNewSession, onCleanup, onSearch, onOpenHit }: Props) {
   const t = useT();
   const lang = useLang();
@@ -74,6 +137,10 @@ export function SessionList({ connected, others, usage, hubVersion, unread, sele
   const shownHits = hits && hits.q === deep ? hits.list : [];
   // Pinned first; the hub's order holds inside each group.
   const rows = [...found.filter((s) => s.pinned), ...found.filter((s) => !s.pinned)];
+  // Group by project (spec 2026-11-27-group-by-project): not while searching nor in the icon-only list.
+  const groupOn = useGroupByProject();
+  const closedGroups = useClosedGroups();
+  const items: (SessionView | GroupItem)[] = groupOn && !q && !collapsed ? groupedItems(found, closedGroups) : rows;
 
   return (
     <div className="flex h-full flex-col bg-surface">
@@ -128,7 +195,9 @@ export function SessionList({ connected, others, usage, hubVersion, unread, sele
       {error && !collapsed && <p className="px-4 py-1 text-xs text-waiting-text">{t('ui.loadError')}</p>}
 
       <ul className="flex-1 overflow-y-auto">
-        {rows.map((s) => {
+        {items.map((item) => {
+          if ('group' in item) return <GroupHeader key={`group:${item.group.key}`} item={item} unread={unread} />;
+          const s = item;
           const selected = s.sessionId === selectedId;
           const n = unread[s.sessionId] ?? 0;
           return (

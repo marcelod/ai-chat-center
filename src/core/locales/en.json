@@ -131,6 +131,8 @@
     "theme": {"label": "Theme", "system": "System", "light": "Light", "dark": "Dark"},
     "language": "Language",
     "showDiffs": "Show file changes",
+    "groupByProject": "Group by project",
+    "group": {"busy": "a conversation is working"},
     "back": "Back",
     "unread": "{n} unread",
     "loadError": "Could not reach the hub. Retrying…",

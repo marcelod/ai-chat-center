@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Language } from '../api';
 import { useLang, useT } from '../i18n';
 import { GearIcon } from './icons';
-import { saveShowDiffs, useShowDiffs, useSystemNotificationsPref } from '../prefs';
+import { saveGroupByProject, saveShowDiffs, useGroupByProject, useShowDiffs, useSystemNotificationsPref } from '../prefs';
 import { notificationStatus, setNotificationsEnabled, type NotificationStatus } from '../notify';
 import { readTheme, saveTheme, type Theme } from '../theme';
 
@@ -25,6 +25,7 @@ export function SettingsMenu({
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(readTheme);
   const showDiffs = useShowDiffs();
+  const groupByProject = useGroupByProject();
   const notifyPref = useSystemNotificationsPref();
   /** The browser permission can change in its own settings: read again whenever the menu opens. */
   const [notifyStatus, setNotifyStatus] = useState<NotificationStatus>(notificationStatus);
@@ -93,6 +94,10 @@ export function SettingsMenu({
           <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-2 text-sm">
             <input type="checkbox" checked={showDiffs} onChange={(e) => saveShowDiffs(e.target.checked)} className="h-4 w-4 accent-accent" />
             {t('ui.showDiffs')}
+          </label>
+          <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+            <input type="checkbox" checked={groupByProject} onChange={(e) => saveGroupByProject(e.target.checked)} className="h-4 w-4 accent-accent" />
+            {t('ui.groupByProject')}
           </label>
           <label className={`mt-3 flex min-h-11 items-center gap-2 text-sm ${notifyStatus === 'unsupported' ? 'text-muted' : 'cursor-pointer'}`}>
             <input
