@@ -32,6 +32,8 @@
       "subagents": "Subagentes",
       "showSubagents": "Ver subagentes",
       "noSubagents": "Nenhum subagente nesta conversa.",
+      "noneRunning": "Nenhum subagente rodando agora.",
+      "history": "Histórico ({n})",
       "noMessages": "Nada ainda.",
       "background": "segundo plano",
       "workingFor": "Trabalhando há {d}",
