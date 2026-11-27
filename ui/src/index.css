@@ -212,3 +212,12 @@ body {
   .print-export blockquote { border-left: 3px solid #ccc; padding-left: 8pt; color: #555; }
   .print-export .who, .print-export h2.day { break-after: avoid; }
 }
+/* The side panel's code view (CodeView.tsx, spec 2026-11-27-side-panel-file-types): theme colours only, so both
+   themes follow; the cited line is tinted with the accent and keeps its number in the accent colour. */
+.code-view .code-num { color: var(--c-muted); opacity: 0.7; }
+.code-view .code-current { background: color-mix(in srgb, var(--c-accent) 16%, transparent); box-shadow: inset 3px 0 0 var(--c-accent); }
+.code-view .code-current .code-num { color: var(--c-accent); opacity: 1; font-weight: 600; }
+.code-view .tok-k { color: var(--c-accent); font-weight: 600; }
+.code-view .tok-s { color: var(--c-ok); }
+.code-view .tok-n { color: var(--c-waiting-text); }
+.code-view .tok-c { color: var(--c-muted); font-style: italic; }

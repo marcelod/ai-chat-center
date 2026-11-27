@@ -1,26 +1,31 @@
-// File paths cited in a conversation (spec 2026-11-26-side-panel): Markdown files and images that the side
-// panel can open. Only paths the hub says exist become links (see useFileLinks); this module only finds
+// File paths cited in a conversation (specs 2026-11-26-side-panel and 2026-11-27-side-panel-file-types):
+// Markdown, images, code and text, PDFs that the side panel can open, with the cited line (`a.ts:42`). Only paths the hub says exist become links (see useFileLinks); this module only finds
 // candidates and marks them in the Markdown tree.
 
-export type FileKind = 'markdown' | 'image';
+import { PANEL_EXTENSIONS, panelFileKind, type PanelFileKind } from '@shared/fileTypes';
 
-const EXT = '(?:md|markdown|png|jpe?g|gif|webp)';
+export type FileKind = PanelFileKind;
+/** A file to open, with the line cited (1-based) when there is one. */
+export type FileTarget = { path: string; line?: number };
+
+const EXT = `(?:${PANEL_EXTENSIONS.join('|')})`;
 /** A path: optional `/`, `./` or `../`, folders, a name, a known extension; never part of a URL or a longer word. */
 const PATH_BODY = String.raw`(?:\.{1,2}\/|\/)?(?:[\w@+\-.]+\/)*[\w@+\-.]*[\w@+\-]\.${EXT}`;
-const PATH_RE = new RegExp(String.raw`(^|[\s(\[{"'<>*_\`])(${PATH_BODY})(?=$|[\s)\]}"'<>,;:!?*_\`]|\.(?:\s|$))`, 'gi');
+const LINE = String.raw`(?::(\d{1,7})(?::\d{1,7})?)?`;
+const PATH_RE = new RegExp(String.raw`(^|[\s(\[{"'<>*_\`])(${PATH_BODY})${LINE}(?=$|[\s)\]}"'<>,;:!?*_\`]|\.(?:\s|$))`, 'gi');
 /** Inline code made of one path, maybe with a `:line` suffix. */
-const WHOLE_RE = new RegExp(String.raw`^(${PATH_BODY})(?::\d+(?::\d+)?)?$`, 'i');
+const WHOLE_RE = new RegExp(String.raw`^(${PATH_BODY})${LINE}$`, 'i');
 
 /** The href prefix of a file link in the Markdown tree (allowed through react-markdown's urlTransform). */
 export const FILE_HREF = 'acc-file:';
 
-export function fileKind(p: string): FileKind | null {
-  const m = /\.([A-Za-z]+)$/.exec(p);
-  const ext = m?.[1].toLowerCase();
-  if (ext === 'md' || ext === 'markdown') return 'markdown';
-  if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'gif' || ext === 'webp') return 'image';
-  return null;
-}
+export const fileKind = (p: string): FileKind | null => panelFileKind(p);
+
+const lineOf = (s: string | undefined): number | undefined => {
+  const n = s ? Number(s) : NaN;
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+};
+const target = (path: string, line: number | undefined): FileTarget => (line ? { path, line } : { path });
 
 /** The candidate paths in a text, each once, in order. */
 export function findFilePaths(text: string): string[] {
@@ -43,8 +48,8 @@ export function resolveRelative(from: string, rel: string): string {
   return (abs ? '/' : '') + parts.join('/');
 }
 
-/** A link target that is a local file of a known type (no scheme, no `//host`), without its `#…`/`?…`. */
-export function localLinkPath(url: string): string | null {
+/** A link target that is a local file of a known type (no scheme, no `//host`); a `#L12` anchor is its line. */
+export function localLinkTarget(url: string): FileTarget | null {
   if (!url || url.startsWith('#') || url.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(url)) return null;
   let p = url.replace(/[?#].*$/, '');
   try {
@@ -52,11 +57,17 @@ export function localLinkPath(url: string): string | null {
   } catch {
     return null;
   }
-  return fileKind(p) ? p : null;
+  if (!fileKind(p)) return null;
+  return target(p, lineOf(/#L(\d{1,7})(?:-L?\d+)?$/.exec(url)?.[1]));
 }
 
+/** The path of localLinkTarget, without its line. */
+export const localLinkPath = (url: string): string | null => localLinkTarget(url)?.path ?? null;
+
 type MdNode = { type: string; value?: string; url?: string; children?: MdNode[] };
-const fileLink = (p: string, children: MdNode[]): MdNode => ({ type: 'link', url: FILE_HREF + encodeURIComponent(p), children });
+/** The href of a file link: the path encoded (so a `#` in it stays), then `#L<line>` when a line is cited. */
+export const fileHref = (p: string, line?: number) => FILE_HREF + encodeURIComponent(p) + (line ? `#L${line}` : '');
+const fileLink = (p: string, line: number | undefined, children: MdNode[]): MdNode => ({ type: 'link', url: fileHref(p, line), children });
 
 function splitText(node: MdNode): MdNode[] {
   const text = node.value ?? '';
@@ -64,9 +75,10 @@ function splitText(node: MdNode): MdNode[] {
   let last = 0;
   for (const m of text.matchAll(PATH_RE)) {
     const start = m.index! + m[1].length;
+    const whole = m[0].slice(m[1].length);
     if (start > last) out.push({ type: 'text', value: text.slice(last, start) });
-    out.push(fileLink(m[2], [{ type: 'text', value: m[2] }]));
-    last = start + m[2].length;
+    out.push(fileLink(m[2], lineOf(m[3]), [{ type: 'text', value: whole }]));
+    last = start + whole.length;
   }
   if (out.length === 0) return [node];
   if (last < text.length) out.push({ type: 'text', value: text.slice(last) });
@@ -85,10 +97,10 @@ export function remarkFileLinks(opts: { linkBase?: string } = {}) {
       if (child.type === 'text') next.push(...splitText(child));
       else if (child.type === 'inlineCode') {
         const m = WHOLE_RE.exec((child.value ?? '').trim());
-        next.push(m ? fileLink(m[1], [child]) : child);
+        next.push(m ? fileLink(m[1], lineOf(m[2]), [child]) : child);
       } else if (child.type === 'link') {
-        const p = localLinkPath(child.url ?? '');
-        if (p) child.url = FILE_HREF + encodeURIComponent(opts.linkBase ? resolveRelative(opts.linkBase, p) : p);
+        const tg = localLinkTarget(child.url ?? '');
+        if (tg) child.url = fileHref(opts.linkBase ? resolveRelative(opts.linkBase, tg.path) : tg.path, tg.line);
         next.push(child);
       } else {
         if (child.type !== 'code' && child.type !== 'linkReference' && child.type !== 'definition') walk(child);
@@ -100,12 +112,17 @@ export function remarkFileLinks(opts: { linkBase?: string } = {}) {
   return (tree: MdNode) => walk(tree);
 }
 
-/** The path behind a file link's href, or null for any other href. */
-export function filePathOf(href: string | undefined): string | null {
+/** The file (and line) behind a file link's href, or null for any other href. */
+export function fileTargetOf(href: string | undefined): FileTarget | null {
   if (!href || !href.startsWith(FILE_HREF)) return null;
+  const m = /^([^#]*)(?:#L(\d+))?$/.exec(href.slice(FILE_HREF.length));
+  if (!m) return null;
   try {
-    return decodeURIComponent(href.slice(FILE_HREF.length));
+    return target(decodeURIComponent(m[1]), lineOf(m[2]));
   } catch {
     return null;
   }
 }
+
+/** The path behind a file link's href, or null for any other href. */
+export const filePathOf = (href: string | undefined): string | null => fileTargetOf(href)?.path ?? null;

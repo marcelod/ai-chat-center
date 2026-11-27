@@ -49,8 +49,8 @@ export function PendingAttachments({ files, onRemove, disabled }: { files: Pendi
 }
 
 /**
- * The files a sent message carries (the files live on the hub machine). An image the side panel can open is
- * a button (`paths`: the full paths, in the same order as `names`).
+ * The files a sent message carries (the files live on the hub machine). A file the side panel can open
+ * (image, PDF, text) is a button (`paths`: the full paths, in the same order as `names`).
  */
 export function SentAttachments({ names, paths }: { names: string[]; paths?: string[] }) {
   const t = useT();
@@ -60,7 +60,7 @@ export function SentAttachments({ names, paths }: { names: string[]; paths?: str
     <ul aria-label={t('ui.chat.attachments')} className="mt-1 flex flex-wrap gap-1.5">
       {names.map((n, i) => {
         const p = paths?.[i];
-        const openable = p && links && fileKind(p) === 'image' && links.isLinkable(p);
+        const openable = p && links && fileKind(p) && links.isLinkable(p);
         const inner = (
           <>
             <FileIcon width={13} height={13} className="shrink-0" />

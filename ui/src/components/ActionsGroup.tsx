@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { DiffLine, ToolAction, ToolDiff } from '@shared/types';
 import { useT } from '../i18n';
 import { useShowDiffs } from '../prefs';
+import { useFileLinksContext } from '../fileLinks';
 import { CheckIcon, ChevronDownIcon, WrenchIcon } from './icons';
 
 function Status({ item }: { item: ToolAction }) {
@@ -24,32 +25,53 @@ const ROW: Record<DiffLine['op'], string> = {
   '~': 'text-muted',
 };
 
-/** Colored line diff of an edit, folded by default, the first 200 lines then "show more". */
-export function DiffView({ diff }: { diff: ToolDiff }) {
+/** The lines of a diff, colored (`max`: how many are shown). */
+export function DiffLines({ diff, max = diff.lines.length }: { diff: ToolDiff; max?: number }) {
+  return (
+    <>
+      {diff.lines.slice(0, max).map((l, k) => (
+        <div key={k} data-diff-line={l.op} className={`flex whitespace-pre px-2 ${ROW[l.op]}`}>
+          <span aria-hidden="true" className="w-4 shrink-0 select-none">
+            {l.op === '~' ? '⋯' : l.op}
+          </span>
+          <span>{l.text}</span>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Colored line diff of an edit, folded by default, the first 200 lines then "show more". With the side panel,
+ * "Open in the panel" shows it there, whole and wider (`title`: the edited file).
+ */
+export function DiffView({ diff, title }: { diff: ToolDiff; title?: string }) {
   const t = useT();
+  const links = useFileLinksContext();
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(DIFF_PAGE);
   const rest = diff.lines.length - shown;
+  const openDiff = links?.openDiff;
   return (
     <div data-diff className="mt-2">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className="text-xs font-semibold text-accent underline"
-      >
-        {open ? t('ui.chat.diffHide') : t('ui.chat.diffShow', { added: diff.added, removed: diff.removed })}
-      </button>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          className="text-xs font-semibold text-accent underline"
+        >
+          {open ? t('ui.chat.diffHide') : t('ui.chat.diffShow', { added: diff.added, removed: diff.removed })}
+        </button>
+        {openDiff && (
+          <button type="button" onClick={() => openDiff(title ?? '', diff)} className="text-xs font-semibold text-accent underline">
+            {t('ui.chat.diffOpenPanel')}
+          </button>
+        )}
+      </div>
       {open && (
         <div className="mt-1 max-h-96 overflow-auto rounded-lg border border-line bg-field font-mono text-xs">
-          {diff.lines.slice(0, shown).map((l, k) => (
-            <div key={k} data-diff-line={l.op} className={`flex whitespace-pre px-2 ${ROW[l.op]}`}>
-              <span aria-hidden="true" className="w-4 shrink-0 select-none">
-                {l.op === '~' ? '⋯' : l.op}
-              </span>
-              <span>{l.text}</span>
-            </div>
-          ))}
+          <DiffLines diff={diff} max={shown} />
           {rest > 0 && (
             <button type="button" className="w-full px-2 py-1 text-left font-semibold text-accent underline" onClick={() => setShown((n) => n + DIFF_PAGE)}>
               {t('ui.chat.diffMore', { n: rest })}
@@ -93,7 +115,7 @@ export function ActionsGroup({ items }: { items: ToolAction[] }) {
                 </span>
                 <Status item={i} />
               </div>
-              {showDiffs && i.diff ? <DiffView diff={i.diff} /> : null}
+              {showDiffs && i.diff ? <DiffView diff={i.diff} title={i.summary} /> : null}
               {/* `!` shell mode: the output is the point, so show it (other tools keep only their status). */}
               {i.name === 'Shell' && i.result ? (
                 <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-field p-2 font-mono text-xs">

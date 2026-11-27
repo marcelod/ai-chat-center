@@ -1,22 +1,29 @@
-// Files the side panel shows (spec 2026-11-26-side-panel): Markdown and images cited in a conversation, read
+// Files the side panel shows (specs 2026-11-26-side-panel and 2026-11-27-side-panel-file-types): Markdown,
+// images, code and plain text, and PDFs cited in a conversation, read
 // only from the session folder and the session's attachments folder. Every check is made on real paths
 // (fs.realpath), so a link never leads out of those folders; the type comes from the name and, for images,
-// is confirmed by the bytes. Errors never carry a path.
+// is confirmed by the bytes (images, PDFs; a text file must not be binary). Errors never carry a path.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { isInside } from './folderBrowse.js';
 import { sniffImage } from '../core/background.js';
+import { panelFileKind, type PanelFileKind } from '../shared/fileTypes.js';
 
 export const MAX_MARKDOWN_BYTES = 2 * 1024 * 1024;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_TEXT_BYTES = 1024 * 1024;
+export const MAX_PDF_BYTES = 20 * 1024 * 1024;
+/** How much of a text file is looked at for a NUL byte (a binary file named `.ts` is refused). */
+const BINARY_SNIFF = 8000;
 const MAX_PATH = 4096;
 /** Most paths one existence check answers. */
 export const MAX_EXISTS = 200;
 
-type FileType = { kind: 'markdown' | 'image'; type: string; max: number; image?: string };
-const FILE_TYPES: Record<string, FileType> = {
-  '.md': { kind: 'markdown', type: 'text/markdown; charset=utf-8', max: MAX_MARKDOWN_BYTES },
-  '.markdown': { kind: 'markdown', type: 'text/markdown; charset=utf-8', max: MAX_MARKDOWN_BYTES },
+type FileType = { kind: PanelFileKind; type: string; max: number; image?: string };
+const MARKDOWN: FileType = { kind: 'markdown', type: 'text/markdown; charset=utf-8', max: MAX_MARKDOWN_BYTES };
+const TEXT: FileType = { kind: 'text', type: 'text/plain; charset=utf-8', max: MAX_TEXT_BYTES };
+const PDF: FileType = { kind: 'pdf', type: 'application/pdf', max: MAX_PDF_BYTES };
+const IMAGES: Record<string, FileType> = {
   '.png': { kind: 'image', type: 'image/png', max: MAX_IMAGE_BYTES, image: 'png' },
   '.jpg': { kind: 'image', type: 'image/jpeg', max: MAX_IMAGE_BYTES, image: 'jpg' },
   '.jpeg': { kind: 'image', type: 'image/jpeg', max: MAX_IMAGE_BYTES, image: 'jpg' },
@@ -45,7 +52,23 @@ export type FileRoots = { base: string; roots: string[] };
 export type SessionFile = { data: Buffer; type: string; kind: FileType['kind'] };
 
 const errCode = (e: unknown) => (e as NodeJS.ErrnoException | null)?.code;
-const typeOf = (p: string): FileType | undefined => FILE_TYPES[path.extname(p).toLowerCase()];
+function typeOf(p: string): FileType | undefined {
+  const ext = path.extname(p).toLowerCase();
+  switch (ext && panelFileKind(ext)) {
+    case 'markdown':
+      return MARKDOWN;
+    case 'text':
+      return TEXT;
+    case 'pdf':
+      return PDF;
+    case 'image':
+      return IMAGES[ext];
+    default:
+      return undefined;
+  }
+}
+
+const isPdf = (b: Buffer) => b.subarray(0, 5).toString('latin1') === '%PDF-';
 
 type Root = { given: string; real: string };
 async function realRoots(r: FileRoots): Promise<Root[]> {
@@ -129,17 +152,20 @@ async function readCapped(file: string, max: number): Promise<Buffer> {
   }
 }
 
-/** A Markdown file or an image of the session. Rejects with SessionFileError. */
+/** A file of the session the panel shows (Markdown, image, text, PDF). Rejects with SessionFileError. */
 export async function readSessionFile(p: unknown, r: FileRoots): Promise<SessionFile> {
-  const { real, ft } = await resolve(p, r, await realRoots(r));
+  const { real, ft, size } = await resolve(p, r, await realRoots(r));
   let data: Buffer;
   try {
-    data = await readCapped(real, ft.max);
+    // Never more than the size seen (a 20 MB buffer for a small PDF is not allocated).
+    data = await readCapped(real, Math.min(ft.max, size));
   } catch (e) {
     if (e instanceof SessionFileError) throw e;
     throw new SessionFileError(errCode(e) === 'EACCES' ? 'denied' : 'not-found');
   }
   if (ft.image && sniffImage(data) !== ft.image) throw new SessionFileError('type');
+  if (ft === PDF && !isPdf(data)) throw new SessionFileError('type');
+  if (ft === TEXT && data.subarray(0, BINARY_SNIFF).includes(0)) throw new SessionFileError('type');
   return { data, type: ft.type, kind: ft.kind };
 }
 

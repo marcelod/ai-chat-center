@@ -508,7 +508,11 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
   }, [panelOpen]);
   const existing = useExistingFiles(session.sessionId, events, panel?.filesExist);
   const fileLinks: FileLinks | null = panel
-    ? { isLinkable: (p) => existing.has(p), open: (p) => openPanel({ kind: 'file', path: p }) }
+    ? {
+        isLinkable: (p) => existing.has(p),
+        open: (p, line) => openPanel({ kind: 'file', path: p, line }),
+        openDiff: (title, diff) => openPanel({ kind: 'diff', title, diff }),
+      }
     : null;
   // Search in this conversation (spec 2026-11-25-app-batch): null while the search bar is closed.
   const [search, setSearch] = useState<string | null>(initialSearch ?? null);
