@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tmpDir } from '../helpers/tmp.js';
 import { fakePng } from '../helpers/png.js';
-import { existingSessionFiles, MAX_PDF_BYTES, MAX_TEXT_BYTES, readSessionFile, SessionFileError, type FileRoots } from '../../src/hub/sessionFiles.js';
+import { existingSessionFiles, MAX_PDF_BYTES, MAX_TEXT_BYTES, readCapped, readSessionFile, SessionFileError, type FileRoots } from '../../src/hub/sessionFiles.js';
 
 // Spec 2026-11-26-side-panel: the side panel reads a few file types from the session folder and the
 // session's attachments folder only.
@@ -200,6 +200,15 @@ describe('private files', () => {
     expect((await readSessionFile(path.join(att, '0123456789abcdef-pic.png'), roots)).kind).toBe('image');
     expect((await readSessionFile(path.join(att, '0123456789abcdef-.env.txt'), roots)).data.toString()).toBe('attached');
     expect(await existingSessionFiles(['notes.md', '.claude/.credentials.json', 'proj/creds.json', 'proj/.env.local.txt'], roots)).toEqual(['notes.md']);
+  });
+});
+
+describe('readCapped', () => {
+  it('a file that grew after the stat is read up to the size seen, not refused (a log being written)', async () => {
+    const f = path.join(fs.realpathSync.native(tmpDir('acc-cap-')), 'live.log');
+    fs.writeFileSync(f, 'first line\nsecond line\n');
+    expect((await readCapped(f, 11)).toString()).toBe('first line\n');
+    expect((await readCapped(f, 1000)).toString()).toBe('first line\nsecond line\n');
   });
 });
 

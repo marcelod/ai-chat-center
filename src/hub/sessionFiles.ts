@@ -184,17 +184,20 @@ async function resolve(p: unknown, r: FileRoots, ctx: Ctx): Promise<{ real: stri
   return { real, ft, size };
 }
 
-/** Reads at most `max` bytes; a file that grew past it since the stat is refused. */
-async function readCapped(file: string, max: number): Promise<Buffer> {
+/**
+ * Reads at most `max` bytes (the size seen by the stat, already within the type's limit). A file that grew
+ * since (a log being written) is shown as it was at the stat, never refused; only the size seen is judged
+ * against the limit.
+ */
+export async function readCapped(file: string, max: number): Promise<Buffer> {
   const fh = await fs.open(file, 'r');
   try {
-    const buf = Buffer.alloc(max + 1);
+    const buf = Buffer.alloc(max);
     let n = 0;
-    for (;;) {
-      const { bytesRead } = await fh.read(buf, n, buf.length - n, n);
+    while (n < max) {
+      const { bytesRead } = await fh.read(buf, n, max - n, n);
       if (bytesRead === 0) break;
       n += bytesRead;
-      if (n > max) throw new SessionFileError('too-large');
     }
     return buf.subarray(0, n);
   } finally {
