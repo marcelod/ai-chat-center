@@ -19,6 +19,7 @@ import { readBackgroundImage, saveBackgroundImage, setBackground, validBackgroun
 import { BACKGROUND_IMAGE_MAX } from '../shared/background.js';
 import { getRegistration, isActive, listRegistrations, isRemoved, markDisconnected, markRemoved, trustedKeys, type Registration } from '../core/registry.js';
 import { VERSION } from '../core/version.js';
+import { isBusy } from '../core/busy.js';
 import { CHALLENGE_RE, healthProof } from '../core/healthProof.js';
 import { createPairing } from './pairing.js';
 import { AttachmentTooLargeError, storeAttachment } from '../core/attachments.js';
@@ -62,6 +63,8 @@ export interface HubOptions {
   port: number;
   staticDir: string;
   pollMs?: number;
+  /** For tests: how long a poll may take before the stream moves on (default 10 s). */
+  pollTimeoutMs?: number;
   log?: (msg: string) => void;
   /** For tests: the clock of the window pings. */
   now?: () => number;
@@ -274,7 +277,7 @@ export async function createHub(
   };
   let pollGen = 0;
   let inFlight: Promise<void> | null = null;
-  const POLL_TIMEOUT_MS = 10_000;
+  const pollTimeoutMs = opts.pollTimeoutMs ?? 10_000;
   const schedulePoll = (gen: number) => {
     pollTimer = setTimeout(async () => {
       if (gen !== pollGen) return;
@@ -285,21 +288,38 @@ export async function createHub(
       }
       let changes: ProviderChange[] = [];
       let timer: NodeJS.Timeout | undefined;
+      // One source of truth: the timeout wins only while the poll has not settled; then its result is late.
+      let settled = false;
+      let timedOut = false;
       try {
         const real = Promise.resolve().then(() => provider.poll());
+        // A poll that outlives the timeout has already taken its changes from the provider: they are sent
+        // when it ends (once: the timed-out path sends nothing). The next poll waits for this one (inFlight).
         const tracked: Promise<void> = real.then(
-          () => {},
-          () => {},
+          (late) => {
+            settled = true;
+            if (!timedOut || closed || gen !== pollGen) return;
+            log(`late poll ended with ${late.length} change(s)`);
+            for (const c of late) fanOut(c);
+          },
+          (e) => {
+            settled = true;
+            if (timedOut) log(`late poll failed: ${(e as Error).message}`);
+          },
         ).finally(() => {
           if (inFlight === tracked) inFlight = null;
         });
         inFlight = tracked;
         const timeout = new Promise<null>((resolve) => {
-          timer = setTimeout(() => resolve(null), POLL_TIMEOUT_MS);
+          timer = setTimeout(() => {
+            if (settled) return;
+            timedOut = true;
+            resolve(null);
+          }, pollTimeoutMs);
         });
         const r = await Promise.race([real, timeout]);
-        if (r === null) log('poll timed out');
-        else changes = r;
+        if (timedOut) log('poll timed out');
+        else if (r) changes = r;
       } catch (e) {
         log(`poll failed: ${(e as Error).message}`);
       } finally {
@@ -760,7 +780,10 @@ export async function createHub(
         if (live === null) throw new HttpError(503, 'could not list running sessions');
         const l = live.find((x) => x.sessionId === sid);
         if (!l || l.kind !== 'background' || !l.bgId) throw new HttpError(404, 'not a background session');
-        if (l.status !== 'idle' || typing.has(sid)) throw new HttpError(409, 'session is busy');
+        // Same rule as the session list (provider): `claude agents` says busy while a background task runs
+        // after the turn ended; only the hub's turn marker makes it a running turn. Waiting stays busy.
+        const turnOn = l.status === 'busy' ? await isBusy(sid) : l.status !== 'idle';
+        if (turnOn || typing.has(sid)) throw new HttpError(409, 'session is busy');
         typing.add(sid);
         try {
           await type(l.bgId, text);

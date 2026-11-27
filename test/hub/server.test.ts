@@ -14,7 +14,9 @@ import { PROTOCOL, VERSION } from '../../src/core/version.js';
 import { tmpDir } from '../helpers/tmp.js';
 import { fakePng } from '../helpers/png.js';
 import { saveConfig, loadConfig } from '../../src/core/config.js';
-import { putPending, readAnswer } from '../../src/core/questions.js';
+import { putPending, readAnswer, verifyAnswer } from '../../src/core/questions.js';
+import { setBusy, clearBusy } from '../../src/core/busy.js';
+import { installSecret } from '../../src/core/secret.js';
 import { paths } from '../../src/core/paths.js';
 import { getDisplayName } from '../../src/core/names.js';
 import { isPinned } from '../../src/core/pins.js';
@@ -52,8 +54,8 @@ function fakeProvider(over: Partial<Provider> = {}): Provider & { pollCalls: num
   return p;
 }
 
-async function start(provider: Provider, extra: { staticDir?: string; pollMs?: number; now?: () => number; bg?: HubOptions['bg'] } = {}) {
-  hub = await createHub({ provider, token: TOKEN, port: 0, staticDir: extra.staticDir ?? path.join(home, 'nope'), pollMs: extra.pollMs ?? 20, now: extra.now, bg: extra.bg });
+async function start(provider: Provider, extra: { staticDir?: string; pollMs?: number; pollTimeoutMs?: number; now?: () => number; bg?: HubOptions['bg'] } = {}) {
+  hub = await createHub({ provider, token: TOKEN, port: 0, staticDir: extra.staticDir ?? path.join(home, 'nope'), pollMs: extra.pollMs ?? 20, pollTimeoutMs: extra.pollTimeoutMs, now: extra.now, bg: extra.bg });
   return new URL(hub.url);
 }
 
@@ -306,7 +308,9 @@ describe('answers endpoint', () => {
     const r = await post(u, 'tu1', { answers: { 'Which?': 'A' } });
     expect(r.status).toBe(202);
     expect(JSON.parse(r.body)).toEqual({ ok: true });
-    expect(await readAnswer('s1', 'tu1')).toEqual({ answers: { 'Which?': 'A' } });
+    const a = (await readAnswer('s1', 'tu1'))!;
+    expect(a).toMatchObject({ answers: { 'Which?': 'A' } });
+    expect(verifyAnswer(a, 's1', 'tu1', await installSecret())).toBe(true); // signed for the ask hook
     expect((await post(u, 'tu1', { release: true })).status).toBe(409);
   });
   it('202 for release', async () => {
@@ -314,7 +318,9 @@ describe('answers endpoint', () => {
     await saveConfig({ answersFromApp: true });
     await seed();
     expect((await post(u, 'tu1', { release: true })).status).toBe(202);
-    expect(await readAnswer('s1', 'tu1')).toEqual({ release: true });
+    const a = (await readAnswer('s1', 'tu1'))!;
+    expect(a).toMatchObject({ release: true });
+    expect(verifyAnswer(a, 's1', 'tu1', await installSecret())).toBe(true);
   });
   it('400 for invalid tool use id, body or answers', async () => {
     const u = await start(fakeProvider());
@@ -471,6 +477,32 @@ describe('stream', () => {
     const u = await start(fakeProvider());
     expect((await req(u, '/api/sessions/a.b/events', { headers: auth })).status).toBe(404);
     expect((await req(u, '/api/sessions/%E0%A4%A/events', { headers: auth })).status).toBe(404);
+  });
+  // Review 2026-11-27: a poll slower than the timeout had already taken its changes from the provider; they
+  // were never sent. They now reach the pages when that poll ends, once, and no other poll overlaps it.
+  it('a poll that outlives the timeout still sends its changes when it ends, once, without overlap', async () => {
+    let calls = 0, active = 0, maxActive = 0;
+    const p = fakeProvider({
+      poll: async () => {
+        calls++; active++; maxActive = Math.max(maxActive, active);
+        const first = calls === 1;
+        await new Promise((r) => setTimeout(r, first ? 300 : 5));
+        active--;
+        return first ? [{ type: 'events', sessionId: 's1', events: [{ kind: 'assistant', id: 'late', ts: 't', text: 'late' }] }] : [];
+      },
+    });
+    const logs: string[] = [];
+    hub = await createHub({ provider: p, token: TOKEN, port: 0, staticDir: path.join(home, 'nope'), pollMs: 20, pollTimeoutMs: 50, log: (m) => logs.push(m) });
+    const u = new URL(hub.url);
+    const s = await openStream(u, '/api/stream', auth);
+    const got = await s.next(/"id":"late"/);
+    expect(logs).toContain('poll timed out');
+    await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(5), { timeout: 10_000, interval: 10 });
+    expect((got.match(/"id":"late"/g) ?? []).length).toBe(1);
+    expect(((await s.next(/heartbeat|$/)).match(/"id":"late"/g) ?? []).length).toBe(1);
+    expect(maxActive).toBe(1);
+    s.req.destroy();
+    await stopsPolling({ get pollCalls() { return calls; } });
   });
   it('survives a throwing poll', async () => {
     let n = 0;
@@ -1098,7 +1130,9 @@ describe('command endpoint (background sessions)', () => {
     const u = await start(fakeProvider(), { bg: { listLive: async () => list, type, platform: 'linux' } });
     expect((await post(u, { text: '/compact' })).status).toBe(404);
     list = [bgLive({ status: 'busy' })];
+    await setBusy('s1'); // a turn is on
     expect((await post(u, { text: '/compact' })).status).toBe(409);
+    await clearBusy('s1');
     list = [bgLive({ status: 'waiting' })];
     expect((await post(u, { text: '/compact' })).status).toBe(409);
     await markDisconnected('s1', 'exited');
@@ -1110,6 +1144,17 @@ describe('command endpoint (background sessions)', () => {
     await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
     const w = await start(fakeProvider(), { bg: { listLive: async () => list, type, platform: 'win32' } });
     expect((await post(w, { text: '/compact' })).status).toBe(501);
+  });
+  // Review 2026-11-27: same rule as the session list. `claude agents` says busy while a background task runs
+  // after the turn ended; without the hub's turn marker the app shows the session idle, and commands work.
+  it('busy in `claude agents` without the turn marker (a background task) is idle: 200', async () => {
+    const type = vi.fn(async () => {});
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [bgLive({ status: 'busy' })], type, platform: 'linux' } });
+    expect((await post(u, { text: '/model sonnet' })).status).toBe(200);
+    expect(type).toHaveBeenCalledWith('5e1b5e9b', '/model sonnet');
+    await setBusy('s1');
+    expect((await post(u, { text: '/model sonnet' })).status).toBe(409);
+    expect(type).toHaveBeenCalledTimes(1);
   });
   it('one command at a time per session; a failure is 502', async () => {
     let release!: () => void;

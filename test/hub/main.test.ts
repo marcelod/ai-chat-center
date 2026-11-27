@@ -338,6 +338,47 @@ describe('main', () => {
       await h!.close();
     }
   });
+  // Windows reserves port ranges (Hyper-V/WSL): binding one fails with EACCES, not EADDRINUSE.
+  it('a reserved port (EACCES) is skipped like a busy one', async () => {
+    const { createHub } = await import('../../src/hub/server.js');
+    const base = await freePort();
+    process.env.AI_CHAT_CENTER_PORT = String(base);
+    const tried: number[] = [];
+    const h = await startHub({
+      createHub: async (o) => {
+        tried.push(o.port);
+        if (o.port === base) throw Object.assign(new Error('listen EACCES'), { code: 'EACCES' });
+        return createHub(o);
+      },
+    });
+    try {
+      expect(h).not.toBeNull();
+      expect(tried[0]).toBe(base);
+      expect(h!.port).toBeGreaterThan(base);
+    } finally {
+      await h?.close();
+    }
+  });
+  it('the routes use the same live lookup as the provider', async () => {
+    const { createHub } = await import('../../src/hub/server.js');
+    const listLive = async () => [];
+    let given: unknown;
+    const h = await startHub({ listLive, createHub: async (o) => ((given = o.bg?.listLive), createHub(o)) });
+    try {
+      expect(given).toBe(listLive);
+    } finally {
+      await h?.close();
+    }
+  });
+  it('any other bind error still stops the start', async () => {
+    const base = await freePort();
+    process.env.AI_CHAT_CENTER_PORT = String(base);
+    let calls = 0;
+    await expect(
+      startHub({ createHub: async () => { calls++; throw Object.assign(new Error('boom'), { code: 'EINVAL' }); } }),
+    ).rejects.toThrow('boom');
+    expect(calls).toBe(1);
+  });
   it('the default idle limit is 2 hours', async () => {
     const { IDLE_EXIT_MS } = await import('../../src/hub/main.js');
     expect(IDLE_EXIT_MS).toBe(2 * 3600_000);

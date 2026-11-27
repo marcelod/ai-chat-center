@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   assertToolUseId, parseQuestions, putPending, getPending, removePending,
-  writeAnswer, readAnswer, validAnswers,
+  writeAnswer, readAnswer, validAnswers, signAnswer, verifyAnswer,
 } from '../../src/core/questions.js';
+import { installSecret } from '../../src/core/secret.js';
+import crypto from 'node:crypto';
 import { tmpDir } from '../helpers/tmp.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -73,7 +75,7 @@ describe('pending and answers', () => {
     await putPending('s1', pending('a', '2026-01-01T00:00:00.000Z'));
     expect(await writeAnswer('s1', 'a', { answers: { 'Qual cor você prefere?': 'Red' } })).toBe('ok');
     expect(await writeAnswer('s1', 'a', { release: true })).toBe('conflict');
-    expect(await readAnswer('s1', 'a')).toEqual({ answers: { 'Qual cor você prefere?': 'Red' } });
+    expect(await readAnswer('s1', 'a')).toMatchObject({ answers: { 'Qual cor você prefere?': 'Red' } });
   });
 
   it('concurrent answers yield one ok and one conflict', async () => {
@@ -125,5 +127,45 @@ describe('validAnswers', () => {
     expect(validAnswers(qs, { 'A?': ' x', 'B?': 'y' })).toBeNull();
     expect(validAnswers(qs, null)).toBeNull();
     expect(validAnswers(qs, ['A?', 'B?'])).toBeNull();
+  });
+});
+
+// Review 0.6.11: an answer file is an approval of the AskUserQuestion tool call, so the hub signs it with the
+// install secret and the hook checks it (a file merely written under ~/.ai-chat-center is not an answer).
+describe('signed answers', () => {
+  const Q = 'Qual cor você prefere?';
+  const secret = 'a'.repeat(64);
+  const signed = (sid = 's1', id = 'toolu_1', a: Parameters<typeof signAnswer>[2] = { answers: { [Q]: 'Red' } }) =>
+    signAnswer(sid, id, a, secret, '2026-11-27T10:00:00.000Z');
+
+  it('signs `ask1|sid|toolUseId|createdAt|payload` with HMAC-SHA256 over sorted answers', () => {
+    const a = signed('s1', 'toolu_1', { answers: { b: '2', a: '1' } });
+    const payload = `answers:${JSON.stringify([['a', '1'], ['b', '2']])}`;
+    const want = crypto.createHmac('sha256', secret).update(`ask1|s1|toolu_1|2026-11-27T10:00:00.000Z|${payload}`).digest('hex');
+    expect(a).toEqual({ answers: { b: '2', a: '1' }, createdAt: '2026-11-27T10:00:00.000Z', sig: want });
+    expect(verifyAnswer(a, 's1', 'toolu_1', secret)).toBe(true);
+    expect(verifyAnswer(signed('s1', 'toolu_1', { release: true }), 's1', 'toolu_1', secret)).toBe(true);
+  });
+
+  it('rejects unsigned, tampered, another session, another tool use, another secret', () => {
+    const a = signed();
+    expect(verifyAnswer({ answers: { [Q]: 'Red' } }, 's1', 'toolu_1', secret)).toBe(false);
+    expect(verifyAnswer({ ...a, answers: { [Q]: 'Blue' } }, 's1', 'toolu_1', secret)).toBe(false);
+    expect(verifyAnswer({ ...a, createdAt: '2026-11-27T10:00:01.000Z' }, 's1', 'toolu_1', secret)).toBe(false);
+    expect(verifyAnswer({ ...a, sig: a.sig!.slice(0, -1) }, 's1', 'toolu_1', secret)).toBe(false);
+    expect(verifyAnswer({ release: true, createdAt: a.createdAt, sig: a.sig }, 's1', 'toolu_1', secret)).toBe(false);
+    expect(verifyAnswer(a, 's2', 'toolu_1', secret)).toBe(false);
+    expect(verifyAnswer(a, 's1', 'toolu_2', secret)).toBe(false);
+    expect(verifyAnswer(a, 's1', 'toolu_1', 'b'.repeat(64))).toBe(false);
+    expect(verifyAnswer({ answers: {}, release: true, createdAt: a.createdAt, sig: a.sig } as never, 's1', 'toolu_1', secret)).toBe(false);
+    expect(verifyAnswer(null as never, 's1', 'toolu_1', secret)).toBe(false);
+  });
+
+  it('writeAnswer signs with the install secret', async () => {
+    await putPending('s1', { toolUseId: 'a', questions: parseQuestions(colors)!, createdAt: '2026-01-01T00:00:00.000Z' });
+    expect(await writeAnswer('s1', 'a', { answers: { [Q]: 'Red' } })).toBe('ok');
+    const a = (await readAnswer('s1', 'a'))!;
+    expect(typeof a.sig).toBe('string');
+    expect(verifyAnswer(a, 's1', 'a', await installSecret())).toBe(true);
   });
 });

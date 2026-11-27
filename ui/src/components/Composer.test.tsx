@@ -139,6 +139,79 @@ describe('Composer drafts', () => {
     expect(box().value).toBe('retry me');
   });
 
+  // Review 0.6.11: sending another message used to drop the failed one (its text lived only in the banner).
+  describe('a failed send is never lost by the next one', () => {
+    const fail500 = () => Promise.reject(new Error('500'));
+    it('the failed text goes back to the box when another message is sent', async () => {
+      sessionStorage.clear();
+      const user = userEvent.setup();
+      const sent: string[] = [];
+      let n = 0;
+      render(mount('n1', async (t) => (n++ === 0 ? fail500() : void sent.push(t))));
+      await user.type(box(), 'first{Enter}');
+      expect(await screen.findByRole('alert')).toBeTruthy();
+      await user.type(box(), 'second{Enter}');
+      expect(sent).toEqual(['second']);
+      expect(box().value).toBe('first');
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    it('when the next send fails too, the box keeps the first and the banner retries the second', async () => {
+      sessionStorage.clear();
+      const user = userEvent.setup();
+      const onSend = vi.fn(fail500);
+      render(mount('n2', onSend));
+      await user.type(box(), 'first{Enter}');
+      expect(await screen.findByRole('alert')).toBeTruthy();
+      await user.type(box(), 'second{Enter}');
+      expect(await screen.findByRole('alert')).toBeTruthy();
+      expect(box().value).toBe('first');
+      await user.click(screen.getByRole('button', { name: 'Retry' }));
+      expect(onSend).toHaveBeenLastCalledWith('second');
+    });
+
+    it('when the next send is refused as disconnected (409), the box keeps both texts', async () => {
+      sessionStorage.clear();
+      const user = userEvent.setup();
+      let n = 0;
+      render(mount('n3', () => (n++ === 0 ? fail500() : Promise.reject(Object.assign(new Error('409'), { status: 409 })))));
+      await user.type(box(), 'first{Enter}');
+      expect(await screen.findByRole('alert')).toBeTruthy();
+      await user.type(box(), 'second{Enter}');
+      await vi.waitFor(() => expect(box().value).toBe('first\n\nsecond'));
+      expect(screen.getByText('This session is disconnected', { exact: false })).toBeTruthy();
+    });
+
+    it('a slash command sent meanwhile leaves the retry banner up', async () => {
+      sessionStorage.clear();
+      const user = userEvent.setup();
+      const onCommand = vi.fn(async () => {});
+      render(
+        <LangProvider lang="en">
+          <Composer sessionId="n5" name="x" disabled={false} onSend={fail500} onCommand={onCommand} />
+        </LangProvider>,
+      );
+      await user.type(box(), 'first{Enter}');
+      expect(await screen.findByRole('button', { name: 'Retry' })).toBeTruthy();
+      await user.type(box(), '/compact{Enter}');
+      await vi.waitFor(() => expect(onCommand).toHaveBeenCalledWith('/compact'));
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    });
+
+    it('retry sends the failed text without putting it back in the box', async () => {
+      sessionStorage.clear();
+      const user = userEvent.setup();
+      let n = 0;
+      const onSend = vi.fn((_t: string) => (n++ === 0 ? fail500() : Promise.resolve()));
+      render(mount('n4', onSend));
+      await user.type(box(), 'first{Enter}');
+      await user.click(await screen.findByRole('button', { name: 'Retry' }));
+      expect(onSend).toHaveBeenLastCalledWith('first');
+      expect(box().value).toBe('');
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+  });
+
   it('works in memory when sessionStorage throws', async () => {
     const spy = vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
       throw new Error('blocked');
@@ -332,6 +405,33 @@ describe('Composer attachments', () => {
     await user.type(box(), '{Enter}');
     expect(await screen.findByRole('alert')).toHaveTextContent('This session is disconnected');
     expect(chips()).toHaveLength(1);
+  });
+
+  it('a failed text survives the next message with a file: banner kept during the upload, then back in the box', async () => {
+    const user = userEvent.setup();
+    let n = 0;
+    const { input, onSend } = mountA({ id: 'ff', onSend: async () => (n++ === 0 ? Promise.reject(new Error('500')) : undefined) });
+    await user.type(box(), 'first{Enter}');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not send the message.');
+    await user.upload(input!, [file('a.txt')]);
+    await user.type(box(), 'with file{Enter}');
+    await vi.waitFor(() => expect(onSend).toHaveBeenLastCalledWith('with file\n[Attachment: /h/att/s/0123456789abcdef-a.txt]'));
+    expect(box().value).toBe('first');
+  });
+
+  it('a failed text survives an upload refused as disconnected (409)', async () => {
+    const user = userEvent.setup();
+    const { input } = mountA({
+      id: 'fg',
+      onSend: () => Promise.reject(new Error('500')),
+      onUpload: async () => Promise.reject(Object.assign(new Error('409'), { status: 409, code: 'session-disconnected' })),
+    });
+    await user.type(box(), 'first{Enter}');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not send the message.');
+    await user.upload(input!, [file('a.txt')]);
+    await user.type(box(), 'with file{Enter}');
+    expect(await screen.findByText('This session is disconnected')).toBeTruthy();
+    expect(box().value).toBe('first\n\nwith file');
   });
 
   it('the text draft still works while files are attached', async () => {
