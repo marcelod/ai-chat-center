@@ -28,6 +28,15 @@ Correção:
 - Conferir também o Console do GNOME (`kgx`), padrão em outras distribuições.
 - Se o terminal abrir e o comando falhar, o app não fica sabendo: avaliar um aviso no app ("o terminal abriu, mas o comando falhou? veja …").
 
+### Respostas rápidas sugeridas pelo uso
+
+Pedido em 2026-11-27. Hoje as respostas rápidas (⚡, 0.6.7) começam com 3 sugestões fixas e depois valem só as que a pessoa edita. Ideia: o app perceber as mensagens que a pessoa repete e sugerir "Adicionar às respostas rápidas?" com um clique.
+
+- De onde tirar: as mensagens que a pessoa mandou (pelo app e pelo terminal) nas transcrições; contar as repetidas, com o texto normalizado (maiúsculas, acentos, pontuação), por exemplo 3 vezes ou mais nos últimos 30 dias. Só mensagens curtas (até uns 80 caracteres); nada de anexos nem comandos `/…`.
+- Onde mostrar: no próprio menu ⚡, numa seção "Sugestões" abaixo da lista, com "+" para adicionar e "x" para dispensar (a dispensada não volta).
+- Privacidade: tudo local, no navegador ou no hub; nada sai do computador.
+- Hoje a lista fica no `localStorage` do navegador; se as sugestões vierem do hub, avaliar guardar a lista no hub também, para valer em qualquer navegador.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
