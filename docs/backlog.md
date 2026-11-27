@@ -1,6 +1,6 @@
 # Pendências
 
-Itens combinados e deixados para depois. Estado em 2026-11-26, versão 0.6.7. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
+Itens combinados e deixados para depois. Estado em 2026-11-27, versão 0.6.8. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
 
 ## A fazer
 
@@ -14,41 +14,9 @@ No primeiro teste no Windows (2026-11-24), o atalho funcionou, mas a pessoa teve
 
 Pedido em 2026-11-25. Investigado na rodada 0.6.2 (Claude Code 2.1.332), **adiado**: a sugestão não fica na transcrição (só `promptSource: "suggestion_accepted"` quando aceita), não fica em `~/.claude` e nenhum hook a entrega. `--prompt-suggestions` só entrega a sugestão no modo `-p`/SDK (`stream-json`), o que exigiria outro modo de sessão (sem `--bg`, `/cc` e attach). Caminho possível depois da ideia 2 (ver a tela da sessão): ler a linha cinza do `claude logs <id>`, com o filtro de token; frágil a cada versão. Bônus barato, se o autor quiser: marcar no app as mensagens com `suggestion_accepted`. Cuidado registrado: `claude --bg --help` cria uma sessão de verdade; para ver a ajuda, use `claude --help`.
 
-### Painel lateral: próximos tipos de arquivo
+### Painel lateral: o que ainda falta
 
-O painel lateral saiu na 0.6.7 com imagens, Markdown, subagentes e a tela da sessão. Falta, quando o autor quiser: código com destaque de sintaxe (`arquivo.ts:42` abrindo na linha), o diff dos arquivos editados no painel, PDF e o resultado de `/status` ou `/context` direto no painel depois do comando. Mesmos cuidados da rota de arquivos da 0.6.7 (só leitura, só a pasta da sessão e os anexos dela, realpath, limite de tamanho, tipos conhecidos).
-
-### "Abrir no terminal" falha no Ubuntu com o Ptyxis
-
-Visto em 2026-11-26 (print do autor): ao clicar em "Abrir no terminal", abre uma janela "claude attach 856fd72f (Falhou)" com "Failed to find executable claude attach 856fd72f: No such file or directory". Causa confirmada: neste Ubuntu o terminal padrão é o Ptyxis (`/usr/bin/x-terminal-emulator` aponta para `/usr/bin/ptyxis`) e não há `gnome-terminal`. Então `linuxTerminal` (`src/hub/openTerminal.ts`) cai no último da lista, `x-terminal-emulator -e "claude attach <id>"`, com o comando numa string só, e o Ptyxis trata a string inteira como o nome do programa.
-
-Correção:
-- Pôr o Ptyxis na lista (antes do `x-terminal-emulator`), com a pasta e o comando em argumentos separados. Pelo `ptyxis --help`: `-d <pasta>` e `-x`/`--execute`, ou `--new-window -d <pasta> -- claude attach <id>`; confirmar ao vivo qual forma separa os argumentos.
-- No `x-terminal-emulator`, descobrir o terminal real (`realpath`) e usar a sintaxe dele quando for conhecido; a string única fica só para um terminal desconhecido.
-- Conferir também o Console do GNOME (`kgx`), padrão em outras distribuições.
-- Se o terminal abrir e o comando falhar, o app não fica sabendo: avaliar um aviso no app ("o terminal abriu, mas o comando falhou? veja …").
-
-### Respostas rápidas sugeridas pelo uso
-
-Pedido em 2026-11-27. Hoje as respostas rápidas (⚡, 0.6.7) começam com 3 sugestões fixas e depois valem só as que a pessoa edita. Ideia: o app perceber as mensagens que a pessoa repete e sugerir "Adicionar às respostas rápidas?" com um clique.
-
-- De onde tirar: as mensagens que a pessoa mandou (pelo app e pelo terminal) nas transcrições; contar as repetidas, com o texto normalizado (maiúsculas, acentos, pontuação), por exemplo 3 vezes ou mais nos últimos 30 dias. Só mensagens curtas (até uns 80 caracteres); nada de anexos nem comandos `/…`.
-- Onde mostrar: no próprio menu ⚡, numa seção "Sugestões" abaixo da lista, com "+" para adicionar e "x" para dispensar (a dispensada não volta).
-- Privacidade: tudo local, no navegador ou no hub; nada sai do computador.
-- Hoje a lista fica no `localStorage` do navegador; se as sugestões vierem do hub, avaliar guardar a lista no hub também, para valer em qualquer navegador.
-
-### Tela da sessão mostra cada quadro da animação
-
-Visto em 2026-11-27 (print do autor, 0.6.7): a "Tela da sessão" abre, mas mostra uma lista longa de linhas soltas ("Doodling…1", "Doodling…42thinking with low effort", "311", "3", "*4" …) em vez da tela como ela está. Causa provável: a saída do `claude logs` é o fluxo do terminal, com os códigos que movem o cursor e redesenham a mesma linha (cada quadro do "pensando"); o app tira os códigos de cor e de cursor e mostra tudo como texto, então cada redesenho vira uma linha nova. Correção: interpretar o fluxo como um terminal faria (por exemplo `@xterm/headless` no hub: escreve o fluxo, lê o buffer final) e mostrar só a tela resultante (as últimas N linhas), com o filtro do link e do token aplicado depois. Outro sinal da mesma causa: os espaços somem ("Falameurei!!!,mandaaioquetápegando…"), porque o terminal usa "avançar o cursor" no lugar de espaços e o app só apaga esse código. Conferir largura e altura iguais às do attach. Vale também para o item "/status bloqueado" (ver "A testar no uso", 0.6.7).
-
-### Painel de subagentes: antigos num "Histórico" fechado
-
-Pedido em 2026-11-27 (print do autor, 0.6.7). Ao clicar em "working" numa sessão longa, o painel de subagentes lista todos os que a sessão já lançou (frentes de rodadas antigas, revisões, correções), todos "Finished", e quem está rodando agora fica perdido no meio. Ideia, no estilo do "Other open sessions" da lista:
-
-- No topo, só os que estão rodando ("Working"); se nenhum, uma linha "Nenhum subagente rodando agora".
-- Embaixo, uma seção fechada por padrão: "Histórico (N)", com os terminados, do mais recente para o mais antigo; ▸/▾ abre e fecha.
-- Opcional: os terminados da rodada atual (desde a última mensagem da pessoa) ficam visíveis logo abaixo dos que rodam, e o resto vai para o Histórico.
-- Ao abrir o painel pelo "agentes trabalhando (N)", ele já mostra os que rodam em cima.
+Na 0.6.8 o painel ganhou código com a linha citada, PDF e o diff das edições. Falta, quando o autor quiser: quebrar linhas no visualizador de código, realce de sintaxe melhor (hoje é aproximado e sem dependência) e PDF no celular (o frame costuma ficar vazio; "Abrir numa nova aba" e "Baixar" funcionam). PDF desenhado pelo próprio app exigiria o pdf.js (dependência nova).
 
 ### Entrada por voz
 
@@ -78,7 +46,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ### Conversa
 9. ★ ✅ 0.6.0 **Busca:** dentro da conversa e entre todas as conversas, incluindo as encerradas.
-10. **Exportar uma conversa** em Markdown ou PDF.
+10. ✅ 0.6.8 **Exportar uma conversa** em Markdown ou PDF.
 11. ✅ 0.6.7 **Respostas rápidas:** botões com mensagens frequentes ("pode seguir", "faz o commit", "resume o que falta").
 12. **Sugestão da próxima mensagem** (ver "A fazer").
 13. ✅ 0.6.2 **Diff dos arquivos editados**, com cores, em vez de só "Edit arquivo X".
@@ -89,7 +57,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 16. ★ ✅ 0.6.7 **Notificação do sistema:** quando uma sessão termina o turno, pede permissão ou faz uma pergunta, mesmo com o app minimizado.
 17. **Painel geral:** todas as sessões numa grade, com estado, tempo trabalhando e uso de contexto.
 18. **Uso e custo por sessão:** tokens, contexto ocupado (ver "Tamanho do contexto da conversa" em "A fazer") e o histórico do uso de 5 horas.
-19. **Agrupar sessões por projeto ou pasta** na lista. Desenho combinado com o autor (2026-11-27):
+19. ✅ 0.6.8 **Agrupar sessões por projeto ou pasta** na lista. Desenho combinado com o autor (2026-11-27):
     - Opcional, **desligado por padrão** ("Agrupar por projeto" nas configurações); desligado, a lista fica como hoje (mais recentes no topo).
     - Um grupo por pasta da sessão, com o nome da última parte do caminho e a contagem ("ai-chat-center (3)"); o caminho completo ao passar o mouse.
     - Grupos ordenados pela conversa mais recente de cada um; dentro do grupo, também da mais recente para a mais antiga.
@@ -106,6 +74,17 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 22. **Remote Control oficial:** comparar o `claude --remote-control` (acesso pelo claude.ai) com a ideia 21 antes de construir.
 
 ## A testar no uso
+
+- 0.6.8 (rodada em paralelo; specs em `docs/superpowers/specs/2026-11-27-*`; reiniciar o hub depois do `/reload-plugins` para ele carregar o código novo):
+  - Tela da sessão: ⋮ → "Tela da sessão" mostra só a tela atual (sem a lista de quadros "Doodling…"), com espaços entre as palavras e o link do `/cc` como `[app link removed]`. Com a sessão pensando, "Atualizar" algumas vezes mostra sempre um único quadro. Linhas de até 200 colunas, rolando para o lado; dois temas.
+  - `/status`, `/cost`, `/context`, `/usage`, `/help`, `/doctor` (só em segundo plano): aparecem na lista do `/`; enviar `/context` mostra "/context enviado…", o painel abre sozinho na tela da sessão e o resultado aparece em até ~6 s. **Risco**: `/status`, `/usage` e `/help` abrem um diálogo na sessão; depois deles, mandar uma mensagem comum e um `/rename x` e conferir que a sessão aceita (se travar, anotar qual comando; dá para voltar a bloquear ou o hub mandar Esc). Em sessão de terminal, continua bloqueado.
+  - Abrir no terminal com o Ptyxis: ⋮ → "Abrir no terminal" abre uma janela do Ptyxis na pasta da sessão rodando `claude attach <id>`, sem a janela "(Falhou)". Se a pasta ou o `--new-window` derem problema, anotar (alternativa: `ptyxis -d <pasta> -- …`). Com gnome-terminal e Ptyxis instalados, abre o gnome-terminal (dá para inverter). Console do GNOME (`kgx`) não testado.
+  - Agent bloqueado: pedir um subagente que o modo auto negue; o balão "Claude → …" fica apagado, com o selo "Não executado" e o motivo numa linha curta, sem recarregar; não conta em "agentes trabalhando". Dois temas e com fundo.
+  - Painel de subagentes: os que rodam em cima ("Nenhum subagente rodando agora" se nenhum), os terminados desde a sua última mensagem logo abaixo, e "Histórico (N)" fechado com o resto; ▸/▾; voltar de um subagente mantém o Histórico aberto.
+  - Respostas rápidas sugeridas: mandar a mesma mensagem curta 3 vezes (variando maiúsculas/pontuação); depois de até 10 min (cache do hub; ou reiniciar o hub), ⚡ mostra "Sugestões" com ela, "+" adiciona e "×" dispensa para sempre. Conferir se a primeira abertura do ⚡ demora.
+  - Painel lateral: `src/hub/server.ts:100` citado abre o código rolado e destacado na linha 100; `docs/backlog.md:20` abre como fonte, sem linha abre formatado; um PDF (citado ou anexo) aparece no painel no computador ("Abrir numa nova aba" e "Baixar" também); com "Mostrar alterações dos arquivos" ligado, "Abrir no painel" ao lado de "Ver alterações" mostra o diff maior.
+  - Exportar: ⋮ → "Exportar conversa" → "Markdown (.md)" baixa `<nome>-AAAA-MM-DD.md` (procurar no arquivo: nada de `127.0.0.1`, `token=`, `[AI Chat Center message` nem `key=`); "PDF" abre a impressão com página clara só com a conversa, também com o tema escuro e com fundo. Um hash git completo numa mensagem sai como `[redacted]` (mesmo filtro da tela).
+  - Agrupar por projeto (⚙, desligado por padrão): grupos "pasta (n)", fixadas no topo, ▾/▸ lembrado depois de recarregar, grupo fechado mostra trabalhando/agentes/não lidas, a busca ignora os grupos; lista recolhida só com ícones fica sem grupos. Grupo fechado não mostra "esperando permissão/resposta": dizer se quer.
 
 - 0.6.7 (rodada em paralelo; specs em `docs/superpowers/specs/2026-11-26-*`):
   - Janela maior: ✅ lembra o último tamanho (2026-11-27, `/cc` em outra sessão abriu no tamanho deixado). Falta: abrir sem tamanho guardado (tirar `windowSize` do `~/.ai-chat-center/config.json`) e ver se cresce para 1280×860. Com o Chrome aberto, `/cc` abre a janela e ela cresce para 1280×860 (ou o último tamanho); redimensionar e esperar 1 s grava `windowSize` em `~/.ai-chat-center/config.json`; maximizada não grava; F5 não muda o tamanho. Conferir no Windows e no macOS.
@@ -164,6 +143,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## Feito
 
+- 0.6.8: tela da sessão interpretada como terminal (só a tela final, com espaços); `/status`, `/cost`, `/context` e afins liberados em segundo plano, abrindo a tela no painel; "Abrir no terminal" com Ptyxis e Console do GNOME (e o terminal real atrás do `x-terminal-emulator`); chamada de agente bloqueada aparece como "Não executado"; painel de subagentes com os que rodam em cima e "Histórico (N)"; respostas rápidas sugeridas pelo uso; painel lateral com código na linha citada, PDF e diff; exportar conversa em Markdown ou PDF; agrupar sessões por projeto (opcional).
 - 0.6.7: janela do app abre maior e lembra o tamanho; tamanho do contexto em pizza na barra; respostas rápidas (⚡); notificações do sistema; painel lateral com Markdown e imagens citados, subagentes da sessão e a tela da sessão (filtrada); estado "agentes trabalhando (N)"; parar, reiniciar e remover sessões em segundo plano pelo ⋮ e limpeza das paradas.
 - 0.6.6: sessões abertas antes de uma atualização passam a rodar a versão mais nova instalada (a partir da próxima); o hub não encurta o intervalo do `claude agents` por um "trabalhando" que a tela mostra como parado; blocos de código com Copiar e Quebrar linhas (texto sem linguagem já quebra); balão com fundo na mensagem "Claude → agente"; a cor ou o degradê do fundo pinta o círculo das iniciais, com iniciais claras ou escuras conforme o contraste; o nome "AI Chat Center" cabe inteiro no topo da lista (título e botões um pouco menores); busca na conversa destaca cada ocorrência, com ↑/↓ (e Enter/Shift+Enter) e contador "i de n", sem esconder as outras mensagens; README revisado e CLAUDE.md criado.
 - 0.6.5: cabeçalho da conversa enxuto (nome, pasta, attach e branch); modelo, esforço, modo e versão do plugin foram para a direita da dica do teclado, sob o campo de mensagem; o chip do modelo abre a lista de modelos e, no último item, os níveis de esforço; a versão do Claude Code fica no texto ao passar o mouse sobre a do plugin. Desenho aprovado em 2026-11-25.

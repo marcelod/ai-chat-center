@@ -47,7 +47,7 @@ function paths() {
 }
 
 // src/core/version.ts
-var VERSION = "0.6.7";
+var VERSION = "0.6.8";
 var PROTOCOL = 2;
 
 // src/hooks/delegate.ts
