@@ -28,8 +28,11 @@ describe('linuxTerminal', () => {
     expect(t).toEqual({ cmd: '/usr/bin/konsole', args: ['--workdir', '/home/u/p', '-e', 'claude', 'attach', ID] });
   });
   it('gives each terminal its own way of running a command', () => {
-    const args = (name: string) => linuxTerminal(ID, '/p', env, (p) => p === `/usr/bin/${name}`)?.args;
+    const args = (name: string) => linuxTerminal(ID, '/p', env, (p) => p === `/usr/bin/${name}`, (p) => p)?.args;
     expect(args('x-terminal-emulator')).toEqual(['-e', `claude attach ${ID}`]);
+    expect(args('ptyxis')).toEqual(['--new-window', '--working-directory', '/p', '--', 'claude', 'attach', ID]);
+    expect(args('kgx')).toEqual(['--working-directory', '/p', '--', 'claude', 'attach', ID]);
+    expect(args('konsole')).toEqual(['--workdir', '/p', '-e', 'claude', 'attach', ID]);
     expect(args('gnome-terminal')).toEqual(['--working-directory=/p', '--', 'claude', 'attach', ID]);
     expect(args('xfce4-terminal')).toEqual(['--working-directory=/p', '-x', 'claude', 'attach', ID]);
     expect(args('kitty')).toEqual(['--directory', '/p', 'claude', 'attach', ID]);
@@ -39,7 +42,10 @@ describe('linuxTerminal', () => {
   it('x-terminal-emulator is the last resort; relative PATH entries are ignored; none found is null', () => {
     expect(linuxTerminal(ID, '/p', env, () => true)?.cmd).toBe('/usr/local/bin/gnome-terminal');
     expect(linuxTerminal(ID, '/p', env, (p) => p.endsWith('/x-terminal-emulator') || p.endsWith('/xterm'))?.cmd).toBe('/usr/local/bin/xterm');
-    expect(linuxTerminal(ID, '/p', env, (p) => p === '/usr/bin/x-terminal-emulator')?.cmd).toBe('/usr/bin/x-terminal-emulator');
+    expect(linuxTerminal(ID, '/p', env, (p) => p === '/usr/bin/x-terminal-emulator', (p) => p)?.cmd).toBe('/usr/bin/x-terminal-emulator');
+    expect(linuxTerminal(ID, '/p', env, (p) => p.endsWith('/x-terminal-emulator') || p.endsWith('/ptyxis') || p.endsWith('/kgx'), (p) => p)?.cmd).toBe(
+      '/usr/local/bin/ptyxis',
+    );
     expect(linuxTerminal(ID, '/p', { PATH: 'bin:.' }, () => true)).toBeNull();
     expect(linuxTerminal(ID, '/p', env, () => false)).toBeNull();
     expect(
@@ -47,6 +53,37 @@ describe('linuxTerminal', () => {
         throw new Error('EACCES');
       }),
     ).toBeNull();
+  });
+  it('x-terminal-emulator: the real terminal behind it (realpath) gets its own syntax', () => {
+    const only = (p: string) => p === '/usr/bin/x-terminal-emulator';
+    const via = (target: string) => linuxTerminal(ID, '/home/u/p', env, only, (p) => (p === '/usr/bin/x-terminal-emulator' ? target : p));
+    // Ubuntu with Ptyxis as the default terminal and no gnome-terminal (backlog 2026-11-26).
+    expect(via('/usr/bin/ptyxis')).toEqual({
+      cmd: '/usr/bin/ptyxis',
+      args: ['--new-window', '--working-directory', '/home/u/p', '--', 'claude', 'attach', ID],
+    });
+    expect(via('/usr/bin/kgx')).toEqual({ cmd: '/usr/bin/kgx', args: ['--working-directory', '/home/u/p', '--', 'claude', 'attach', ID] });
+    expect(via('/usr/bin/gnome-terminal')).toEqual({
+      cmd: '/usr/bin/gnome-terminal',
+      args: ['--working-directory=/home/u/p', '--', 'claude', 'attach', ID],
+    });
+    expect(via('/usr/bin/konsole')?.args).toEqual(['--workdir', '/home/u/p', '-e', 'claude', 'attach', ID]);
+    expect(via('/usr/bin/xfce4-terminal')?.args).toEqual(['--working-directory=/home/u/p', '-x', 'claude', 'attach', ID]);
+    expect(via('/opt/kitty.app/bin/kitty')).toEqual({ cmd: '/opt/kitty.app/bin/kitty', args: ['--directory', '/home/u/p', 'claude', 'attach', ID] });
+    expect(via('/usr/bin/alacritty')?.args).toEqual(['--working-directory', '/home/u/p', '-e', 'claude', 'attach', ID]);
+    expect(via('/usr/bin/xterm')?.args).toEqual(['-e', 'claude', 'attach', ID]);
+  });
+  it('x-terminal-emulator: an unknown target, a Debian .wrapper (xterm-style) or a realpath error keeps the one-string -e', () => {
+    const only = (p: string) => p === '/usr/bin/x-terminal-emulator';
+    const fallback = { cmd: '/usr/bin/x-terminal-emulator', args: ['-e', `claude attach ${ID}`] };
+    expect(linuxTerminal(ID, '/p', env, only, () => '/usr/bin/terminology')).toEqual(fallback);
+    expect(linuxTerminal(ID, '/p', env, only, () => '/usr/bin/gnome-terminal.wrapper')).toEqual(fallback);
+    expect(linuxTerminal(ID, '/p', env, only, () => '/usr/bin/x-terminal-emulator')).toEqual(fallback);
+    expect(
+      linuxTerminal(ID, '/p', env, only, () => {
+        throw new Error('ELOOP');
+      }),
+    ).toEqual(fallback);
   });
 });
 
@@ -87,6 +124,24 @@ describe('openTerminal', () => {
     expect(c.opts.env).toMatchObject({ PATH: '/usr/bin', CLAUDE_CONFIG_DIR: '/home/u/.claude-work' });
     expect(c.opts.env).not.toHaveProperty('CLAUDECODE');
     expect(c.unref).toBe(true);
+  });
+  it('Linux: x-terminal-emulator pointing to Ptyxis runs ptyxis with separate arguments (realpath injected)', async () => {
+    const r = recorder();
+    const res = await openTerminal(
+      { bgId: ID, cwd: '/home/u/p' },
+      {
+        spawn: r.spawn,
+        isDir: () => true,
+        platform: 'linux',
+        env: { PATH: '/usr/bin' },
+        exists: (p) => p === '/usr/bin/x-terminal-emulator',
+        realpath: (p) => (p === '/usr/bin/x-terminal-emulator' ? '/usr/bin/ptyxis' : p),
+      },
+    );
+    expect(res).toEqual({ ok: true });
+    expect(r.calls[0].cmd).toBe('/usr/bin/ptyxis');
+    expect(r.calls[0].args).toEqual(['--new-window', '--working-directory', '/home/u/p', '--', 'claude', 'attach', ID]);
+    expect(r.calls[0].opts).toMatchObject({ cwd: '/home/u/p', shell: false });
   });
   it('no terminal found, or a spawn error, is a failure (never a throw)', async () => {
     const r = recorder();
