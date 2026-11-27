@@ -325,17 +325,18 @@ describe('ChatView', () => {
     expect(box).toHaveValue('hello');
   });
 
-  it('409 does not overwrite text typed since', async () => {
+  it('409 does not overwrite text typed since: the refused text joins it', async () => {
     const user = userEvent.setup();
     let reject: (e: unknown) => void = () => {};
     const onSend = vi.fn(() => new Promise<void>((_, rej) => (reject = rej)));
     setup({ onSend });
     const box = screen.getByPlaceholderText('Message billing-api…');
+    await user.clear(box); // a draft left by an earlier test (drafts are kept in memory too)
     await user.type(box, 'first{Enter}');
     await user.type(box, 'second');
     reject(Object.assign(new Error('409'), { status: 409 }));
     expect(await screen.findByText('This session is disconnected')).toBeInTheDocument();
-    expect(box).toHaveValue('second');
+    expect(box).toHaveValue('second\n\nfirst');
   });
 
   it('a user message with attachments shows its file chips; one made only of files has no empty text', () => {

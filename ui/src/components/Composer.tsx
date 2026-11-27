@@ -63,6 +63,9 @@ const statusOf = (e: unknown): number | undefined => {
   return typeof s === 'number' ? s : Number((e as Error | null)?.message);
 };
 
+/** Two texts kept in one box, the older first, a blank line between them. */
+const joinText = (a: string, b: string) => (!a ? b : !b ? a : `${a}\n\n${b}`);
+
 export const LINE_PX = 22;
 export const PAD_PX = 12;
 export const MAX_LINES = 8;
@@ -167,8 +170,25 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
     };
   }, [keepAsDraft]);
 
-  const deliver = async (body: string) => {
+  /**
+   * Clears the send failure before a new send. A failed text lives only in its retry banner, so it goes back
+   * into the box first (review 0.6.11: the next message used to drop it). `keepFailed` leaves the banner up
+   * instead (a command or an upload that may still fail and needs the box for its own text).
+   */
+  const clearFailure = (keepFailed = false) => {
+    const f = failureRef.current;
+    if (f?.kind !== 'failed') return setFailure(null);
+    if (keepFailed) return;
+    failureRef.current = null;
     setFailure(null);
+    setText((cur) => joinText(f.text, cur));
+  };
+
+  const deliver = async (body: string, retry = false) => {
+    if (retry) {
+      failureRef.current = null;
+      setFailure(null);
+    } else clearFailure();
     try {
       await onSend(body);
     } catch (e) {
@@ -177,7 +197,7 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
         return;
       }
       if (statusOf(e) === 409) {
-        setText((cur) => (cur === '' ? body : cur));
+        setText((cur) => (cur === body ? cur : joinText(cur, body)));
         const direction = versionOf(e);
         setFailure(direction ? { kind: 'version', direction } : { kind: 'disconnected' });
       } else {
@@ -188,7 +208,7 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
 
   const runCommand = async (cmd: string) => {
     if (!onCommand) return;
-    setFailure(null);
+    clearFailure(true);
     setCommand(null);
     try {
       await onCommand(cmd);
@@ -235,7 +255,7 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
     // Upload first; the text and the files stay in the box until every file is on the hub.
     setUploading(true);
     setAttachError(null);
-    setFailure(null);
+    clearFailure(true); // the box still holds the text being sent; deliver() brings the failed one back
     const paths: string[] = [];
     try {
       for (const f of batch) {
@@ -250,6 +270,7 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
       if (!mounted.current) return; // the files are gone with the composer; the text is still the draft
       setUploading(false);
       if (statusOf(e) === 409) {
+        clearFailure(); // its banner gives way to this one: the failed text joins the box
         const direction = versionOf(e);
         setFailure(direction ? { kind: 'version', direction } : { kind: 'disconnected' });
       } else setAttachError({ kind: 'upload' });
@@ -407,7 +428,7 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
           {t('ui.composer.sendFailed')}
           <button
             type="button"
-            onClick={() => void deliver(failure.text)}
+            onClick={() => void deliver(failure.text, true)}
             className="min-h-11 rounded-lg px-3 font-semibold underline"
           >
             {t('ui.composer.retry')}

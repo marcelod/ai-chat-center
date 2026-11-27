@@ -5,7 +5,8 @@ import { runAsk, type AskInput, type AskOptions } from '../../src/hooks/ask.js';
 import { register, markDisconnected, updateRegistration } from '../../src/core/registry.js';
 import { saveConfig } from '../../src/core/config.js';
 import { setTurnOrigin } from '../../src/core/turn.js';
-import { getPending, writeAnswer } from '../../src/core/questions.js';
+import { getPending, signAnswer, writeAnswer } from '../../src/core/questions.js';
+import { installSecret } from '../../src/core/secret.js';
 import { getWaiting } from '../../src/core/waiting.js';
 import { paths } from '../../src/core/paths.js';
 import { tmpDir } from '../helpers/tmp.js';
@@ -138,7 +139,7 @@ describe('runAsk: waits for the app', () => {
     fs.writeFileSync(answer, '{"answers":{');
     await new Promise((r) => setTimeout(r, 50));
     expect(await getPending(SID)).not.toBeNull();
-    fs.writeFileSync(answer, JSON.stringify({ answers: { [Q]: 'Yellow' } }));
+    fs.writeFileSync(answer, JSON.stringify(signAnswer(SID, ID, { answers: { [Q]: 'Yellow' } }, await installSecret())));
     expect((JSON.parse((await run)!) as Out).hookSpecificOutput.updatedInput.answers).toEqual({ [Q]: 'Yellow' });
   });
 
@@ -199,5 +200,51 @@ describe('runAsk: waits for the app', () => {
     expect(await runAsk(inp(), opts({ deadlineMs: 50 }))).toBeNull();
     expect(await getPending(SID)).toBeNull();
     expect(await getWaiting(SID)).toBeNull();
+  });
+});
+
+// Review 0.6.11: only an answer signed by the hub (install secret) approves the tool call. Anything else written
+// into questions/ (an old hub during an upgrade, or a forged file) gives no decision: Claude Code shows its own
+// dialog, the app shows the question as waiting in the terminal, and ask.log says why.
+describe('runAsk: unsigned or badly signed answers fall back to the terminal dialog', () => {
+  const answerPath = () => path.join(paths().questionsDir(SID), `${ID}.answer.json`);
+  const rejected = async (write: () => Promise<void> | void) => {
+    const run = runAsk(inp(), opts());
+    await pendingSeen();
+    await write();
+    expect(await run).toBeNull();
+    expect(await getPending(SID)).toBeNull();
+    expect(fs.existsSync(answerPath())).toBe(false);
+    expect((await getWaiting(SID))?.kind).toBe('question');
+    const log = fs.readFileSync(path.join(paths().logDir, 'ask.log'), 'utf8');
+    expect(log).toMatch(/answer.*not signed by the hub|unsigned/i);
+    expect(log).not.toContain(await installSecret());
+  };
+  const put = (a: unknown) => fs.writeFileSync(answerPath(), JSON.stringify(a));
+  const sign = async (sid: string, id: string, a: Parameters<typeof signAnswer>[2], createdAt?: string) =>
+    signAnswer(sid, id, a, await installSecret(), createdAt);
+
+  it('an unsigned answer (an old hub, or a forged file)', () => rejected(() => put({ answers: { [Q]: 'Blue' } })));
+  it('an unsigned release', () => rejected(() => put({ release: true })));
+  it('a tampered answer', () =>
+    rejected(async () => put({ ...(await sign(SID, ID, { answers: { [Q]: 'Blue' } })), answers: { [Q]: 'Red' } })));
+  it('an answer signed for another session', () => rejected(async () => put(await sign('s2', ID, { answers: { [Q]: 'Blue' } }))));
+  it('an answer signed for another tool use', () => rejected(async () => put(await sign(SID, 'toolu_99', { answers: { [Q]: 'Blue' } }))));
+  it('an answer signed with another secret', () =>
+    rejected(() => put(signAnswer(SID, ID, { answers: { [Q]: 'Blue' } }, 'f'.repeat(64)))));
+  it('an answer dated before the question (a replayed file)', () =>
+    rejected(async () => put(await sign(SID, ID, { answers: { [Q]: 'Blue' } }, new Date(Date.now() - 60_000).toISOString()))));
+  it('no install secret', () =>
+    rejected(async () => {
+      const a = await sign(SID, ID, { answers: { [Q]: 'Blue' } });
+      fs.rmSync(paths().secret);
+      put(a);
+    }));
+
+  it('a valid signed answer is allowed', async () => {
+    const run = runAsk(inp(), opts());
+    await pendingSeen();
+    put(await sign(SID, ID, { answers: { [Q]: 'Blue' } }));
+    expect((JSON.parse((await run)!) as Out).hookSpecificOutput.permissionDecision).toBe('allow');
   });
 });
