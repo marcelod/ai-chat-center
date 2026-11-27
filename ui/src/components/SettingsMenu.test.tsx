@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LangProvider } from '../i18n';
-import { saveShowDiffs, saveSystemNotifications } from '../prefs';
+import { saveGroupByProject, saveShowDiffs, saveSystemNotifications } from '../prefs';
 import { SettingsMenu } from './SettingsMenu';
 
 afterEach(() => {
@@ -67,6 +67,29 @@ describe('SettingsMenu file changes', () => {
     await user.click(screen.getByRole('checkbox', { name: 'Mostrar alterações dos arquivos' }));
     expect(screen.getByRole('checkbox', { name: 'Mostrar alterações dos arquivos' })).toBeChecked();
     spy.mockRestore();
+  });
+});
+
+describe('SettingsMenu group by project', () => {
+  afterEach(() => saveGroupByProject(false));
+  it('is off by default and the choice is remembered', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    const box = screen.getByRole('checkbox', { name: 'Group by project' });
+    expect(box).not.toBeChecked();
+    await user.click(box);
+    expect(box).toBeChecked();
+    expect(localStorage.getItem('acc.groupByProject')).toBe('1');
+    await user.click(box);
+    expect(localStorage.getItem('acc.groupByProject')).toBe('0');
+  });
+
+  it('has a Portuguese label', async () => {
+    const user = userEvent.setup();
+    setup('pt-BR');
+    await user.click(screen.getByRole('button', { name: /Configura/ }));
+    expect(screen.getByRole('checkbox', { name: 'Agrupar por projeto' })).toBeInTheDocument();
   });
 });
 

@@ -133,6 +133,8 @@
     "theme": {"label": "Tema", "system": "Sistema", "light": "Claro", "dark": "Escuro"},
     "language": "Idioma",
     "showDiffs": "Mostrar alterações dos arquivos",
+    "groupByProject": "Agrupar por projeto",
+    "group": {"busy": "uma conversa está trabalhando"},
     "back": "Voltar",
     "unread": "{n} não lidas",
     "loadError": "Não foi possível falar com o hub. Tentando de novo…",
