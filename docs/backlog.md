@@ -27,6 +27,10 @@ Ideias, da melhor para a mais simples:
 - O hub antigo, antes de sair, avisar as páginas abertas ("o app foi atualizado") e elas se fecharem (`window.close()` funciona na janela `--app` aberta pelo hub; numa aba comum, mostrar "Atualizado: feche esta aba").
 - No mínimo, a janela sem conexão mostrar "O app foi atualizado; esta janela pode ser fechada" em vez de ficar vazia.
 
+### Subagente com tarefa própria em segundo plano aparece como terminado
+
+Visto em 2026-11-27 (teste com 3 subagentes de 5, 20 e 60 s): o de 60 s apareceu como terminado **primeiro**. Causa: ele rodou o `sleep 60` como tarefa em segundo plano dele e encerrou o turno depois de ~5 s ("waiting on its own background work"); o Claude Code marca o subagente como `finished` nesse momento, embora ele volte quando a tarefa termina e só então entregue o resultado. O app confia só no `finished` do `agent-<id>.meta.json`. Correção: considerar também as tarefas em segundo plano do próprio subagente (uma ferramenta com `run_in_background` sem a notificação de fim na transcrição dele, ou linhas novas depois do `finished`), mostrando "Aguardando tarefa" em vez de "Finished"; e o "agentes trabalhando (N)" contar esse caso.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
