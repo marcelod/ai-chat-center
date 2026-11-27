@@ -82,7 +82,7 @@ export function SessionControls({ onCommand, working, unavailable = false, model
   const currentEffort = pending.effort ?? effort;
   const label = [pending.model ?? model ?? t('ui.chat.model'), currentEffort].filter(Boolean).join(' · ');
   const waiting = working && (pending.model || pending.effort);
-  const chipCls = 'inline-flex h-7 min-w-0 max-w-[14rem] items-center gap-1 rounded-full border px-2.5 text-xs';
+  const chipCls = 'inline-flex h-6 min-w-0 max-w-[14rem] items-center gap-1 rounded-full border px-2 text-[11px]';
   const item = 'flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink hover:bg-field aria-checked:bg-field';
 
   return (

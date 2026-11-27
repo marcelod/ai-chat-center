@@ -92,7 +92,7 @@ export function ContextMeter({ context, model }: { context: ContextUsage; model?
             setHover(false);
           }
         }}
-        className={`inline-flex h-7 items-center gap-1 rounded-full px-1.5 text-xs tabular-nums hover:bg-field ${LEVEL_CLS[level]}`}
+        className={`inline-flex h-6 items-center gap-1 rounded-full px-1.5 text-[11px] tabular-nums hover:bg-field ${LEVEL_CLS[level]}`}
       >
         <Pie pct={pct} />
         <span aria-hidden="true">{pct}%</span>

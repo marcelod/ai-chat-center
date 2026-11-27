@@ -941,3 +941,62 @@ describe('provider: background sessions (spec 2026-11-24-background-sessions)', 
     expect(v.resumeError).toBeUndefined();
   });
 });
+
+// Claude Code moves the transcript of a session that enters a worktree into the worktree's project folder
+// (~/.claude/projects/<project>--claude-worktrees-<name>/<id>.jsonl). The hub follows it.
+describe('provider: transcript moved into a worktree folder', () => {
+  const setup = async () => {
+    const projects = path.join(dir, 'claude', 'projects');
+    const oldDir = path.join(projects, '-home-u-proj');
+    const newDir = path.join(projects, '-home-u-proj--claude-worktrees-site');
+    fs.mkdirSync(oldDir, { recursive: true });
+    fs.mkdirSync(path.join(projects, '-home-u-other'), { recursive: true });
+    const oldPath = path.join(oldDir, 's1.jsonl');
+    fs.writeFileSync(oldPath, line('a', 'before'));
+    await register({ sessionId: 's1', transcriptPath: oldPath, cwd: '/home/u/proj', pid: 1, version: VERSION, protocol: PROTOCOL, configDir: path.join(dir, 'claude') });
+    const move = () => {
+      fs.mkdirSync(newDir, { recursive: true });
+      const newPath = path.join(newDir, 's1.jsonl');
+      fs.renameSync(oldPath, newPath);
+      fs.appendFileSync(newPath, JSON.stringify({ type: 'assistant', uuid: 'b', cwd: '/home/u/proj/.claude/worktrees/site', timestamp: '2026-01-01T00:01:00Z', message: { role: 'assistant', content: [{ type: 'text', text: 'after' }] } }) + '\n');
+      const sub = path.join(newDir, 's1', 'subagents');
+      fs.mkdirSync(sub, { recursive: true });
+      return newPath;
+    };
+    return { projects, oldPath, move };
+  };
+
+  it('finds the moved file, updates transcriptPath and cwd, and keeps reading without the missing warning', async () => {
+    const { move } = await setup();
+    const connectedAt = Date.parse((await getRegistration('s1'))!.connectedAt);
+    const p = new ClaudeCodeProvider(async () => [live({ cwd: undefined as unknown as string })], { now: () => connectedAt + 60_000 });
+    expect((await p.listSessions()).connected[0].lastEvent?.id).toBe('a');
+    const newPath = move();
+    const s = (await p.listSessions()).connected[0];
+    expect(s.transcriptMissing).toBeUndefined();
+    expect(s.lastEvent?.id).toBe('b');
+    const r = await getRegistration('s1');
+    expect(r?.transcriptPath).toBe(newPath);
+    expect(r?.cwd).toBe('/home/u/proj/.claude/worktrees/site');
+    expect((await p.events('s1')).map((e) => e.id)).toEqual(['a', 'b']);
+  });
+
+  it('the poll after the move sends only the new events, not the whole history again', async () => {
+    const { move } = await setup();
+    const p = new ClaudeCodeProvider(async () => [live()]);
+    await p.poll();
+    move();
+    const changes = await p.poll();
+    const ev = changes.find((c) => c.type === 'events') as { events: { id: string }[] } | undefined;
+    expect(ev?.events.map((e) => e.id)).toEqual(['b']);
+  });
+
+  it('still warns when the file is nowhere', async () => {
+    const { oldPath } = await setup();
+    const connectedAt = Date.parse((await getRegistration('s1'))!.connectedAt);
+    const p = new ClaudeCodeProvider(async () => [live()], { now: () => connectedAt + 60_000 });
+    fs.rmSync(oldPath);
+    expect((await p.listSessions()).connected[0].transcriptMissing).toBe(true);
+    expect((await getRegistration('s1'))?.transcriptPath).toBe(oldPath);
+  });
+});

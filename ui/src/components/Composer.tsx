@@ -336,7 +336,7 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
 
   return (
     <footer
-      className={`border-t bg-surface px-4 py-3 md:px-12 ${dragging ? 'border-accent ring-2 ring-inset ring-accent/40' : 'border-line'}`}
+      className={`border-t bg-surface px-4 py-3 md:px-6 ${dragging ? 'border-accent ring-2 ring-inset ring-accent/40' : 'border-line'}`}
       onDragOver={onDragOver}
       onDragLeave={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);

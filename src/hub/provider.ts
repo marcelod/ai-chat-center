@@ -8,7 +8,8 @@ import { getBackground } from '../core/background.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ChatEvent, LiveSession, ProviderChange, SessionsResponse, SessionView } from '../shared/types.js';
-import { getRegistration, isActive, isRemoved, listRegistrations, markDisconnected, sameConfigDir, trustedKeys, type Registration } from '../core/registry.js';
+import { claudeConfigDir, getRegistration, isActive, isRemoved, listRegistrations, markDisconnected, sameConfigDir, trustedKeys, updateRegistration, type Registration } from '../core/registry.js';
+import { findMovedTranscript, transcriptCwd } from './relocateTranscript.js';
 import { busyAge, clearBusy, isBusy } from '../core/busy.js';
 import { countUnsigned, enqueue, peek } from '../core/inbox.js';
 import { getPending } from '../core/questions.js';
@@ -87,6 +88,8 @@ const MISSES_TO_EXIT = 3;
 export const RESTART_GRACE_MS = 90_000;
 /** How old the count of a session's working subagents may be (it stats their files: kept cheap). */
 export const AGENTS_TTL_MS = 5000;
+/** How often the hub searches again for a transcript that is gone (see relocated). */
+const RELOCATE_RETRY_MS = 10_000;
 
 export type ProviderOptions = {
   now?: () => number;
@@ -94,7 +97,7 @@ export type ProviderOptions = {
   isAlive?: (pid: number) => boolean;
 };
 
-type Entry = { reader: TranscriptReader; read: boolean };
+type Entry = { reader: TranscriptReader; read: boolean; /** Ids already sent by the reader this one replaced. */ seen?: Set<string> };
 type Live = { list: LiveSession[]; ok: boolean; fresh: boolean };
 
 export class ClaudeCodeProvider implements Provider {
@@ -107,6 +110,7 @@ export class ClaudeCodeProvider implements Provider {
   private restarting = new Map<string, number>();
   private liveCache: { at: number; value: LiveSession[] } | null = null;
   private agentCounts = new Map<string, { at: number; n: number }>();
+  private relocateTries = new Map<string, number>();
   private lastGood: LiveSession[] | null = null;
   private lastSignature: string | null = null;
   private readonly now: () => number;
@@ -137,13 +141,17 @@ export class ClaudeCodeProvider implements Provider {
     const sid = reg.sessionId;
     const keys = trustedKeys(reg);
     let e = this.readers.get(sid);
+    let seen: Set<string> | undefined;
     if (e && (e.reader.path !== reg.transcriptPath || (e.reader.keys ?? []).join() !== keys.join())) {
+      // Same keys, new path: the transcript moved (a worktree) or the session resumed. Events already sent
+      // are not sent again (they would come back as unread); the pending ones still go out.
+      if ((e.reader.keys ?? []).join() === keys.join()) seen = new Set(e.reader.all().map((ev) => ev.id));
+      else this.pending.delete(sid);
       this.readers.delete(sid);
-      this.pending.delete(sid);
       e = undefined;
     }
     if (!e) {
-      e = { reader: new TranscriptReader(reg.transcriptPath, keys), read: false };
+      e = { reader: new TranscriptReader(reg.transcriptPath, keys), read: false, ...(seen ? { seen } : {}) };
       this.readers.set(sid, e);
     }
     return e;
@@ -151,8 +159,14 @@ export class ClaudeCodeProvider implements Provider {
 
   /** Read new events, buffering them for the next poll so no consumer steals them. */
   private async refresh(sid: string, e: Entry): Promise<void> {
-    const evs = await e.reader.readNew();
+    let evs = await e.reader.readNew();
     e.read = true;
+    if (e.seen) {
+      const seen = e.seen;
+      const pendingIds = new Set((this.pending.get(sid) ?? []).map((ev) => ev.id));
+      evs = evs.filter((ev) => !seen.has(ev.id) && !pendingIds.has(ev.id));
+      delete e.seen;
+    }
     if (evs.length) this.pending.set(sid, [...(this.pending.get(sid) ?? []), ...evs]);
   }
 
@@ -216,6 +230,35 @@ export class ClaudeCodeProvider implements Provider {
     } catch {
       return true; // no lock: no waiter
     }
+  }
+
+  /**
+   * The registered transcript is gone: Claude Code moved it (a session that entered a worktree writes under
+   * <project>--claude-worktrees-<name>). Finds <id>.jsonl in the other project folders of its Claude config
+   * dir and records the new path and folder, so reading (and the subagents beside it) goes on. Searched at
+   * most every RELOCATE_RETRY_MS per session.
+   */
+  private async relocated(reg: Registration): Promise<Registration> {
+    try {
+      await fs.stat(reg.transcriptPath);
+      this.relocateTries.delete(reg.sessionId);
+      return reg;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return reg;
+    }
+    const sid = reg.sessionId;
+    const t = this.now();
+    const last = this.relocateTries.get(sid);
+    if (last !== undefined && t >= last && t - last < RELOCATE_RETRY_MS) return reg;
+    this.relocateTries.set(sid, t);
+    const projects = path.join(reg.configDir ? path.resolve(reg.configDir) : claudeConfigDir(), 'projects');
+    const found = await findMovedTranscript(reg.transcriptPath, sid, projects).catch(() => null);
+    if (!found) return reg;
+    this.relocateTries.delete(sid);
+    const cwd = await transcriptCwd(found);
+    const patch = { transcriptPath: found, ...(cwd ? { cwd } : {}) };
+    const next = await updateRegistration(sid, patch, isActive(reg) ? { ifConnectedAt: reg.connectedAt } : {});
+    return next ?? { ...reg, ...patch };
   }
 
   /**
@@ -300,9 +343,10 @@ export class ClaudeCodeProvider implements Provider {
     const connected: (SessionView & { _sort: number })[] = [];
     const activeIds = new Set<string>();
 
-    for (const reg of regs) {
+    for (let reg of regs) {
       // Removed from the app by the user: hidden until a new /cc registers it again.
       if (isRemoved(reg)) continue;
+      reg = await this.relocated(reg);
       const sid = reg.sessionId;
       const l = liveById.get(sid);
       let disconnected = !isActive(reg);
@@ -428,8 +472,9 @@ export class ClaudeCodeProvider implements Provider {
   }
 
   async events(sid: string, opts: { diffs?: boolean } = {}): Promise<ChatEvent[]> {
-    const reg = await getRegistration(sid);
-    if (!reg) return [];
+    const found = await getRegistration(sid);
+    if (!found) return [];
+    const reg = await this.relocated(found);
     if (!isActive(reg)) {
       const tmp = new TranscriptReader(reg.transcriptPath, trustedKeys(reg), opts); // not cached: bounded memory
       await tmp.readNew();
@@ -444,10 +489,10 @@ export class ClaudeCodeProvider implements Provider {
     const changes: ProviderChange[] = [];
     const regs = await listRegistrations();
     const known = new Set(regs.map((r) => r.sessionId));
-    for (const reg of regs) {
-      const sid = reg.sessionId;
-      if (isActive(reg)) {
-        await this.refresh(sid, this.entry(reg));
+    for (const r of regs) {
+      const sid = r.sessionId;
+      if (isActive(r)) {
+        await this.refresh(sid, this.entry(await this.relocated(r)));
       } else if (this.readers.has(sid)) {
         // final read of a just-disconnected session, then evict its reader
         const e = this.readers.get(sid)!;
@@ -463,7 +508,7 @@ export class ClaudeCodeProvider implements Provider {
       this.pending.delete(sid);
       if (events?.length) changes.push({ type: 'events', sessionId: sid, events });
     }
-    for (const m of [this.readers, this.pending, this.lastEvents, this.lastModels, this.misses, this.agentCounts] as Map<string, unknown>[]) {
+    for (const m of [this.readers, this.pending, this.lastEvents, this.lastModels, this.misses, this.agentCounts, this.relocateTries] as Map<string, unknown>[]) {
       for (const sid of [...m.keys()]) if (!known.has(sid)) m.delete(sid);
     }
     // A restart mark ends with its grace, whether or not the session ever left the list.
