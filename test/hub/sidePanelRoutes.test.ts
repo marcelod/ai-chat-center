@@ -234,6 +234,7 @@ describe('GET /api/sessions/:sid/screen', () => {
     const secret = await installSecret();
     const calls: unknown[][] = [];
     const u = await start({
+      platform: 'linux',
       listLive: async () => [bgLive()],
       screen: async (...a) => {
         calls.push(a);
@@ -253,7 +254,7 @@ describe('GET /api/sessions/:sid/screen', () => {
     let raw = '\x1b[2J\x1b[1;1H';
     for (let i = 0; i < 30; i++) raw += `\r\x1b[K✻ Doodling… ${i}`;
     raw += '\r\x1b[KFala\x1b[1Cmeu\x1b[1Crei';
-    const u = await start({ listLive: async () => [bgLive()], screen: async () => raw });
+    const u = await start({ platform: 'linux', listLive: async () => [bgLive()], screen: async () => raw });
     const r = await req(u, '/api/sessions/s1/screen', { headers: auth });
     expect(parse(r.body).text).toBe('Fala meu rei');
   });
@@ -261,7 +262,7 @@ describe('GET /api/sessions/:sid/screen', () => {
   it('409 for an interactive or disconnected session, 503 failed lookup, 502 failed read, 401 without token', async () => {
     let list: LiveSession[] | null = [bgLive({ kind: 'interactive', bgId: undefined })];
     let fail = false;
-    const u = await start({ listLive: async () => list, screen: async () => { if (fail) throw new Error(`boom ${TOKEN}`); return 'ok'; } });
+    const u = await start({ platform: 'linux', listLive: async () => list, screen: async () => { if (fail) throw new Error(`boom ${TOKEN}`); return 'ok'; } });
     let r = await req(u, '/api/sessions/s1/screen', { headers: auth });
     expect(r.status).toBe(409);
     expect(parse(r.body).code).toBe('not-background');
