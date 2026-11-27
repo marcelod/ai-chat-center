@@ -19,6 +19,7 @@ import { readBackgroundImage, saveBackgroundImage, setBackground, validBackgroun
 import { BACKGROUND_IMAGE_MAX } from '../shared/background.js';
 import { getRegistration, isActive, listRegistrations, isRemoved, markDisconnected, markRemoved, trustedKeys, type Registration } from '../core/registry.js';
 import { VERSION } from '../core/version.js';
+import { isBusy } from '../core/busy.js';
 import { CHALLENGE_RE, healthProof } from '../core/healthProof.js';
 import { createPairing } from './pairing.js';
 import { AttachmentTooLargeError, storeAttachment } from '../core/attachments.js';
@@ -779,7 +780,10 @@ export async function createHub(
         if (live === null) throw new HttpError(503, 'could not list running sessions');
         const l = live.find((x) => x.sessionId === sid);
         if (!l || l.kind !== 'background' || !l.bgId) throw new HttpError(404, 'not a background session');
-        if (l.status !== 'idle' || typing.has(sid)) throw new HttpError(409, 'session is busy');
+        // Same rule as the session list (provider): `claude agents` says busy while a background task runs
+        // after the turn ended; only the hub's turn marker makes it a running turn. Waiting stays busy.
+        const turnOn = l.status === 'busy' ? await isBusy(sid) : l.status !== 'idle';
+        if (turnOn || typing.has(sid)) throw new HttpError(409, 'session is busy');
         typing.add(sid);
         try {
           await type(l.bgId, text);

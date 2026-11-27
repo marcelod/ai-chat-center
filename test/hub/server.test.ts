@@ -15,6 +15,7 @@ import { tmpDir } from '../helpers/tmp.js';
 import { fakePng } from '../helpers/png.js';
 import { saveConfig, loadConfig } from '../../src/core/config.js';
 import { putPending, readAnswer } from '../../src/core/questions.js';
+import { setBusy, clearBusy } from '../../src/core/busy.js';
 import { paths } from '../../src/core/paths.js';
 import { getDisplayName } from '../../src/core/names.js';
 import { isPinned } from '../../src/core/pins.js';
@@ -1124,7 +1125,9 @@ describe('command endpoint (background sessions)', () => {
     const u = await start(fakeProvider(), { bg: { listLive: async () => list, type, platform: 'linux' } });
     expect((await post(u, { text: '/compact' })).status).toBe(404);
     list = [bgLive({ status: 'busy' })];
+    await setBusy('s1'); // a turn is on
     expect((await post(u, { text: '/compact' })).status).toBe(409);
+    await clearBusy('s1');
     list = [bgLive({ status: 'waiting' })];
     expect((await post(u, { text: '/compact' })).status).toBe(409);
     await markDisconnected('s1', 'exited');
@@ -1136,6 +1139,17 @@ describe('command endpoint (background sessions)', () => {
     await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
     const w = await start(fakeProvider(), { bg: { listLive: async () => list, type, platform: 'win32' } });
     expect((await post(w, { text: '/compact' })).status).toBe(501);
+  });
+  // Review 2026-11-27: same rule as the session list. `claude agents` says busy while a background task runs
+  // after the turn ended; without the hub's turn marker the app shows the session idle, and commands work.
+  it('busy in `claude agents` without the turn marker (a background task) is idle: 200', async () => {
+    const type = vi.fn(async () => {});
+    const u = await start(fakeProvider(), { bg: { listLive: async () => [bgLive({ status: 'busy' })], type, platform: 'linux' } });
+    expect((await post(u, { text: '/model sonnet' })).status).toBe(200);
+    expect(type).toHaveBeenCalledWith('5e1b5e9b', '/model sonnet');
+    await setBusy('s1');
+    expect((await post(u, { text: '/model sonnet' })).status).toBe(409);
+    expect(type).toHaveBeenCalledTimes(1);
   });
   it('one command at a time per session; a failure is 502', async () => {
     let release!: () => void;
