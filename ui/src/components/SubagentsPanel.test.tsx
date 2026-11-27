@@ -1,10 +1,10 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, renderHook, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { ChatEvent, SessionView, SubagentInfo } from '@shared/types';
 import { LangProvider } from '../i18n';
 import { ChatView } from './ChatView';
-import { formatDuration, groupSubagents, lastUserMessageAt } from './SubagentsPanel';
+import { formatDuration, groupSubagents, lastUserMessageAt, SUBAGENTS_POLL_MS, usePolled } from './SubagentsPanel';
 import type { PanelApi } from './SidePanel';
 
 // Spec 2026-11-26-side-panel: the subagents of the session in the side panel.
@@ -53,6 +53,45 @@ function setup(over: Partial<PanelApi> = {}, s = session(), events: ChatEvent[] 
   );
   return panel;
 }
+
+describe('usePolled', () => {
+  const setHidden = (hidden: boolean) => Object.defineProperty(document, 'hidden', { value: hidden, configurable: true });
+  it('does not poll while the page is hidden, and loads again when it is shown', async () => {
+    vi.useFakeTimers();
+    try {
+      let n = 0;
+      const load = vi.fn(async () => ({ n: ++n }));
+      const { result } = renderHook(() => usePolled(load, SUBAGENTS_POLL_MS));
+      await act(async () => {});
+      expect(load).toHaveBeenCalledTimes(1);
+      setHidden(true);
+      await act(async () => vi.advanceTimersByTime(SUBAGENTS_POLL_MS)); // the one already scheduled
+      await act(async () => vi.advanceTimersByTime(SUBAGENTS_POLL_MS * 5));
+      expect(load).toHaveBeenCalledTimes(2);
+      setHidden(false);
+      await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+      expect(load).toHaveBeenCalledTimes(3);
+      expect(result.current.value).toEqual({ n: 3 });
+    } finally {
+      setHidden(false);
+      vi.useRealTimers();
+    }
+  });
+  it('keeps the same value when an answer did not change', async () => {
+    vi.useFakeTimers();
+    try {
+      const load = vi.fn(async () => ({ same: true }));
+      const { result } = renderHook(() => usePolled(load, SUBAGENTS_POLL_MS));
+      await act(async () => {});
+      const first = result.current.value;
+      await act(async () => vi.advanceTimersByTime(SUBAGENTS_POLL_MS));
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(result.current.value).toBe(first);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe('formatDuration', () => {
   it('says minutes and hours', () => {
