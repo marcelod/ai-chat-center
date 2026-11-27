@@ -1,14 +1,8 @@
 # Pendências
 
-Itens combinados e deixados para depois. Estado em 2026-11-27, versão 0.6.10. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
+Itens combinados e deixados para depois. Estado em 2026-11-27, versão 0.6.11. Só o autor usa o app por enquanto: priorizar o que atrapalha o uso diário.
 
 ## A fazer
-
-### Sessão que entra num worktree some do app ("não salva o histórico")
-
-Visto em 2026-11-27 (0.6.10), sessão `856fd72f` do meetaone-v4. A sessão se conectou com `/cc` na pasta do projeto e depois entrou num worktree (`.claude/worktrees/site-publico`). O Claude Code move a transcrição para a pasta de projeto do worktree (`~/.claude/projects/<projeto>--claude-worktrees-<nome>/<id>.jsonl`), mas o registro no hub (`~/.ai-chat-center/sessions/<id>.json`) continua com o `transcriptPath` e o `cwd` antigos. O hub não acha mais o arquivo, mostra o aviso "Esta sessão não salva o histórico" (cujo texto fala de variáveis `CLAUDE_CODE_*`, que não é o caso aqui) e deixa de mostrar as respostas novas. O que já tinha sido lido continua na tela. As mensagens do app continuam chegando ao terminal.
-
-Correção sugerida: quando o `transcriptPath` registrado sumir, procurar `<id>.jsonl` nas outras pastas de `~/.claude/projects` (ou nas pastas `*--claude-worktrees-*` do mesmo projeto), atualizar o registro (`transcriptPath` e `cwd`) e seguir lendo. Os subagentes ficam junto, em `<id>/subagents/`. O aviso só aparece se o arquivo não estiver em lugar nenhum. Testado em 2026-11-27: `/cc` de novo na sessão atualiza `transcriptPath` e `cwd` no registro, mas o autor viu o problema continuar no app. Conferir se o hub ou a UI guardam o estado de transcrição ausente ou o leitor antigo. Enviado ao desenvolvimento em 2026-11-27. **Corrigido na branch `fix/transcript-relocate` (9a7ff3e), ainda sem merge nem versão.** Também deixa de reenviar todo o histórico quando o arquivo muda de lugar ou há um novo `/cc`. O dev não reproduziu o aviso que ficou depois do `/cc`.
 
 ### Instalação mais fácil no Windows
 
@@ -77,6 +71,10 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## A testar no uso
 
+- 0.6.11 (spec `docs/superpowers/specs/2026-11-27-transcript-relocate-design.md`):
+  - Sessão que entra num worktree: conectar com `/cc` na pasta do projeto, pedir para entrar num worktree e mandar um prompt. Em até ~10 s o app segue mostrando as respostas, sem o aviso "não salva o histórico"; pasta e branch passam a ser as do worktree; o painel de subagentes continua funcionando. O aviso que o autor viu depois do `/cc` na 0.6.10 não foi reproduzido: conferir se some.
+  - Depois do arquivo mudar de lugar (ou de um novo `/cc`), o histórico não volta como mensagens novas nem não lidas.
+  - Margens laterais menores na conversa e no campo de mensagem (tela larga); chips de contexto, modelo e modo menores. Conferir tema claro e escuro.
 - 0.6.10 (correções da auditoria das 0.6.5–0.6.9; spec `docs/superpowers/specs/2026-11-27-audit-fixes-design.md`):
   - Blocos de código: ligar "Quebrar linhas" e "Copiar" enquanto outra sessão trabalha; a escolha não some. Com a busca aberta, ↑/↓ continua destacando dentro de código.
   - Painel numa sessão rodando em `~`: `~/.claude/.credentials.json` ou `~/.config/gh/hosts.yml` citados não viram link e, abertos direto, mostram "não pode ser mostrado"; arquivos comuns e anexos abrem; um `.log` sendo escrito abre sem "grande demais". Efeito colateral: sessão numa pasta `~/.algo` (ex. `~/.dotfiles`) não abre arquivos no painel.
@@ -160,6 +158,7 @@ Sugestão de ordem: 2 (fecha o "fazer tudo sem terminal"), depois 16 e 21. ✅ m
 
 ## Feito
 
+- 0.6.11: sessão que entra num worktree continua no app (o hub acha a transcrição movida e atualiza caminho e pasta); histórico não é reenviado quando o arquivo muda; margens laterais e chips da barra inferior menores.
 - 0.6.10: correções da auditoria das 0.6.5–0.6.9: Markdown não remonta os blocos a cada atualização; regex de caminhos e filtro de link/token sem lentidão em textos longos; `claude.cmd` plantado na pasta do projeto não roda no Windows; painel recusa arquivos ocultos da home e nomes de segredo; bloco forjado em subagente aparece como texto; erros de parar/reiniciar/remover sem a saída do `claude`; limpeza de sessões paradas não esconde a viva; ajustes de interface (submenu no celular, links além de 200 caminhos, leitor de tela, plurais e números em pt-BR, polling com a aba oculta, Esc no diálogo) e testes que faltavam.
 - 0.6.9: a janela antiga do app se fecha (ou diz "O app foi atualizado") quando o hub é trocado por uma versão nova, e não fica mais vazia ao perder a conexão; subagente esperando a própria tarefa em segundo plano aparece como "Aguardando tarefa" e conta em "agentes trabalhando"; painel lateral com "Quebrar linhas" no código, realce por linguagem e dica do PDF no celular.
 - 0.6.8: tela da sessão interpretada como terminal (só a tela final, com espaços); `/status`, `/cost`, `/context` e afins liberados em segundo plano, abrindo a tela no painel; "Abrir no terminal" com Ptyxis e Console do GNOME (e o terminal real atrás do `x-terminal-emulator`); chamada de agente bloqueada aparece como "Não executado"; painel de subagentes com os que rodam em cima e "Histórico (N)"; respostas rápidas sugeridas pelo uso; painel lateral com código na linha citada, PDF e diff; exportar conversa em Markdown ou PDF; agrupar sessões por projeto (opcional).

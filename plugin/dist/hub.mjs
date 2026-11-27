@@ -5077,9 +5077,9 @@ ${i3.join("\n")}
 });
 
 // src/hub/main.ts
-import fs21 from "node:fs/promises";
+import fs22 from "node:fs/promises";
 import fsSync from "node:fs";
-import path20 from "node:path";
+import path21 from "node:path";
 import crypto10 from "node:crypto";
 import { fileURLToPath } from "node:url";
 
@@ -5411,8 +5411,8 @@ async function clearBackground(sid) {
 }
 
 // src/hub/provider.ts
-import fs13 from "node:fs/promises";
-import path12 from "node:path";
+import fs14 from "node:fs/promises";
+import path13 from "node:path";
 
 // src/core/registry.ts
 import fs9 from "node:fs/promises";
@@ -5837,7 +5837,7 @@ async function cleanupAttachments(alive, now = Date.now(), maxAgeMs = ATTACHMENT
 }
 
 // src/core/version.ts
-var VERSION = "0.6.10";
+var VERSION = "0.6.11";
 var PROTOCOL = 2;
 
 // src/core/registry.ts
@@ -5859,6 +5859,17 @@ function sameConfigDir(r, mine = claudeConfigDir()) {
   return process.platform === "win32" ? a.toLowerCase() === mine.toLowerCase() : a === mine;
 }
 var trustedKeys = (r) => [...r.previousKeys ?? [], ...r.key ? [r.key] : []];
+async function updateRegistration(sid, patch, opts = {}) {
+  if (!await getRegistration(sid)) return null;
+  return locked(sid, async () => {
+    const r = await getRegistration(sid);
+    if (!r) return null;
+    if (opts.ifConnectedAt !== void 0 && (!isActive(r) || r.connectedAt !== opts.ifConnectedAt)) return null;
+    const next = { ...r, ...patch };
+    await writeJsonAtomic(regFile(sid), next);
+    return next;
+  });
+}
 async function getRegistration(sid) {
   return readJson(regFile(sid));
 }
@@ -5939,9 +5950,68 @@ async function pruneRegistrations(maxAgeMs, now = Date.now()) {
   return pruned;
 }
 
-// src/core/questions.ts
+// src/hub/relocateTranscript.ts
 import fs10 from "node:fs/promises";
 import path9 from "node:path";
+var CWD_TAIL_BYTES = 64 * 1024;
+async function regularFile(p) {
+  try {
+    const st = await fs10.lstat(p);
+    return st.isFile() ? st.mtimeMs : null;
+  } catch {
+    return null;
+  }
+}
+async function newest(dirs, projectsDir, name) {
+  let best = null;
+  for (const d of dirs) {
+    const p = path9.join(projectsDir, d, name);
+    const m = await regularFile(p);
+    if (m !== null && (!best || m > best.m)) best = { p, m };
+  }
+  return best?.p ?? null;
+}
+async function findMovedTranscript(oldPath, sid, projectsDir) {
+  assertSessionId(sid);
+  let dirs;
+  try {
+    dirs = (await fs10.readdir(projectsDir, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name);
+  } catch {
+    return null;
+  }
+  const project = path9.basename(path9.dirname(oldPath));
+  const name = `${sid}.jsonl`;
+  const prefix = `${project}--claude-worktrees-`;
+  const own = dirs.filter((d) => d.startsWith(prefix));
+  return await newest(own, projectsDir, name) ?? await newest(dirs.filter((d) => d !== project && !d.startsWith(prefix)), projectsDir, name);
+}
+async function transcriptCwd(file) {
+  let fh;
+  try {
+    fh = await fs10.open(file, "r");
+    const { size } = await fh.stat();
+    const len = Math.min(size, CWD_TAIL_BYTES);
+    const buf = Buffer.alloc(len);
+    await fh.read(buf, 0, len, size - len);
+    const lines2 = buf.toString("utf8").split("\n");
+    for (let i = lines2.length - 1; i >= 0; i--) {
+      try {
+        const cwd = JSON.parse(lines2[i])?.cwd;
+        if (typeof cwd === "string" && cwd) return cwd;
+      } catch {
+      }
+    }
+    return void 0;
+  } catch {
+    return void 0;
+  } finally {
+    await fh?.close();
+  }
+}
+
+// src/core/questions.ts
+import fs11 from "node:fs/promises";
+import path10 from "node:path";
 var TOOL_USE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 function assertToolUseId(id) {
   if (typeof id !== "string" || !TOOL_USE_ID_RE.test(id)) {
@@ -5970,12 +6040,12 @@ function parseQuestions(input) {
   }
   return out;
 }
-var pendingFile = (sid, id) => (assertToolUseId(id), path9.join(paths().questionsDir(sid), `${id}.json`));
-var answerFile = (sid, id) => (assertToolUseId(id), path9.join(paths().questionsDir(sid), `${id}.answer.json`));
+var pendingFile = (sid, id) => (assertToolUseId(id), path10.join(paths().questionsDir(sid), `${id}.json`));
+var answerFile = (sid, id) => (assertToolUseId(id), path10.join(paths().questionsDir(sid), `${id}.answer.json`));
 async function getPending(sid) {
   let names;
   try {
-    names = await fs10.readdir(paths().questionsDir(sid));
+    names = await fs11.readdir(paths().questionsDir(sid));
   } catch {
     return null;
   }
@@ -5983,10 +6053,10 @@ async function getPending(sid) {
   let removedStale = false;
   for (const n of names) {
     if (!n.endsWith(".json") || n.endsWith(".answer.json")) continue;
-    const p = await readJson(path9.join(paths().questionsDir(sid), n));
+    const p = await readJson(path10.join(paths().questionsDir(sid), n));
     if (p && typeof p.pid === "number" && !isAlive(p.pid)) {
       if (typeof p.toolUseId === "string" && `${p.toolUseId}.json` === n) await removePending(sid, p.toolUseId);
-      else await removeFile(path9.join(paths().questionsDir(sid), n));
+      else await removeFile(path10.join(paths().questionsDir(sid), n));
       removedStale = true;
       continue;
     }
@@ -6003,7 +6073,7 @@ async function writeAnswer(sid, toolUseId, a) {
   if (await readJson(pendingFile(sid, toolUseId)) === null) return "not-found";
   await ensureDir(paths().questionsDir(sid));
   try {
-    await fs10.writeFile(answerFile(sid, toolUseId), JSON.stringify(a, null, 2), { encoding: "utf8", flag: "wx", mode: FILE_MODE });
+    await fs11.writeFile(answerFile(sid, toolUseId), JSON.stringify(a, null, 2), { encoding: "utf8", flag: "wx", mode: FILE_MODE });
     return "ok";
   } catch (e) {
     if (e.code === "EEXIST") return "conflict";
@@ -6025,8 +6095,8 @@ function validAnswers(questions, answers) {
 }
 
 // src/hub/subagents.ts
-import fs11 from "node:fs/promises";
-import path10 from "node:path";
+import fs12 from "node:fs/promises";
+import path11 from "node:path";
 
 // src/hub/transcript/reader.ts
 import { open } from "node:fs/promises";
@@ -6631,8 +6701,8 @@ var TranscriptParser = class {
 // src/hub/transcript/reader.ts
 var CHUNK = 64 * 1024;
 var TranscriptReader = class {
-  constructor(path21, keys, opts = {}) {
-    this.path = path21;
+  constructor(path22, keys, opts = {}) {
+    this.path = path22;
     this.keys = keys;
     this.opts = opts;
     this.parser = new TranscriptParser(keys, opts);
@@ -6741,7 +6811,7 @@ var AGENT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 var isAgentId = (v) => typeof v === "string" && AGENT_ID_RE.test(v);
 function subagentsDir(transcriptPath, sid) {
   assertSessionId(sid);
-  return path10.join(path10.dirname(transcriptPath), sid, "subagents");
+  return path11.join(path11.dirname(transcriptPath), sid, "subagents");
 }
 var cache = /* @__PURE__ */ new Map();
 var MAX_CACHE = 2e3;
@@ -6774,7 +6844,7 @@ function parseMeta(raw) {
   };
 }
 async function readRange(file, start, length) {
-  const fh = await fs11.open(file, "r");
+  const fh = await fs12.open(file, "r");
   try {
     const buf = Buffer.alloc(length);
     const { bytesRead } = await fh.read(buf, 0, length, start);
@@ -6854,15 +6924,15 @@ async function readTail(file, size, prev, onRead) {
   return { startedAt, lastAt: lastAt ?? prev?.lastAt, lastTool: lastToolOf(tail) ?? prev?.lastTool, pending: pendingTasks(tail) };
 }
 async function readAgent(dir, id, onRead) {
-  const metaFile = path10.join(dir, `agent-${id}.meta.json`);
-  const logFile = path10.join(dir, `agent-${id}.jsonl`);
+  const metaFile = path11.join(dir, `agent-${id}.meta.json`);
+  const logFile = path11.join(dir, `agent-${id}.jsonl`);
   let metaSt;
   try {
-    metaSt = await fs11.stat(metaFile);
+    metaSt = await fs12.stat(metaFile);
   } catch {
     return null;
   }
-  const logSt = await fs11.stat(logFile).catch(() => null);
+  const logSt = await fs12.stat(logFile).catch(() => null);
   const metaKey = `${metaSt.size}:${metaSt.mtimeMs}`;
   const logKey = logSt ? `${logSt.size}:${logSt.mtimeMs}` : "";
   const prev = cache.get(metaFile);
@@ -6875,7 +6945,7 @@ async function readAgent(dir, id, onRead) {
     meta = null;
     if (metaSt.size <= MAX_META) {
       onRead?.(metaFile);
-      meta = parseMeta(await fs11.readFile(metaFile, "utf8").catch(() => ""));
+      meta = parseMeta(await fs12.readFile(metaFile, "utf8").catch(() => ""));
     }
   }
   let tail = prev?.tail ?? {};
@@ -6902,7 +6972,7 @@ function info(id, e, now) {
 async function agentIds(dir) {
   let names;
   try {
-    names = await fs11.readdir(dir);
+    names = await fs12.readdir(dir);
   } catch {
     return [];
   }
@@ -6929,7 +6999,7 @@ async function runningSubagents(dir, now = Date.now) {
   const t = now();
   let n = 0;
   for (const id of await agentIds(dir)) {
-    const known = cache.get(path10.join(dir, `agent-${id}.meta.json`));
+    const known = cache.get(path11.join(dir, `agent-${id}.meta.json`));
     if (known?.meta?.finished && (known.meta.stopped || !known.tail.pending)) continue;
     const e = await readAgent(dir, id).catch(() => null);
     const status = e && info(id, e, t)?.status;
@@ -6939,9 +7009,9 @@ async function runningSubagents(dir, now = Date.now) {
 }
 async function subagentEvents(dir, id) {
   if (!isAgentId(id)) throw new Error("invalid agent id");
-  const file = path10.join(dir, `agent-${id}.jsonl`);
+  const file = path11.join(dir, `agent-${id}.jsonl`);
   try {
-    await fs11.stat(file);
+    await fs12.stat(file);
   } catch {
     return null;
   }
@@ -6977,7 +7047,7 @@ function runClaudeAgentsJson(platform = process.platform, all = false) {
 // src/hub/bgSessions.ts
 import { spawn as nodeSpawn } from "node:child_process";
 import os4 from "node:os";
-import path11 from "node:path";
+import path12 from "node:path";
 var BG_ID_RE = /^[0-9a-f]{8}$/;
 var isBgId = (id) => typeof id === "string" && BG_ID_RE.test(id);
 var MAX_COMMAND = 200;
@@ -6998,8 +7068,8 @@ function cleanEnv(env, configDir) {
 }
 function configDirFor(configDir, home = os4.homedir(), platform = process.platform) {
   if (!configDir) return void 0;
-  const a = path11.resolve(configDir);
-  const b = path11.resolve(home, ".claude");
+  const a = path12.resolve(configDir);
+  const b = path12.resolve(home, ".claude");
   const same = platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
   return same ? void 0 : configDir;
 }
@@ -7210,7 +7280,7 @@ async function queryStoppedBackground(run = () => runClaudeAgentsJson(process.pl
 }
 
 // src/hooks/parentClaude.ts
-import fs12 from "node:fs";
+import fs13 from "node:fs";
 import { execFileSync } from "node:child_process";
 function isClaudeArgv(argv) {
   const base = (s) => s.split(/[\\/]/).pop() ?? "";
@@ -7220,7 +7290,7 @@ function isClaudeArgv(argv) {
 function readProcessArgv(pid, platform) {
   try {
     if (platform === "linux") {
-      return fs12.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
+      return fs13.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
     }
     const out = execFileSync("ps", ["-o", "args=", "-p", String(pid)], { encoding: "utf8", timeout: 2e3, stdio: ["ignore", "pipe", "ignore"] });
     return out.trim().split(/\s+/).filter(Boolean);
@@ -7313,6 +7383,7 @@ var TRANSCRIPT_MISSING_AFTER_MS = 15e3;
 var MISSES_TO_EXIT = 3;
 var RESTART_GRACE_MS = 9e4;
 var AGENTS_TTL_MS = 5e3;
+var RELOCATE_RETRY_MS = 1e4;
 var ClaudeCodeProvider = class {
   constructor(listLive = queryLiveSessions, opts = {}) {
     this.listLive = listLive;
@@ -7333,6 +7404,7 @@ var ClaudeCodeProvider = class {
   restarting = /* @__PURE__ */ new Map();
   liveCache = null;
   agentCounts = /* @__PURE__ */ new Map();
+  relocateTries = /* @__PURE__ */ new Map();
   lastGood = null;
   lastSignature = null;
   now;
@@ -7353,21 +7425,29 @@ var ClaudeCodeProvider = class {
     const sid = reg.sessionId;
     const keys = trustedKeys(reg);
     let e = this.readers.get(sid);
+    let seen;
     if (e && (e.reader.path !== reg.transcriptPath || (e.reader.keys ?? []).join() !== keys.join())) {
+      if ((e.reader.keys ?? []).join() === keys.join()) seen = new Set(e.reader.all().map((ev) => ev.id));
+      else this.pending.delete(sid);
       this.readers.delete(sid);
-      this.pending.delete(sid);
       e = void 0;
     }
     if (!e) {
-      e = { reader: new TranscriptReader(reg.transcriptPath, keys), read: false };
+      e = { reader: new TranscriptReader(reg.transcriptPath, keys), read: false, ...seen ? { seen } : {} };
       this.readers.set(sid, e);
     }
     return e;
   }
   /** Read new events, buffering them for the next poll so no consumer steals them. */
   async refresh(sid, e) {
-    const evs = await e.reader.readNew();
+    let evs = await e.reader.readNew();
     e.read = true;
+    if (e.seen) {
+      const seen = e.seen;
+      const pendingIds = new Set((this.pending.get(sid) ?? []).map((ev) => ev.id));
+      evs = evs.filter((ev) => !seen.has(ev.id) && !pendingIds.has(ev.id));
+      delete e.seen;
+    }
     if (evs.length) this.pending.set(sid, [...this.pending.get(sid) ?? [], ...evs]);
   }
   async lastEventOf(reg) {
@@ -7419,10 +7499,38 @@ var ClaudeCodeProvider = class {
     const oldest = Math.min(...queued.map((m) => Date.parse(m.createdAt)).filter((n) => !Number.isNaN(n)));
     if (!Number.isFinite(oldest) || this.now() - oldest < STALLED_AFTER_MS) return false;
     try {
-      return this.now() - (await fs13.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
+      return this.now() - (await fs14.stat(paths().waiterLock(sid))).mtimeMs > WAITER_HEARTBEAT_STALE_MS;
     } catch {
       return true;
     }
+  }
+  /**
+   * The registered transcript is gone: Claude Code moved it (a session that entered a worktree writes under
+   * <project>--claude-worktrees-<name>). Finds <id>.jsonl in the other project folders of its Claude config
+   * dir and records the new path and folder, so reading (and the subagents beside it) goes on. Searched at
+   * most every RELOCATE_RETRY_MS per session.
+   */
+  async relocated(reg) {
+    try {
+      await fs14.stat(reg.transcriptPath);
+      this.relocateTries.delete(reg.sessionId);
+      return reg;
+    } catch (err) {
+      if (err.code !== "ENOENT") return reg;
+    }
+    const sid = reg.sessionId;
+    const t = this.now();
+    const last = this.relocateTries.get(sid);
+    if (last !== void 0 && t >= last && t - last < RELOCATE_RETRY_MS) return reg;
+    this.relocateTries.set(sid, t);
+    const projects = path13.join(reg.configDir ? path13.resolve(reg.configDir) : claudeConfigDir(), "projects");
+    const found = await findMovedTranscript(reg.transcriptPath, sid, projects).catch(() => null);
+    if (!found) return reg;
+    this.relocateTries.delete(sid);
+    const cwd = await transcriptCwd(found);
+    const patch = { transcriptPath: found, ...cwd ? { cwd } : {} };
+    const next = await updateRegistration(sid, patch, isActive(reg) ? { ifConnectedAt: reg.connectedAt } : {});
+    return next ?? { ...reg, ...patch };
   }
   /**
    * The session's transcript does not exist some time after it connected: Claude Code is not writing it
@@ -7433,7 +7541,7 @@ var ClaudeCodeProvider = class {
   async transcriptMissing(transcriptPath, connectedAt) {
     if (this.now() - (Date.parse(connectedAt) || 0) < TRANSCRIPT_MISSING_AFTER_MS) return false;
     try {
-      await fs13.stat(transcriptPath);
+      await fs14.stat(transcriptPath);
       return false;
     } catch (err) {
       return err.code === "ENOENT";
@@ -7496,8 +7604,9 @@ var ClaudeCodeProvider = class {
     const liveById = new Map(live.list.map((l) => [l.sessionId, l]));
     const connected = [];
     const activeIds = /* @__PURE__ */ new Set();
-    for (const reg of regs) {
+    for (let reg of regs) {
       if (isRemoved(reg)) continue;
+      reg = await this.relocated(reg);
       const sid = reg.sessionId;
       const l = liveById.get(sid);
       let disconnected = !isActive(reg);
@@ -7540,7 +7649,7 @@ var ClaudeCodeProvider = class {
       if (!disconnected && live.ok && l?.status === "idle") await this.dropStaleBusy(sid);
       const cwd = l?.cwd ?? reg.cwd;
       const queued = disconnected ? [] : await peek(sid);
-      const originalName = l?.name || path12.basename(cwd);
+      const originalName = l?.name || path13.basename(cwd);
       const custom = await getDisplayName(sid);
       const view = {
         sessionId: sid,
@@ -7613,8 +7722,9 @@ var ClaudeCodeProvider = class {
     return n;
   }
   async events(sid, opts = {}) {
-    const reg = await getRegistration(sid);
-    if (!reg) return [];
+    const found = await getRegistration(sid);
+    if (!found) return [];
+    const reg = await this.relocated(found);
     if (!isActive(reg)) {
       const tmp = new TranscriptReader(reg.transcriptPath, trustedKeys(reg), opts);
       await tmp.readNew();
@@ -7628,10 +7738,10 @@ var ClaudeCodeProvider = class {
     const changes = [];
     const regs = await listRegistrations();
     const known = new Set(regs.map((r) => r.sessionId));
-    for (const reg of regs) {
-      const sid = reg.sessionId;
-      if (isActive(reg)) {
-        await this.refresh(sid, this.entry(reg));
+    for (const r of regs) {
+      const sid = r.sessionId;
+      if (isActive(r)) {
+        await this.refresh(sid, this.entry(await this.relocated(r)));
       } else if (this.readers.has(sid)) {
         const e = this.readers.get(sid);
         await this.refresh(sid, e);
@@ -7646,7 +7756,7 @@ var ClaudeCodeProvider = class {
       this.pending.delete(sid);
       if (events?.length) changes.push({ type: "events", sessionId: sid, events });
     }
-    for (const m of [this.readers, this.pending, this.lastEvents, this.lastModels, this.misses, this.agentCounts]) {
+    for (const m of [this.readers, this.pending, this.lastEvents, this.lastModels, this.misses, this.agentCounts, this.relocateTries]) {
       for (const sid of [...m.keys()]) if (!known.has(sid)) m.delete(sid);
     }
     for (const [sid, until] of [...this.restarting]) if (!known.has(sid) || this.now() >= until) this.restarting.delete(sid);
@@ -7695,7 +7805,7 @@ var ClaudeCodeProvider = class {
     if (!again || !isActive(again)) {
       const dir = paths().inboxDir(sid);
       try {
-        for (const n of await fs13.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs13.rm(path12.join(dir, n), { force: true });
+        for (const n of await fs14.readdir(dir)) if (n.endsWith(`-${msg.id}.msg`)) await fs14.rm(path13.join(dir, n), { force: true });
       } catch {
       }
       throw new SessionDisconnectedError(sid);
@@ -7706,8 +7816,8 @@ var ClaudeCodeProvider = class {
 
 // src/hub/server.ts
 import http from "node:http";
-import fs20 from "node:fs/promises";
-import path19 from "node:path";
+import fs21 from "node:fs/promises";
+import path20 from "node:path";
 import crypto9 from "node:crypto";
 import os8 from "node:os";
 
@@ -7780,12 +7890,12 @@ function createPairing(now = Date.now) {
 }
 
 // src/hub/folders.ts
-import fs14 from "node:fs/promises";
-import path13 from "node:path";
+import fs15 from "node:fs/promises";
+import path14 from "node:path";
 var MAX_FOLDERS = 50;
 var isDir = async (p) => {
   try {
-    return (await fs14.stat(p)).isDirectory();
+    return (await fs15.stat(p)).isDirectory();
   } catch {
     return false;
   }
@@ -7793,7 +7903,7 @@ var isDir = async (p) => {
 async function knownFolders(regs, live, exists = isDir) {
   const seen = /* @__PURE__ */ new Map();
   const add = (cwd, at) => {
-    if (!cwd || !path13.isAbsolute(cwd)) return;
+    if (!cwd || !path14.isAbsolute(cwd)) return;
     const prev = seen.get(cwd);
     if (!prev || prev < at) seen.set(cwd, at);
   };
@@ -7814,9 +7924,9 @@ function configDirOf(regs, cwd) {
 }
 
 // src/hub/folderBrowse.ts
-import fs15 from "node:fs/promises";
+import fs16 from "node:fs/promises";
 import os5 from "node:os";
-import path14 from "node:path";
+import path15 from "node:path";
 var MESSAGES = {
   invalid: "invalid folder path",
   outside: "folder outside the home folder",
@@ -7834,39 +7944,39 @@ var FolderError = class extends Error {
 var MAX_ENTRIES = 500;
 var MAX_PATH = 4096;
 function isInside(root, p) {
-  const rel = path14.relative(root, p);
-  return rel === "" || rel !== ".." && !rel.startsWith(".." + path14.sep) && !path14.isAbsolute(rel);
+  const rel = path15.relative(root, p);
+  return rel === "" || rel !== ".." && !rel.startsWith(".." + path15.sep) && !path15.isAbsolute(rel);
 }
 var errCode = (e) => e?.code;
 async function realHome(home) {
   try {
-    return { given: path14.resolve(home), real: await fs15.realpath(home) };
+    return { given: path15.resolve(home), real: await fs16.realpath(home) };
   } catch {
     throw new FolderError("not-found");
   }
 }
 async function assertAncestorInside(given, home) {
-  let dir = path14.dirname(given);
+  let dir = path15.dirname(given);
   for (; ; ) {
     try {
-      const real = await fs15.realpath(dir);
+      const real = await fs16.realpath(dir);
       if (!isInside(home.real, real)) throw new FolderError("outside");
       return;
     } catch (e) {
       if (e instanceof FolderError) throw e;
-      const parent = path14.dirname(dir);
+      const parent = path15.dirname(dir);
       if (parent === dir) return;
       dir = parent;
     }
   }
 }
 async function resolveIn(p, home) {
-  if (typeof p !== "string" || !p || p.length > MAX_PATH || p.includes("\0") || !path14.isAbsolute(p)) throw new FolderError("invalid");
-  const given = path14.resolve(p);
+  if (typeof p !== "string" || !p || p.length > MAX_PATH || p.includes("\0") || !path15.isAbsolute(p)) throw new FolderError("invalid");
+  const given = path15.resolve(p);
   if (!isInside(home.given, given) && !isInside(home.real, given)) throw new FolderError("outside");
   let real;
   try {
-    real = await fs15.realpath(given);
+    real = await fs16.realpath(given);
   } catch (e) {
     if (errCode(e) === "EACCES" || errCode(e) === "EPERM") throw new FolderError("denied");
     if (errCode(e) === "ENOENT" || errCode(e) === "ENOTDIR") await assertAncestorInside(given, home);
@@ -7874,7 +7984,7 @@ async function resolveIn(p, home) {
   }
   if (!isInside(home.real, real)) throw new FolderError("outside");
   try {
-    if (!(await fs15.stat(real)).isDirectory()) throw new FolderError("not-found");
+    if (!(await fs16.stat(real)).isDirectory()) throw new FolderError("not-found");
   } catch (e) {
     if (e instanceof FolderError) throw e;
     throw new FolderError(errCode(e) === "EACCES" ? "denied" : "not-found");
@@ -7895,19 +8005,19 @@ async function browseFolder(p, opts = {}) {
   const dir = p === void 0 ? homeReal : await resolveIn(p, home);
   let dirents;
   try {
-    dirents = await fs15.readdir(dir, { withFileTypes: true });
+    dirents = await fs16.readdir(dir, { withFileTypes: true });
   } catch (e) {
     throw new FolderError(errCode(e) === "EACCES" || errCode(e) === "EPERM" ? "denied" : "not-found");
   }
   const entries = [];
   for (const d of dirents) {
     if (!opts.hidden && d.name.startsWith(".")) continue;
-    const full = path14.join(dir, d.name);
+    const full = path15.join(dir, d.name);
     if (d.isDirectory()) entries.push({ name: d.name, path: full });
     else if (d.isSymbolicLink()) {
       try {
-        const target = await fs15.realpath(full);
-        if (isInside(homeReal, target) && (await fs15.stat(target)).isDirectory()) entries.push({ name: d.name, path: full });
+        const target = await fs16.realpath(full);
+        if (isInside(homeReal, target) && (await fs16.stat(target)).isDirectory()) entries.push({ name: d.name, path: full });
       } catch {
       }
     }
@@ -7916,7 +8026,7 @@ async function browseFolder(p, opts = {}) {
   const limit = opts.limit ?? MAX_ENTRIES;
   return {
     path: dir,
-    parent: dir === homeReal ? null : path14.dirname(dir),
+    parent: dir === homeReal ? null : path15.dirname(dir),
     entries: entries.slice(0, limit),
     truncated: entries.length > limit
   };
@@ -7981,18 +8091,18 @@ async function searchAll(provider, q) {
 
 // src/hub/openTerminal.ts
 import { spawn as nodeSpawn2 } from "node:child_process";
-import fs17 from "node:fs";
+import fs18 from "node:fs";
 import os6 from "node:os";
-import path16 from "node:path";
+import path17 from "node:path";
 
 // src/hooks/openWindow.ts
-import fs16 from "node:fs";
+import fs17 from "node:fs";
 function isExecutableFile(p, platform = process.platform, checks = {}) {
-  const stat = checks.stat ?? fs16.statSync;
-  const access = checks.access ?? fs16.accessSync;
+  const stat = checks.stat ?? fs17.statSync;
+  const access = checks.access ?? fs17.accessSync;
   try {
     if (!stat(p).isFile()) return false;
-    if (platform !== "win32") access(p, fs16.constants.X_OK);
+    if (platform !== "win32") access(p, fs17.constants.X_OK);
     return true;
   } catch {
     return false;
@@ -8000,7 +8110,7 @@ function isExecutableFile(p, platform = process.platform, checks = {}) {
 }
 
 // src/hooks/launcherMac.ts
-import path15 from "node:path";
+import path16 from "node:path";
 
 // src/hooks/launcherFiles.ts
 var PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -8008,9 +8118,9 @@ var PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 // src/hooks/launcherMac.ts
 var EXECUTABLE = "ai-chat-center";
 var shQuote = (s) => `'${s.replace(/'/g, "'\\''")}'`;
-var OUR_DIRS = /* @__PURE__ */ new Set(["Contents", path15.join("Contents", "MacOS"), path15.join("Contents", "Resources")]);
-var OUR_EXEC = path15.join("Contents", "MacOS", EXECUTABLE);
-var OUR_ICON = path15.join("Contents", "Resources", "icon.icns");
+var OUR_DIRS = /* @__PURE__ */ new Set(["Contents", path16.join("Contents", "MacOS"), path16.join("Contents", "Resources")]);
+var OUR_EXEC = path16.join("Contents", "MacOS", EXECUTABLE);
+var OUR_ICON = path16.join("Contents", "Resources", "icon.icns");
 
 // src/hub/openTerminal.ts
 var LINUX_TERMINALS = [
@@ -8029,7 +8139,7 @@ var LINUX_TERMINALS = [
 var X_TERMINAL_EMULATOR = "x-terminal-emulator";
 function findInPath(name, dirs, exists) {
   for (const d of dirs) {
-    const p = path16.posix.join(d, name);
+    const p = path17.posix.join(d, name);
     try {
       if (exists(p)) return p;
     } catch {
@@ -8037,9 +8147,9 @@ function findInPath(name, dirs, exists) {
   }
   return null;
 }
-function linuxTerminal(id, cwd, env, exists, realpath = fs17.realpathSync) {
+function linuxTerminal(id, cwd, env, exists, realpath = fs18.realpathSync) {
   const run = ["claude", "attach", id];
-  const dirs = (env.PATH ?? "").split(path16.posix.delimiter).filter((d) => path16.posix.isAbsolute(d));
+  const dirs = (env.PATH ?? "").split(path17.posix.delimiter).filter((d) => path17.posix.isAbsolute(d));
   for (const [name, argsFor] of LINUX_TERMINALS) {
     const p = findInPath(name, dirs, exists);
     if (p) return { cmd: p, args: argsFor(cwd, run) };
@@ -8052,8 +8162,8 @@ function linuxTerminal(id, cwd, env, exists, realpath = fs17.realpathSync) {
   } catch {
     target = null;
   }
-  if (target && path16.posix.isAbsolute(target)) {
-    const base = path16.posix.basename(target);
+  if (target && path17.posix.isAbsolute(target)) {
+    const base = path17.posix.basename(target);
     const known = LINUX_TERMINALS.find(([name]) => name === base);
     if (known) return { cmd: target, args: known[1](cwd, run) };
   }
@@ -8064,7 +8174,7 @@ function macCommandScript(id, cwd, file, configDir) {
   return [
     "#!/bin/sh",
     `rm -f ${shQuote(file)}`,
-    `rmdir ${shQuote(path16.posix.dirname(file))} 2>/dev/null`,
+    `rmdir ${shQuote(path17.posix.dirname(file))} 2>/dev/null`,
     ...configDir ? [`export CLAUDE_CONFIG_DIR=${shQuote(configDir)}`] : [],
     `cd ${shQuote(cwd)} || exit 1`,
     `exec claude attach ${id}`,
@@ -8077,11 +8187,11 @@ async function openTerminal(t, deps = {}) {
   const env = deps.env ?? process.env;
   const spawn = deps.spawn ?? nodeSpawn2;
   const configDir = configDirFor(t.configDir, deps.home, platform);
-  const isAbs = platform === "win32" ? path16.win32.isAbsolute : path16.posix.isAbsolute;
+  const isAbs = platform === "win32" ? path17.win32.isAbsolute : path17.posix.isAbsolute;
   if (!isAbs(t.cwd)) return { ok: false, code: "spawn-failed", error: "the session folder is not an absolute path" };
   let isDir2 = false;
   try {
-    isDir2 = (deps.isDir ?? ((p) => fs17.statSync(p).isDirectory()))(t.cwd);
+    isDir2 = (deps.isDir ?? ((p) => fs18.statSync(p).isDirectory()))(t.cwd);
   } catch {
     isDir2 = false;
   }
@@ -8092,9 +8202,9 @@ async function openTerminal(t, deps = {}) {
   if (platform === "darwin") {
     let dir;
     try {
-      dir = (deps.mkdtemp ?? (() => fs17.mkdtempSync(path16.join(os6.tmpdir(), "ai-chat-center-term-"))))();
-      const file = path16.posix.join(dir, `attach-${t.bgId}.command`);
-      (deps.writeFile ?? ((p, d, mode) => fs17.writeFileSync(p, d, { mode, flag: "wx" })))(file, macCommandScript(t.bgId, t.cwd, file, configDir), 448);
+      dir = (deps.mkdtemp ?? (() => fs18.mkdtempSync(path17.join(os6.tmpdir(), "ai-chat-center-term-"))))();
+      const file = path17.posix.join(dir, `attach-${t.bgId}.command`);
+      (deps.writeFile ?? ((p, d, mode) => fs18.writeFileSync(p, d, { mode, flag: "wx" })))(file, macCommandScript(t.bgId, t.cwd, file, configDir), 448);
       cmd = "/usr/bin/open";
       args = ["-a", "Terminal", file];
     } catch (e) {
@@ -8102,13 +8212,13 @@ async function openTerminal(t, deps = {}) {
     }
   } else if (platform === "win32") {
     const root = env.SystemRoot ?? env.SYSTEMROOT ?? env.windir;
-    if (!root || !path16.win32.isAbsolute(root)) return { ok: false, code: "no-terminal", error: "SystemRoot is not set" };
-    const cmdExe = path16.win32.join(root, "System32", "cmd.exe");
+    if (!root || !path17.win32.isAbsolute(root)) return { ok: false, code: "no-terminal", error: "SystemRoot is not set" };
+    const cmdExe = path17.win32.join(root, "System32", "cmd.exe");
     const run = [cmdExe, "/k", "claude", "attach", t.bgId];
     procEnv = { ...procEnv, NoDefaultCurrentDirectoryInExePath: "1" };
     const local = env.LOCALAPPDATA;
-    const wt = local && path16.win32.isAbsolute(local) ? path16.win32.join(local, "Microsoft", "WindowsApps", "wt.exe") : null;
-    const has = deps.exists ?? ((p) => fs17.existsSync(p));
+    const wt = local && path17.win32.isAbsolute(local) ? path17.win32.join(local, "Microsoft", "WindowsApps", "wt.exe") : null;
+    const has = deps.exists ?? ((p) => fs18.existsSync(p));
     if (wt && has(wt)) {
       cmd = wt;
       args = ["-d", ".", ...run];
@@ -8145,8 +8255,8 @@ async function openTerminal(t, deps = {}) {
 }
 
 // src/hub/sessionFiles.ts
-import fs18 from "node:fs/promises";
-import path17 from "node:path";
+import fs19 from "node:fs/promises";
+import path18 from "node:path";
 
 // src/shared/fileTypes.ts
 var MARKDOWN_EXTENSIONS = ["md", "markdown"];
@@ -8258,7 +8368,7 @@ var SessionFileError = class extends Error {
 };
 var errCode2 = (e) => e?.code;
 function typeOf(p) {
-  const ext = path17.extname(p).toLowerCase();
+  const ext = path18.extname(p).toLowerCase();
   switch (ext && panelFileKind(ext)) {
     case "markdown":
       return MARKDOWN;
@@ -8277,7 +8387,7 @@ async function realRoots(folders) {
   const out = [];
   for (const g of folders) {
     try {
-      out.push({ given: path17.resolve(g), real: await fs18.realpath(g) });
+      out.push({ given: path18.resolve(g), real: await fs19.realpath(g) });
     } catch {
     }
   }
@@ -8285,10 +8395,10 @@ async function realRoots(folders) {
 }
 var SECRET_NAME = /^\.env(?:\.|$)|\.(?:pem|key)(?:\.|$)|^id_(?:rsa|dsa|ecdsa|ed25519)|credentials|^\.(?:netrc|npmrc|pypirc)(?:\.|$)/i;
 function isPrivate(p, homes) {
-  if (SECRET_NAME.test(path17.basename(p))) return true;
+  if (SECRET_NAME.test(path18.basename(p))) return true;
   for (const h of homes) {
     if (!isInside(h, p)) continue;
-    const first = path17.relative(h, p).split(path17.sep)[0];
+    const first = path18.relative(h, p).split(path18.sep)[0];
     if (first.startsWith(".") && first !== "." && first !== "..") return true;
   }
   return false;
@@ -8296,9 +8406,9 @@ function isPrivate(p, homes) {
 async function context(r) {
   const homes = [];
   if (r.home) {
-    homes.push(path17.resolve(r.home));
+    homes.push(path18.resolve(r.home));
     try {
-      homes.push(await fs18.realpath(r.home));
+      homes.push(await fs19.realpath(r.home));
     } catch {
     }
   }
@@ -8310,15 +8420,15 @@ function assertNotPrivate(p, ctx, which) {
 }
 var insideAny = (roots, p, which) => roots.some((r) => which !== "real" && isInside(r.given, p) || which !== "given" && isInside(r.real, p));
 async function assertAncestorInside2(given, roots) {
-  let dir = path17.dirname(given);
+  let dir = path18.dirname(given);
   for (; ; ) {
     try {
-      const real = await fs18.realpath(dir);
+      const real = await fs19.realpath(dir);
       if (!insideAny(roots, real, "real")) throw new SessionFileError("outside");
       return;
     } catch (e) {
       if (e instanceof SessionFileError) throw e;
-      const parent = path17.dirname(dir);
+      const parent = path18.dirname(dir);
       if (parent === dir) return;
       dir = parent;
     }
@@ -8327,14 +8437,14 @@ async function assertAncestorInside2(given, roots) {
 async function resolve(p, r, ctx) {
   const roots = ctx.roots;
   if (typeof p !== "string" || !p || p.length > MAX_PATH2 || p.includes("\0")) throw new SessionFileError("invalid");
-  const given = path17.resolve(r.base, p);
+  const given = path18.resolve(r.base, p);
   const ft = typeOf(given);
   if (!ft) throw new SessionFileError("type");
   if (!insideAny(roots, given, "both")) throw new SessionFileError("outside");
   assertNotPrivate(given, ctx, "given");
   let real;
   try {
-    real = await fs18.realpath(given);
+    real = await fs19.realpath(given);
   } catch (e) {
     if (errCode2(e) === "EACCES" || errCode2(e) === "EPERM") throw new SessionFileError("denied");
     await assertAncestorInside2(given, roots);
@@ -8345,7 +8455,7 @@ async function resolve(p, r, ctx) {
   assertNotPrivate(real, ctx, "real");
   let size;
   try {
-    const st = await fs18.stat(real);
+    const st = await fs19.stat(real);
     if (!st.isFile()) throw new SessionFileError("not-found");
     size = st.size;
   } catch (e) {
@@ -8356,7 +8466,7 @@ async function resolve(p, r, ctx) {
   return { real, ft, size };
 }
 async function readCapped(file, max) {
-  const fh = await fs18.open(file, "r");
+  const fh = await fs19.open(file, "r");
   try {
     const buf = Buffer.alloc(max);
     let n = 0;
@@ -8547,9 +8657,9 @@ function readScreen(bgId, deps = {}) {
 }
 
 // src/hub/suggestions.ts
-import fs19 from "node:fs";
+import fs20 from "node:fs";
 import fsp from "node:fs/promises";
-import path18 from "node:path";
+import path19 from "node:path";
 import readline from "node:readline";
 
 // src/shared/quickReplies.ts
@@ -8627,7 +8737,7 @@ async function safePath(src) {
   try {
     const real = await fsp.realpath(src.path);
     const root = await fsp.realpath(src.projects);
-    if (path18.extname(real).toLowerCase() !== ".jsonl" || !isInside(root, real) || real === root) return null;
+    if (path19.extname(real).toLowerCase() !== ".jsonl" || !isInside(root, real) || real === root) return null;
     return real;
   } catch {
     return null;
@@ -8635,7 +8745,7 @@ async function safePath(src) {
 }
 async function scanFile(file, size, keys, since, maxBytes, tally) {
   const start = Math.max(0, size - maxBytes);
-  const stream = fs19.createReadStream(file, { start, end: Math.max(start, size - 1), encoding: "utf8" });
+  const stream = fs20.createReadStream(file, { start, end: Math.max(start, size - 1), encoding: "utf8" });
   const lines2 = readline.createInterface({ input: stream, crlfDelay: Infinity });
   let first = start > 0;
   const queued = [];
@@ -8823,7 +8933,7 @@ async function createHub(opts) {
   const pairing = createPairing();
   const suggestions = createSuggestionCache(
     async () => suggestReplies(
-      (await listRegistrations()).filter((r) => !isRemoved(r)).map((r) => ({ path: r.transcriptPath, keys: trustedKeys(r), projects: path19.join(r.configDir ? path19.resolve(r.configDir) : claudeConfigDir(), "projects") }))
+      (await listRegistrations()).filter((r) => !isRemoved(r)).map((r) => ({ path: r.transcriptPath, keys: trustedKeys(r), projects: path20.join(r.configDir ? path20.resolve(r.configDir) : claudeConfigDir(), "projects") }))
     )
   );
   const listLive = opts.bg?.listLive ?? (() => queryLiveSessions());
@@ -8944,15 +9054,15 @@ data: ${JSON.stringify(c)}
       return sendJson(res, 404, { error: "not found" });
     }
     if (rel.includes("\0")) return sendJson(res, 404, { error: "not found" });
-    const root = path19.resolve(staticDir);
-    const target = path19.resolve(root, "." + path19.sep + rel);
-    if (target !== root && !target.startsWith(root + path19.sep)) return sendJson(res, 404, { error: "not found" });
+    const root = path20.resolve(staticDir);
+    const target = path20.resolve(root, "." + path20.sep + rel);
+    if (target !== root && !target.startsWith(root + path20.sep)) return sendJson(res, 404, { error: "not found" });
     const send = async (file) => {
       try {
-        const st = await fs20.stat(file);
+        const st = await fs21.stat(file);
         if (!st.isFile()) return false;
-        const data = await fs20.readFile(file);
-        const ext = path19.extname(file).toLowerCase();
+        const data = await fs21.readFile(file);
+        const ext = path20.extname(file).toLowerCase();
         const type2 = MIME2[ext] ?? "application/octet-stream";
         const headers = { "Content-Type": type2, "Content-Length": data.length };
         if (ext === ".html") headers["Content-Security-Policy"] = CSP;
@@ -8965,12 +9075,12 @@ data: ${JSON.stringify(c)}
     };
     let rootExists = true;
     try {
-      rootExists = (await fs20.stat(root)).isDirectory();
+      rootExists = (await fs21.stat(root)).isDirectory();
     } catch {
       rootExists = false;
     }
     const accepts = String(req.headers.accept ?? "").includes("text/html");
-    const spaEligible = req.method === "GET" && accepts && path19.extname(pathname) === "";
+    const spaEligible = req.method === "GET" && accepts && path20.extname(pathname) === "";
     const isRoot = pathname === "/";
     if (!rootExists) {
       if (isRoot || spaEligible) {
@@ -8981,7 +9091,7 @@ data: ${JSON.stringify(c)}
     }
     if (target !== root && await send(target)) return;
     if (isRoot || spaEligible) {
-      if (await send(path19.join(root, "index.html"))) return;
+      if (await send(path20.join(root, "index.html"))) return;
     }
     sendJson(res, 404, { error: "not found" });
   };
@@ -9266,7 +9376,7 @@ data: ${JSON.stringify(c)}
         if (!reg) throw new HttpError(404, "no such session");
         await setDisplayName(sid, name);
         let shown = name;
-        if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path19.basename(reg.cwd);
+        if (!shown) shown = (await provider.listSessions()).connected.find((s) => s.sessionId === sid)?.name ?? path20.basename(reg.cwd);
         return sendJson(res, 200, { name: shown });
       }
       if (m[2] === "pin" && method === "PUT") {
@@ -9534,7 +9644,7 @@ async function holdsHub(r, now = Date.now()) {
   if (r.pid !== null) return isAlive(r.pid);
   let last = Date.parse(r.connectedAt) || 0;
   try {
-    last = Math.max(last, (await fs21.stat(r.transcriptPath)).mtimeMs);
+    last = Math.max(last, (await fs22.stat(r.transcriptPath)).mtimeMs);
   } catch {
   }
   return now - last < UNKNOWN_PID_HOLD_MS;
@@ -9549,20 +9659,20 @@ async function prune(log) {
 }
 async function rotateToken() {
   const file = paths().token;
-  await ensureDir(path20.dirname(file));
+  await ensureDir(path21.dirname(file));
   const t = crypto10.randomBytes(32).toString("hex");
   await writeFileAtomic600(file, t);
-  await fs21.chmod(file, 384).catch(() => {
+  await fs22.chmod(file, 384).catch(() => {
   });
   return t;
 }
 async function writeFileAtomic600(file, data) {
   const tmp = `${file}.${process.pid}.${crypto10.randomUUID()}.tmp`;
   try {
-    await fs21.writeFile(tmp, data, { mode: 384 });
-    await withFsRetry(() => fs21.rename(tmp, file));
+    await fs22.writeFile(tmp, data, { mode: 384 });
+    await withFsRetry(() => fs22.rename(tmp, file));
   } catch (e) {
-    await fs21.rm(tmp, { force: true });
+    await fs22.rm(tmp, { force: true });
     throw e;
   }
 }
@@ -9572,7 +9682,7 @@ async function liveHubExists(self) {
   if (self && info2.port === self.port) return false;
   let token;
   try {
-    token = (await fs21.readFile(paths().token, "utf8")).trim();
+    token = (await fs22.readFile(paths().token, "utf8")).trim();
   } catch {
     return false;
   }
@@ -9605,7 +9715,7 @@ async function acquireHubLock(lock) {
 async function startHub(opts = {}) {
   const logDir = paths().logDir;
   await ensureDir(logDir);
-  const logFile = path20.join(logDir, "hub.log");
+  const logFile = path21.join(logDir, "hub.log");
   let secret = "";
   const log = (msg) => {
     try {
@@ -9620,7 +9730,7 @@ async function startHub(opts = {}) {
     return null;
   };
   if (await liveHubExists()) return deferred("before the lock");
-  const lock = path20.join(paths().home, "hub.lock");
+  const lock = path21.join(paths().home, "hub.lock");
   const locked2 = await acquireHubLock(lock);
   let hub;
   try {
@@ -9629,7 +9739,7 @@ async function startHub(opts = {}) {
     secret = token;
     const base = pickPort();
     const tries = base === 0 ? 1 : 11;
-    const staticDir = path20.join(path20.dirname(fileURLToPath(import.meta.url)), "ui");
+    const staticDir = path21.join(path21.dirname(fileURLToPath(import.meta.url)), "ui");
     const provider = opts.listLive ? new ClaudeCodeProvider(opts.listLive) : new ClaudeCodeProvider();
     let lastErr;
     for (let i = 0; i < tries && !hub; i++) {
@@ -9720,7 +9830,7 @@ async function startHub(opts = {}) {
         clearInterval(ownTimer);
         await started.close();
         const cur = await readJson(paths().hubJson);
-        if (cur?.pid === process.pid && cur?.port === port) await fs21.rm(paths().hubJson, { force: true });
+        if (cur?.pid === process.pid && cur?.port === port) await fs22.rm(paths().hubJson, { force: true });
         log("hub stopped");
       }
     };
