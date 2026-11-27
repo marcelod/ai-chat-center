@@ -48,7 +48,7 @@ import { failResume, isResuming, startResume } from './resumeState.js';
 import { openTerminal, type OpenTerminalResult, type TerminalTarget } from './openTerminal.js';
 import { existingSessionFiles, readSessionFile, SessionFileError, type FileRoots } from './sessionFiles.js';
 import { isAgentId, listSubagents, subagentEvents, subagentsDir } from './subagents.js';
-import { cleanScreen, readScreen } from './sessionScreen.js';
+import { readScreen, screenText } from './sessionScreen.js';
 import { loadSecret } from '../core/secret.js';
 import { sessionAttachmentsDir } from '../core/attachments.js';
 
@@ -587,7 +587,7 @@ export async function createHub(
         }
         const secret = await loadSecret({ tries: 1 });
         const secrets = [token, ...trustedKeys(reg), ...(secret.ok ? [secret.secret] : [])];
-        return sendJson(res, 200, { text: cleanScreen(raw, secrets) });
+        return sendJson(res, 200, { text: await screenText(raw, secrets) });
       }
       if (sp[2] === 'subagents' && method === 'GET') {
         return sendJson(res, 200, { subagents: await listSubagents(subagentsDir(reg.transcriptPath, sid), { now }) });
