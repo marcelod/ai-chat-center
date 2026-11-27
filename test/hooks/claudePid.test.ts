@@ -31,6 +31,10 @@ describe('lookupClaudePid', () => {
     expect(await lookupClaudePid('a', { run: async () => unknown })).toEqual({ ok: false });
     expect(await resolveClaudePid('a', { run: async () => unknown })).toBeNull();
   });
+  it('a list of only stopped background sessions (no pid) is a working lookup: a miss', async () => {
+    const stopped = JSON.stringify([{ kind: 'background', sessionId: 'b', cwd: '/p', state: 'blocked' }]);
+    expect(await lookupClaudePid('a', { run: async () => stopped })).toEqual({ ok: true, pid: null });
+  });
   it('one known item is enough for the lookup to count', async () => {
     const mixed = JSON.stringify([{ session_id: 'x' }, { pid: 10, sessionId: 'a' }]);
     expect(await lookupClaudePid('b', { run: async () => mixed })).toEqual({ ok: true, pid: null });

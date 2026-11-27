@@ -18,10 +18,11 @@ export async function lookupClaudePid(sessionId: string, opts: ResolvePidOptions
     const list = JSON.parse(await (opts.run ?? runClaudeAgentsJson)()) as unknown;
     if (!Array.isArray(list)) return { ok: false };
     let known = 0;
-    for (const a of list as Array<{ pid?: unknown; sessionId?: unknown } | null>) {
-      if (!a || typeof a.sessionId !== 'string' || typeof a.pid !== 'number') continue;
-      known++;
-      if (a.sessionId === sessionId) return { ok: true, pid: a.pid };
+    for (const a of list as Array<{ pid?: unknown; sessionId?: unknown; kind?: unknown } | null>) {
+      if (!a || typeof a.sessionId !== 'string' || !a.sessionId) continue;
+      // A stopped background session has no pid: still the known shape.
+      if (a.kind === 'interactive' || a.kind === 'background' || typeof a.pid === 'number') known++;
+      if (a.sessionId === sessionId && typeof a.pid === 'number') return { ok: true, pid: a.pid };
     }
     // A non-empty list with no item of the known shape is a new output format, not a miss: a miss
     // makes the waiter count towards "the session is gone".

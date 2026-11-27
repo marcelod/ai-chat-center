@@ -23,6 +23,13 @@ function toLive(x: unknown): LiveSession | null {
   return live;
 }
 
+/** An item of the known `claude agents` shape, running or not (a stopped background session has no pid). */
+export function knownItem(x: unknown): boolean {
+  if (!x || typeof x !== 'object') return false;
+  const o = x as Record<string, unknown>;
+  return typeof o.sessionId === 'string' && !!o.sessionId && (o.kind === 'interactive' || o.kind === 'background');
+}
+
 /** A short, fixed description of a failed command: the error code or signal only, never its text or output. */
 function commandFailure(e: unknown): string {
   const { code, signal } = (e ?? {}) as { code?: unknown; signal?: unknown };
@@ -61,7 +68,8 @@ export async function queryLiveSessions(
     return null;
   }
   const live = parsed.map(toLive).filter((s): s is LiveSession => s !== null);
-  if (parsed.length > 0 && live.length === 0) {
+  // A stopped background session (no pid) is a known item that is simply not running.
+  if (parsed.length > 0 && !parsed.some(knownItem)) {
     onFail?.('unknown item shape');
     return null;
   }

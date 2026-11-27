@@ -47,6 +47,10 @@ describe('queryLiveSessions', () => {
     expect(await queryLiveSessions(run, (r) => reasons.push(r))).toBeNull();
     expect(reasons).toEqual(['unknown item shape']);
   });
+  it('a list of only stopped background sessions (no pid) is a working lookup with no live session', async () => {
+    const run = async () => JSON.stringify([{ kind: 'background', sessionId: 's1', cwd: '/p', id: 'abcd1234', state: 'blocked' }]);
+    expect(await queryLiveSessions(run)).toEqual([]);
+  });
   it('reports why a lookup failed, without the output or the error text', async () => {
     const reasons: string[] = [];
     const note = (r: string) => reasons.push(r);
