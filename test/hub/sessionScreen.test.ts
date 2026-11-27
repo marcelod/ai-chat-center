@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
-import { cleanScreen, readScreen, MAX_SCREEN_CHARS } from '../../src/hub/sessionScreen.js';
+import { cleanScreen, readScreen, renderScreen, screenSize, screenText, MAX_SCREEN_CHARS, MAX_RENDER_BYTES } from '../../src/hub/sessionScreen.js';
 
 // Spec 2026-11-26-side-panel: the screen of a background session (`claude logs <bgId>`), cleaned before it
 // reaches the app: no terminal codes, no app link, no token, no key.
@@ -47,6 +47,76 @@ describe('cleanScreen', () => {
     const out = cleanScreen(raw, []);
     expect(out.length).toBeLessThanOrEqual(MAX_SCREEN_CHARS);
     expect(out.endsWith('THE END')).toBe(true);
+  });
+});
+
+// Spec 2026-11-27-session-screen-terminal: `claude logs` is a terminal stream (cursor moves, redraws, "cursor
+// forward" in place of spaces). The hub plays it in a headless terminal and keeps only the final screen.
+const ESC = '\x1b[';
+describe('renderScreen', () => {
+  it('a line redrawn many times shows once, as its last frame', async () => {
+    let raw = `${ESC}2J${ESC}1;1HHeader\r\n`;
+    for (let i = 1; i <= 40; i++) raw += `\r${ESC}K✻ Doodling… ${i}`;
+    raw += `\r${ESC}KDone thinking\r\nprompt`;
+    const out = await renderScreen(raw);
+    expect(out).toBe('Header\nDone thinking\nprompt');
+    expect(out).not.toContain('Doodling');
+  });
+
+  it('cursor forward gives the spaces back; cursor up rewrites a line above', async () => {
+    const raw = `Fala${ESC}1Cmeu${ESC}3Crei!\r\nold status\r\nbottom${ESC}1A\r${ESC}2Knew status`;
+    expect(await renderScreen(raw)).toBe('Fala meu   rei!\nnew status\nbottom');
+  });
+
+  it('absolute moves (CUP, CHA) land where the session put them, without trailing empty lines', async () => {
+    const raw = `${ESC}2J${ESC}3;5Hmiddle${ESC}1;1Htop${ESC}5;1Hleft${ESC}60Gright\r\n\r\n\r\n`;
+    expect(await renderScreen(raw)).toBe(`top\n\n    middle\n\nleft${' '.repeat(55)}right`);
+  });
+
+  it('only the final screen: what scrolled off the top is gone', async () => {
+    const raw = Array.from({ length: 120 }, (_, i) => `line ${i}`).join('\r\n');
+    const out = (await renderScreen(raw, { cols: 80, rows: 10 })).split('\n');
+    expect(out).toHaveLength(10);
+    expect(out[0]).toBe('line 110');
+    expect(out[9]).toBe('line 119');
+  });
+
+  it('a line the terminal wrapped is joined back (so a long token is never cut in two)', async () => {
+    const out = await renderScreen(`${'a'.repeat(30)}${'b'.repeat(30)}\r\nnext`, { cols: 40, rows: 5 });
+    expect(out).toBe(`${'a'.repeat(30)}${'b'.repeat(30)}\nnext`);
+  });
+
+  it('a huge stream: only its end is played', async () => {
+    const raw = 'x'.repeat(MAX_RENDER_BYTES * 2) + '\r\nTHE END';
+    expect((await renderScreen(raw)).endsWith('THE END')).toBe(true);
+  });
+});
+
+describe('screenSize', () => {
+  it('at least 200x50 (what `claude logs` draws at), larger when the session moved the cursor further', () => {
+    expect(screenSize('')).toEqual({ cols: 200, rows: 50 });
+    expect(screenSize(`${ESC}40;1H${ESC}38;3Hx`)).toEqual({ cols: 200, rows: 50 });
+    expect(screenSize(`${ESC}62;1H${ESC}250Gx${ESC}5;300H${ESC}70d`)).toEqual({ cols: 300, rows: 70 });
+    expect(screenSize(`${ESC}9999;9999H`)).toEqual({ cols: 400, rows: 200 });
+  });
+});
+
+describe('screenText', () => {
+  it('plays the stream, then removes the app link, token, key and secret', async () => {
+    const raw = `${ESC}2J${ESC}1;1HOpen the app:${ESC}1Chttp://127.0.0.1:7777/#token=${TOKEN}\r\nAI${ESC}1CChat${ESC}1CCenter${ESC}1Ckey:${ESC}1C${KEY}\r\nsecret ${SECRET}\r\n${ESC}1;200Hz`;
+    const out = await screenText(raw, [TOKEN, KEY, SECRET]);
+    for (const bad of [TOKEN, KEY, SECRET, '127.0.0.1', '#token', '\x1b']) expect(out).not.toContain(bad);
+    expect(out).toContain('Open the app: [app link removed]');
+    expect(out).toContain('AI Chat Center key: [redacted]');
+  });
+
+  it('a token wrapped by the terminal, or cut by the session at the end of a line, is still removed', async () => {
+    const wrapped = await screenText(`link: http://127.0.0.1:7777/#token=${TOKEN}\r\nrest`, [TOKEN], { cols: 40, rows: 10 });
+    for (const bad of [TOKEN.slice(-12), TOKEN.slice(0, 12), '127.0.0.1']) expect(wrapped).not.toContain(bad);
+    expect(wrapped).toContain('rest');
+    const cut = await screenText(`key ${KEY.slice(0, 22)}\r\n  ${KEY.slice(22)} after\r\nthe ${TOKEN.slice(0, 9)}\r\n${TOKEN.slice(9)}`, [TOKEN, KEY]);
+    for (const bad of [KEY.slice(22), KEY.slice(0, 22), TOKEN.slice(0, 9)]) expect(cut).not.toContain(bad);
+    expect(cut).toContain('after');
   });
 });
 

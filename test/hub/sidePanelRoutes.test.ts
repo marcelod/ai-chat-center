@@ -217,6 +217,15 @@ describe('GET /api/sessions/:sid/screen', () => {
     expect(calls).toEqual([['5e1b5e9b', '/home/u/.claude-work']]);
   });
 
+  it('answers the final screen of the terminal stream, not every frame (spec 2026-11-27-session-screen-terminal)', async () => {
+    let raw = '\x1b[2J\x1b[1;1H';
+    for (let i = 0; i < 30; i++) raw += `\r\x1b[K✻ Doodling… ${i}`;
+    raw += '\r\x1b[KFala\x1b[1Cmeu\x1b[1Crei';
+    const u = await start({ listLive: async () => [bgLive()], screen: async () => raw });
+    const r = await req(u, '/api/sessions/s1/screen', { headers: auth });
+    expect(parse(r.body).text).toBe('Fala meu rei');
+  });
+
   it('409 for an interactive or disconnected session, 503 failed lookup, 502 failed read, 401 without token', async () => {
     let list: LiveSession[] | null = [bgLive({ kind: 'interactive', bgId: undefined })];
     let fail = false;

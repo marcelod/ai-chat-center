@@ -1,12 +1,16 @@
 // Slash commands the app knows, for the list shown when `/` is typed in a background session (spec
 // 2026-11-25-app-batch). Seen live with Claude Code 2.1.332: the app types one line through `claude attach`,
 // so a command works only when that line does everything; a command that opens a menu (arrows and Enter)
-// or that only draws on the screen has to be used in a terminal.
+// has to be used in a terminal, and one that only draws on the screen needs the session screen in the side
+// panel (spec 2026-11-27-session-screen-terminal).
 
 export type CommandKind =
   /** Runs from the app. */
   | 'app'
-  /** Runs, but its result is drawn on the screen only: the app would show nothing. */
+  /**
+   * Runs, but its result is drawn on the screen only: sent when the app can show the session screen (spec
+   * 2026-11-27-session-screen-terminal), refused otherwise.
+   */
   | 'screen'
   /** Opens a menu or needs the terminal (or ends the conversation in the app). */
   | 'terminal';
@@ -54,11 +58,14 @@ export const COMMANDS: CommandInfo[] = [
 
 const byName = new Map(COMMANDS.map((c) => [c.cmd, c]));
 
-/** The commands that run from the app whose name starts with `typed` (the first word only). */
-export function suggestions(typed: string): CommandInfo[] {
+/**
+ * The commands that run from the app whose name starts with `typed` (the first word only); with `screen`, the
+ * screen-only ones too (the app opens the session screen after them).
+ */
+export function suggestions(typed: string, opts: { screen?: boolean } = {}): CommandInfo[] {
   if (!typed.startsWith('/') || /\s/.test(typed)) return [];
   const q = typed.toLowerCase();
-  return COMMANDS.filter((c) => c.kind === 'app' && c.cmd.startsWith(q));
+  return COMMANDS.filter((c) => (c.kind === 'app' || (opts.screen && c.kind === 'screen')) && c.cmd.startsWith(q));
 }
 
 /**

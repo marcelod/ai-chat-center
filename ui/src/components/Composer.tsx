@@ -22,6 +22,11 @@ type Props = {
   onCommand?: (text: string) => Promise<void>;
   /** Short id of the background session, for "use claude attach <id>" when a command needs the terminal. */
   attachId?: string;
+  /**
+   * The app can show this session's screen (spec 2026-11-27-session-screen-terminal): commands that only draw
+   * there (/status, /context…) are sent too, and this is called with the command once the hub typed it.
+   */
+  onScreenCommand?: (cmd: string) => void;
   /** Interactive (terminal) session: a typed command name gets a line saying why the app cannot run it. */
   terminalHint?: boolean;
   /** Shown right of the keyboard hint (ChatView: model and effort, mode, plugin version). */
@@ -29,7 +34,7 @@ type Props = {
 };
 /** A one-line message that names a slash command (`/compact`, `/rename x`): the hub's rule (bgSessions.isValidCommand). A path such as `/home/x` is text. */
 export const isSlashCommand = (text: string) => text.length <= 200 && /^\/[A-Za-z0-9][\w:.-]*( [^\n]*)?$/.test(text);
-type CommandNote = { kind: 'sent' | 'busy' | 'windows' | 'failed' | 'screen' | 'terminal'; cmd: string };
+type CommandNote = { kind: 'sent' | 'sentScreen' | 'busy' | 'windows' | 'failed' | 'screen' | 'terminal'; cmd: string };
 type Failure = { kind: 'disconnected' } | { kind: 'version'; direction: 'older' | 'newer' } | { kind: 'failed'; text: string };
 type AttachError = { kind: 'tooLarge'; name: string } | { kind: 'tooMany' } | { kind: 'upload' };
 
@@ -63,7 +68,7 @@ export const PAD_PX = 12;
 export const MAX_LINES = 8;
 export const MAX_HEIGHT = MAX_LINES * LINE_PX + 2 * PAD_PX;
 
-export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuestion = false, onSend, onUpload, onCommand, attachId, terminalHint = false, controls }: Props) {
+export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuestion = false, onSend, onUpload, onCommand, onScreenCommand, attachId, terminalHint = false, controls }: Props) {
   const t = useT();
   const disabled = sessionOff || blockedByQuestion;
   const [text, setText] = useState(() => loadDraft(sessionId));
@@ -80,7 +85,7 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
   // The list of commands shown while a command name is typed in a background session (spec 2026-11-25-app-batch).
   const [pick, setPick] = useState(0);
   const [menuOff, setMenuOff] = useState<string | null>(null);
-  const menu = onCommand && !disabled && menuOff !== text ? suggestions(text) : [];
+  const menu = onCommand && !disabled && menuOff !== text ? suggestions(text, { screen: Boolean(onScreenCommand) }) : [];
   const showTerminalHint = terminalHint && !onCommand && !disabled && asText === null && suggestions(text).length > 0;
   const menuId = `${sessionId}-commands`;
   const picker = useRef<HTMLInputElement>(null);
@@ -187,7 +192,10 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
     setCommand(null);
     try {
       await onCommand(cmd);
-      if (mounted.current) setCommand({ kind: 'sent', cmd });
+      const screenCmd = onScreenCommand && classify(cmd) === 'screen' ? cmd.split(' ')[0] : null;
+      if (!mounted.current) return; // another conversation is open now: its panel is not this session's
+      if (screenCmd) onScreenCommand?.(screenCmd);
+      setCommand(screenCmd ? { kind: 'sentScreen', cmd: screenCmd } : { kind: 'sent', cmd });
     } catch (e) {
       if (!mounted.current) return keepAsDraft(cmd);
       const st = statusOf(e);
@@ -204,7 +212,7 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
     if (batch.length === 0 && isSlashCommand(typed)) {
       if (onCommand) {
         const kind = classify(typed);
-        if (kind !== 'app') {
+        if (kind !== 'app' && !(kind === 'screen' && onScreenCommand)) {
           setCommand({ kind, cmd: typed.split(' ')[0] }); // the text stays in the box
           return;
         }
@@ -352,9 +360,11 @@ export function Composer({ sessionId, name, disabled: sessionOff, blockedByQuest
       )}
       <PendingAttachments files={files} onRemove={removeFile} disabled={uploading} />
       {command && (
-        <p role={command.kind === 'sent' ? 'status' : 'alert'} className={`mb-2 text-sm ${command.kind === 'sent' ? 'text-muted' : 'text-danger'}`}>
+        <p role={command.kind === 'sent' || command.kind === 'sentScreen' ? 'status' : 'alert'} className={`mb-2 text-sm ${command.kind === 'sent' || command.kind === 'sentScreen' ? 'text-muted' : 'text-danger'}`}>
           {command.kind === 'sent'
             ? t('ui.composer.commandSent', { cmd: command.cmd })
+            : command.kind === 'sentScreen'
+            ? t('ui.composer.commandScreenSent', { cmd: command.cmd })
             : command.kind === 'screen'
               ? t('ui.composer.commandScreen', { cmd: command.cmd, attach: `claude attach ${attachId ?? ''}`.trim() })
               : command.kind === 'terminal'
