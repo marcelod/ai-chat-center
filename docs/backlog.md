@@ -55,6 +55,8 @@ No primeiro teste no Windows (2026-11-24), o atalho funcionou, mas a pessoa teve
 
 Pedido em 2026-11-25. Investigado na rodada 0.6.2 (Claude Code 2.1.332), **adiado**: a sugestão não fica na transcrição (só `promptSource: "suggestion_accepted"` quando aceita), não fica em `~/.claude` e nenhum hook a entrega. `--prompt-suggestions` só entrega a sugestão no modo `-p`/SDK (`stream-json`), o que exigiria outro modo de sessão (sem `--bg`, `/cc` e attach). Caminho possível depois da ideia 2 (ver a tela da sessão): ler a linha cinza do `claude logs <id>`, com o filtro de token; frágil a cada versão. Bônus barato, se o autor quiser: marcar no app as mensagens com `suggestion_accepted`. Cuidado registrado: `claude --bg --help` cria uma sessão de verdade; para ver a ajuda, use `claude --help`.
 
+**Como o autor quer que funcione (2026-11-27, com prints do terminal e do app):** é um dos usos mais úteis do terminal. Lá a sugestão aparece em cinza dentro do campo (ex.: "pode juntar na main quando terminar") e um toque completa. No app, a sugestão do Claude Code deveria aparecer do mesmo jeito: texto cinza dentro do campo vazio da conversa. `Tab` ou seta → no teclado (e um toque no celular) aceita e preenche o campo, sem enviar; o autor revisa e dá Enter. Ao começar a digitar, a sugestão some. Ela é diferente das respostas rápidas (o ⚡ com frases fixas e "mensagens que você manda sempre"), que continuam como estão. Prioridade alta para o autor, mas segue bloqueado pelo motivo acima: hoje a única fonte é a tela da sessão (`claude logs`), que já é lida para a ideia 2. Vale um teste para ver se a linha cinza aparece lá de forma estável.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
