@@ -2,18 +2,18 @@ import type { ReactNode } from 'react';
 import Markdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useT } from '../i18n';
-import { FILE_HREF, filePathOf, fileKind, localLinkPath, remarkFileLinks, resolveRelative } from '../filePaths';
+import { FILE_HREF, fileTargetOf, fileKind, localLinkPath, remarkFileLinks, resolveRelative } from '../filePaths';
 import { useFileLinksContext } from '../fileLinks';
 import { CodeBlock } from './CodeBlock';
 
 const urlTransform = (url: string) => (url.startsWith(FILE_HREF) ? url : defaultUrlTransform(url));
 
 /** A cited file: a button that opens it in the side panel when it can be opened, plain text otherwise. */
-function FileLink({ path, children }: { path: string; children: ReactNode }) {
+function FileLink({ path, line, children }: { path: string; line?: number; children: ReactNode }) {
   const links = useFileLinksContext();
   if (!links || !links.isLinkable(path)) return <>{children}</>;
   return (
-    <button type="button" className="file-link" title={path} onClick={() => links.open(path)}>
+    <button type="button" className="file-link" title={line ? `${path}:${line}` : path} onClick={() => links.open(path, line)}>
       {children}
     </button>
   );
@@ -46,8 +46,8 @@ export function MarkdownText({ text, linkBase }: { text: string; linkBase?: stri
       skipHtml
       components={{
         a: ({ node: _node, href, children, ...props }) => {
-          const p = filePathOf(href);
-          if (p !== null) return <FileLink path={p}>{children}</FileLink>;
+          const f = fileTargetOf(href);
+          if (f !== null) return <FileLink path={f.path} line={f.line}>{children}</FileLink>;
           return (
             <a {...props} href={href} target="_blank" rel="noopener noreferrer">
               {children}
