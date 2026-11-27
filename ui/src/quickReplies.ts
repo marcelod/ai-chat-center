@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { normalizeReply } from '@shared/quickReplies';
 
 // Quick replies (spec 2026-11-26-context-quick-replies): short messages the user sends often, kept per browser in
 // localStorage like the other preferences. Until the user edits the list, the defaults of the app's language are
@@ -68,4 +69,50 @@ export const useQuickReplies = (): string[] | null => useSyncExternalStore(subsc
 export function resetQuickRepliesMemory(): void {
   memory = undefined;
   cache = undefined;
+  dismissedMemory = undefined;
+  dismissedCache = undefined;
 }
+
+// Dismissed suggestions (spec 2026-11-27-suggested-quick-replies): kept normalized, so a dismissed suggestion
+// never comes back in this browser, whatever its case, accents or punctuation.
+const DISMISSED_KEY = 'acc.quickReplies.dismissed';
+export const MAX_DISMISSED = 200;
+let dismissedMemory: string[] | undefined; // set only when storage failed to save
+let dismissedCache: { raw: string | null; list: string[] } | undefined;
+const NONE: string[] = [];
+
+export function loadDismissed(): string[] {
+  if (dismissedMemory !== undefined) return dismissedMemory;
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(DISMISSED_KEY);
+  } catch {
+    return NONE;
+  }
+  if (dismissedCache && dismissedCache.raw === raw) return dismissedCache.list; // same array while unchanged
+  let list: string[] = NONE;
+  try {
+    const d: unknown = raw === null ? null : JSON.parse(raw);
+    if (Array.isArray(d)) list = d.filter((v): v is string => typeof v === 'string' && v !== '').slice(-MAX_DISMISSED);
+  } catch {
+    list = NONE;
+  }
+  dismissedCache = { raw, list };
+  return list;
+}
+
+export function dismissSuggestion(text: string): void {
+  const norm = normalizeReply(text);
+  if (!norm) return;
+  const list = [...loadDismissed().filter((x) => x !== norm), norm].slice(-MAX_DISMISSED);
+  try {
+    localStorage.setItem(DISMISSED_KEY, JSON.stringify(list));
+    dismissedMemory = undefined;
+  } catch {
+    dismissedMemory = list;
+  }
+  listeners.forEach((l) => l());
+}
+
+/** The dismissed suggestions (normalized); re-renders when one is added. */
+export const useDismissed = (): string[] => useSyncExternalStore(subscribe, loadDismissed);

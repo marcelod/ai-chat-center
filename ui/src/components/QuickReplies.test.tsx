@@ -1,9 +1,9 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LangProvider } from '../i18n';
 import { Composer } from './Composer';
-import { loadQuickReplies, resetQuickRepliesMemory, saveQuickReplies } from '../quickReplies';
+import { dismissSuggestion, loadDismissed, loadQuickReplies, resetQuickRepliesMemory, saveQuickReplies } from '../quickReplies';
 
 let n = 0;
 const setup = (opts: { lang?: 'en' | 'pt-BR'; onSend?: (t: string) => Promise<void>; blocked?: boolean } = {}) =>
@@ -18,8 +18,24 @@ const openList = async () => {
   return screen.getByRole('dialog', { name: 'Quick replies' });
 };
 
+/** The hub's suggestions (spec 2026-11-27-suggested-quick-replies); none unless a test says otherwise. */
+const hub = (suggestions: { text: string; count: number }[] | 'fail' = []) => {
+  const f = vi.fn(async (url: string) =>
+    suggestions === 'fail' || url !== '/api/quick-replies/suggestions'
+      ? new Response('{}', { status: 500 })
+      : new Response(JSON.stringify({ suggestions }), { status: 200, headers: { 'content-type': 'application/json' } }),
+  );
+  vi.stubGlobal('fetch', f);
+  return f;
+};
+
+beforeEach(() => {
+  hub();
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   resetQuickRepliesMemory();
 });
 
@@ -115,5 +131,97 @@ describe('quick replies in the composer', () => {
   it('disabled while a question blocks the field', () => {
     setup({ blocked: true });
     expect(screen.getByRole('button', { name: 'Quick replies' })).toBeDisabled();
+  });
+});
+
+describe('suggested quick replies', () => {
+  const section = async () => {
+    const list = await openList();
+    return within(list).findByRole('region', { name: 'Suggestions' });
+  };
+
+  it('shows what the hub suggests below the list; a pick fills the field', async () => {
+    const f = hub([{ text: 'run the tests', count: 4 }]);
+    setup();
+    const s = await section();
+    expect(f).toHaveBeenCalledWith('/api/quick-replies/suggestions', expect.anything());
+    await userEvent.click(within(s).getByRole('button', { name: 'Use suggestion: run the tests' }));
+    expect(box().value).toBe('run the tests');
+  });
+
+  it('+ adds it to the list (after the defaults) and it leaves the suggestions', async () => {
+    hub([{ text: 'run the tests', count: 4 }, { text: 'and push', count: 3 }]);
+    setup();
+    const s = await section();
+    await userEvent.click(within(s).getByRole('button', { name: 'Add to quick replies: run the tests' }));
+    expect(loadQuickReplies()).toEqual(['Go ahead', 'Commit it', "Summarize what's left", 'run the tests']);
+    expect(within(s).queryByRole('button', { name: /run the tests/ })).toBeNull();
+    expect(within(s).getByRole('button', { name: 'Use suggestion: and push' })).toBeInTheDocument();
+  });
+
+  it('x dismisses it for good', async () => {
+    hub([{ text: 'Run the tests!', count: 4 }]);
+    const { unmount } = setup();
+    const s = await section();
+    await userEvent.click(within(s).getByRole('button', { name: 'Dismiss: Run the tests!' }));
+    expect(screen.queryByRole('region', { name: 'Suggestions' })).toBeNull();
+    expect(loadDismissed()).toContain('run the tests');
+    unmount();
+    setup();
+    const list = await openList();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(within(list).queryByRole('region', { name: 'Suggestions' })).toBeNull();
+  });
+
+  it('hides what is already in the list (defaults included, compared normalized) or was dismissed', async () => {
+    dismissSuggestion('ship IT');
+    hub([{ text: 'go ahead!', count: 9 }, { text: 'Ship it', count: 5 }, { text: 'keep going', count: 3 }]);
+    setup();
+    const s = await section();
+    expect(within(s).getAllByRole('button', { name: /^Use suggestion: / }).map((b) => b.textContent)).toEqual(['keep going']);
+  });
+
+  it('+ is disabled when the list is full', async () => {
+    saveQuickReplies(Array.from({ length: 12 }, (_, i) => `r${i}`));
+    hub([{ text: 'keep going', count: 3 }]);
+    setup();
+    const s = await section();
+    expect(within(s).getByRole('button', { name: 'Add to quick replies: keep going' })).toBeDisabled();
+  });
+
+  it('a failure shows no section', async () => {
+    hub('fail');
+    setup();
+    const list = await openList();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(within(list).queryByRole('region', { name: 'Suggestions' })).toBeNull();
+    expect(within(list).getByRole('button', { name: 'Use: Go ahead' })).toBeInTheDocument();
+  });
+
+  it('Portuguese', async () => {
+    hub([{ text: 'roda os testes', count: 3 }]);
+    setup({ lang: 'pt-BR' });
+    await userEvent.click(screen.getByRole('button', { name: 'Respostas rápidas' }));
+    const s = await screen.findByRole('region', { name: 'Sugestões' });
+    expect(within(s).getByRole('button', { name: 'Adicionar às respostas rápidas: roda os testes' })).toBeInTheDocument();
+    expect(within(s).getByRole('button', { name: 'Dispensar: roda os testes' })).toBeInTheDocument();
+  });
+});
+
+describe('dismissed suggestions storage', () => {
+  it('keeps them normalized, without repeats, capped, and survives storage errors', () => {
+    dismissSuggestion('Pode seguir!');
+    dismissSuggestion('pode   SEGUIR');
+    expect(loadDismissed()).toEqual(['pode seguir']);
+    for (let i = 0; i < 250; i++) dismissSuggestion(`t${i}`);
+    expect(loadDismissed()).toHaveLength(200);
+    expect(loadDismissed()).toContain('t249');
+    localStorage.setItem('acc.quickReplies.dismissed', '{"x":1}');
+    expect(loadDismissed()).toEqual([]);
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    expect(() => dismissSuggestion('a')).not.toThrow();
+    expect(loadDismissed()).toContain('a');
   });
 });

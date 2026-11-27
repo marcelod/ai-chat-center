@@ -343,6 +343,11 @@
       "new": "New quick reply",
       "empty": "No quick replies. Use Edit to add one.",
       "hint": "Fills the message field; press Enter to send.",
+      "suggestions": "Suggestions",
+      "suggestionsHint": "Messages you send often",
+      "useSuggestion": "Use suggestion: {text}",
+      "addSuggestion": "Add to quick replies: {text}",
+      "dismiss": "Dismiss: {text}",
       "defaults": {
         "d1": "Go ahead",
         "d2": "Commit it",

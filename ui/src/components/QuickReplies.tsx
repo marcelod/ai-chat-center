@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useT } from '../i18n';
-import { DEFAULT_QUICK_REPLY_KEYS, MAX_QUICK_REPLIES, MAX_QUICK_REPLY_LENGTH, saveQuickReplies, useQuickReplies } from '../quickReplies';
+import { DEFAULT_QUICK_REPLY_KEYS, MAX_QUICK_REPLIES, MAX_QUICK_REPLY_LENGTH, dismissSuggestion, saveQuickReplies, useDismissed, useQuickReplies } from '../quickReplies';
+import { quickReplySuggestions } from '../api';
+import { normalizeReply, type SuggestedReply } from '@shared/quickReplies';
 
 // The ⚡ button under the message field (spec 2026-11-26-context-quick-replies). A pick only fills the field:
 // nothing is sent until the user presses Enter, so a slip of the finger never sends a message.
@@ -13,6 +15,23 @@ export function QuickReplies({ onPick, disabled = false }: { onPick: (text: stri
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const box = useRef<HTMLSpanElement>(null);
+  // Suggestions from the hub (spec 2026-11-27-suggested-quick-replies): fetched when the menu opens; a failure
+  // shows none. What is already in the list or was dismissed is not offered.
+  const [suggested, setSuggested] = useState<SuggestedReply[]>([]);
+  const dismissed = useDismissed();
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    quickReplySuggestions().then(
+      (s) => alive && setSuggested(Array.isArray(s) ? s : []),
+      () => alive && setSuggested([]),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [open]);
+  const hidden = new Set([...list.map(normalizeReply), ...dismissed]);
+  const offered = suggested.filter((s) => typeof s?.text === 'string' && !hidden.has(normalizeReply(s.text)));
   const button = useRef<HTMLButtonElement>(null);
 
   const close = (refocus = false) => {
@@ -95,6 +114,49 @@ export function QuickReplies({ onPick, disabled = false }: { onPick: (text: stri
               </li>
             ))}
           </ul>
+          {offered.length > 0 && (
+            <section aria-label={t('ui.quickReplies.suggestions')} className="mx-0.5 mt-1 border-t border-line pt-1">
+              <p className="truncate px-2 pb-0.5 text-[11px] text-muted" title={t('ui.quickReplies.suggestionsHint')}>
+                <span className="font-semibold">{t('ui.quickReplies.suggestions')}</span> · {t('ui.quickReplies.suggestionsHint')}
+              </p>
+              <ul className="max-h-40 overflow-y-auto">
+                {offered.map(({ text }) => (
+                  <li key={text} className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      aria-label={t('ui.quickReplies.useSuggestion', { text })}
+                      onClick={() => {
+                        close();
+                        onPick(text);
+                      }}
+                      className="min-w-0 flex-1 truncate rounded-lg px-2 py-1.5 text-left text-[13px] italic text-ink hover:bg-field"
+                    >
+                      {text}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={t('ui.quickReplies.addSuggestion', { text })}
+                      title={t('ui.quickReplies.addSuggestion', { text })}
+                      disabled={full}
+                      onClick={() => saveQuickReplies([...list, text])}
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg font-semibold text-accent hover:bg-field disabled:opacity-40"
+                    >
+                      <span aria-hidden="true">+</span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={t('ui.quickReplies.dismiss', { text })}
+                      title={t('ui.quickReplies.dismiss', { text })}
+                      onClick={() => dismissSuggestion(text)}
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-field hover:text-danger"
+                    >
+                      <span aria-hidden="true">×</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <div className="mx-0.5 my-1 border-t border-line" />
           {editing ? (
             <form
