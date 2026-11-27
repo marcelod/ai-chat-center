@@ -39,6 +39,12 @@ describe('redactAppSecrets', () => {
       expect(performance.now() - t).toBeLessThan(300);
     }
   });
+  it('removes the other loopback addresses too: [::1], 0.0.0.0 and any 127.x.y.z', () => {
+    for (const link of ['http://[::1]:4823/#token=x', '0.0.0.0:5173/app', 'ws://127.1.2.3:9/a', '[::1]']) {
+      const s = redactAppSecrets(`open ${link} now`);
+      expect(s, link).toBe('open [app link removed] now');
+    }
+  });
   it('ignores short secrets and keeps ordinary text', () => {
     expect(redactAppSecrets('see https://example.com and abc123', ['abc'])).toBe('see https://example.com and abc123');
   });

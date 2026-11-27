@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatEvent, SessionView, ToolDiff } from '@shared/types';
 import { LangProvider } from '../i18n';
-import { saveShowDiffs } from '../prefs';
+import { saveCodeWrap, saveShowDiffs } from '../prefs';
 import { ChatView } from './ChatView';
 import type { PanelApi } from './SidePanel';
 
@@ -92,7 +92,7 @@ describe('side panel: code files', () => {
   });
 
   it('"Wrap lines" wraps the code view, and the choice is remembered (spec 2026-11-27-side-panel-leftovers)', async () => {
-    setup([say('see `src/hub/server.ts`')]);
+    const first = setup([say('see `src/hub/server.ts`')]);
     await userEvent.click(await screen.findByRole('button', { name: 'src/hub/server.ts' }));
     const panel = await screen.findByTestId('side-panel');
     const view = await within(panel).findByTestId('panel-code');
@@ -103,6 +103,12 @@ describe('side panel: code files', () => {
     expect(view).toHaveAttribute('data-wrap', 'on');
     expect(within(panel).getByRole('button', { name: "Don't wrap lines" })).toHaveAttribute('aria-pressed', 'true');
     expect(localStorage.getItem('acc.codeWrap')).toBe('1');
+    // A new page (unmounted and mounted again) opens the code view wrapped.
+    first.unmount();
+    setup([say('see `src/hub/server.ts`')]);
+    await userEvent.click(await screen.findByRole('button', { name: 'src/hub/server.ts' }));
+    expect(await screen.findByTestId('panel-code')).toHaveAttribute('data-wrap', 'on');
+    saveCodeWrap(false);
   });
 
   it('without a line it opens at the top, nothing marked', async () => {
