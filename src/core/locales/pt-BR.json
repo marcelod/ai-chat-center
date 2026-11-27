@@ -62,6 +62,7 @@
     },
     "pinned": "Fixada",
     "chatMenu": {"label": "Ações da conversa", "rename": "Renomear", "remove": "Remover do app", "confirmRemove": "Remover? Confirmar", "removeFailed": "Não foi possível remover", "pin": "Fixar no topo", "unpin": "Desafixar", "disconnect": "Desconectar", "confirmDisconnect": "Desconectar? Confirmar", "pinFailed": "Não foi possível alterar a fixação", "disconnectFailed": "Não foi possível desconectar", "resume": "Retomar em segundo plano", "openTerminal": "Abrir no terminal", "stop": "Parar sessão", "confirmStop": "Parar? Confirmar", "stopFailed": "Não foi possível parar", "respawn": "Reiniciar sessão", "respawnFailed": "Não foi possível reiniciar", "rm": "Remover do Claude Code", "confirmRm": "Remover do Claude Code? Confirmar", "rmFailed": "Não foi possível remover do Claude Code"},
+    "export": {"menu": "Exportar conversa", "markdown": "Markdown (.md)", "pdf": "PDF", "failed": "Não foi possível exportar", "folder": "Pasta", "branch": "Branch", "exportedAt": "Exportada em", "claude": "Claude", "toAgent": "Claude → {name}", "attachments": "Anexos", "images": "Imagens: {n}", "untitled": "conversa"},
     "background": {
       "menu": "Fundo",
       "title": "Fundo da conversa",

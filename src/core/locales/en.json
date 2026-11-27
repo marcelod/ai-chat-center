@@ -62,6 +62,7 @@
     },
     "pinned": "Pinned",
     "chatMenu": {"label": "Conversation actions", "rename": "Rename", "remove": "Remove from app", "confirmRemove": "Remove? Confirm", "removeFailed": "Couldn't remove", "pin": "Pin to top", "unpin": "Unpin", "disconnect": "Disconnect", "confirmDisconnect": "Disconnect? Confirm", "pinFailed": "Couldn't change the pin", "disconnectFailed": "Couldn't disconnect", "resume": "Resume in the background", "openTerminal": "Open in a terminal", "stop": "Stop session", "confirmStop": "Stop? Confirm", "stopFailed": "Couldn't stop", "respawn": "Restart session", "respawnFailed": "Couldn't restart", "rm": "Remove from Claude Code", "confirmRm": "Remove from Claude Code? Confirm", "rmFailed": "Couldn't remove from Claude Code"},
+    "export": {"menu": "Export conversation", "markdown": "Markdown (.md)", "pdf": "PDF", "failed": "Couldn't export", "folder": "Folder", "branch": "Branch", "exportedAt": "Exported", "claude": "Claude", "toAgent": "Claude → {name}", "attachments": "Attachments", "images": "Images: {n}", "untitled": "conversation"},
     "background": {
       "menu": "Background",
       "title": "Conversation background",
