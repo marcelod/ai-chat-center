@@ -18,7 +18,7 @@ import { useCommandProgress } from '../useCommandProgress';
 import { SessionControls } from './SessionControls';
 import { ContextMeter } from './ContextMeter';
 import { SidePanel, type PanelApi, type PanelItem } from './SidePanel';
-import { SubagentList, SubagentTranscript } from './SubagentsPanel';
+import { lastUserMessageAt, SubagentList, SubagentTranscript } from './SubagentsPanel';
 import { ScreenView } from './ScreenPanel';
 import { FileLinksProvider, useExistingFiles, type FileLinks } from '../fileLinks';
 import { AgentBubble, RecapCard, AssistantBubble, ToAgentBubble, FailedBubble, QueuedBubble, UserBubble } from './MessageBubble';
@@ -485,6 +485,8 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
   const progress = useCommandProgress(session, events);
   // The side panel: a stack of what was opened in it (Back pops, X and Esc close it all).
   const [panelStack, setPanelStack] = useState<PanelItem[]>([]);
+  // The subagents' History stays as left while a subagent is viewed (spec 2026-11-27-subagents-history).
+  const [subagentHistoryOpen, setSubagentHistoryOpen] = useState(false);
   const openPanel = (item: PanelItem) => setPanelStack((st) => [...st, item]);
   const closePanel = () => setPanelStack([]);
   useEffect(() => setPanelStack([]), [session.sessionId]);
@@ -858,7 +860,16 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
             renderOther={(item) => {
               if (item.kind === 'subagents' && panel.subagents) {
                 const load = panel.subagents;
-                return <SubagentList load={load} now={now} onOpen={(a) => openPanel({ kind: 'subagent', id: a.id, title: a.description || a.agentType || a.id })} />;
+                return (
+                  <SubagentList
+                    load={load}
+                    now={now}
+                    since={lastUserMessageAt(events)}
+                    historyOpen={subagentHistoryOpen}
+                    onHistoryOpen={setSubagentHistoryOpen}
+                    onOpen={(a) => openPanel({ kind: 'subagent', id: a.id, title: a.description || a.agentType || a.id })}
+                  />
+                );
               }
               if (item.kind === 'subagent' && panel.subagentEvents) {
                 const load = panel.subagentEvents;

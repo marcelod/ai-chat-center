@@ -32,6 +32,8 @@
       "subagents": "Subagents",
       "showSubagents": "Show subagents",
       "noSubagents": "No subagents in this conversation.",
+      "noneRunning": "No subagents running now.",
+      "history": "History ({n})",
       "noMessages": "Nothing yet.",
       "background": "background",
       "workingFor": "Working for {d}",
