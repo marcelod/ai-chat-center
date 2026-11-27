@@ -62,6 +62,8 @@ export interface HubOptions {
   port: number;
   staticDir: string;
   pollMs?: number;
+  /** For tests: how long a poll may take before the stream moves on (default 10 s). */
+  pollTimeoutMs?: number;
   log?: (msg: string) => void;
   /** For tests: the clock of the window pings. */
   now?: () => number;
@@ -274,7 +276,7 @@ export async function createHub(
   };
   let pollGen = 0;
   let inFlight: Promise<void> | null = null;
-  const POLL_TIMEOUT_MS = 10_000;
+  const pollTimeoutMs = opts.pollTimeoutMs ?? 10_000;
   const schedulePoll = (gen: number) => {
     pollTimer = setTimeout(async () => {
       if (gen !== pollGen) return;
@@ -285,21 +287,38 @@ export async function createHub(
       }
       let changes: ProviderChange[] = [];
       let timer: NodeJS.Timeout | undefined;
+      // One source of truth: the timeout wins only while the poll has not settled; then its result is late.
+      let settled = false;
+      let timedOut = false;
       try {
         const real = Promise.resolve().then(() => provider.poll());
+        // A poll that outlives the timeout has already taken its changes from the provider: they are sent
+        // when it ends (once: the timed-out path sends nothing). The next poll waits for this one (inFlight).
         const tracked: Promise<void> = real.then(
-          () => {},
-          () => {},
+          (late) => {
+            settled = true;
+            if (!timedOut || closed || gen !== pollGen) return;
+            log(`late poll ended with ${late.length} change(s)`);
+            for (const c of late) fanOut(c);
+          },
+          (e) => {
+            settled = true;
+            if (timedOut) log(`late poll failed: ${(e as Error).message}`);
+          },
         ).finally(() => {
           if (inFlight === tracked) inFlight = null;
         });
         inFlight = tracked;
         const timeout = new Promise<null>((resolve) => {
-          timer = setTimeout(() => resolve(null), POLL_TIMEOUT_MS);
+          timer = setTimeout(() => {
+            if (settled) return;
+            timedOut = true;
+            resolve(null);
+          }, pollTimeoutMs);
         });
         const r = await Promise.race([real, timeout]);
-        if (r === null) log('poll timed out');
-        else changes = r;
+        if (timedOut) log('poll timed out');
+        else if (r) changes = r;
       } catch (e) {
         log(`poll failed: ${(e as Error).message}`);
       } finally {
