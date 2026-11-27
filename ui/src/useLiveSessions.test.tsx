@@ -13,7 +13,7 @@ vi.mock('./api', () => ({
 }));
 
 import * as api from './api';
-import { mergeEvents, nextDelay, useLiveSessions } from './useLiveSessions';
+import { LOST_MS, mergeEvents, nextDelay, useLiveSessions } from './useLiveSessions';
 
 const sessions: SessionsResponse = {
   connected: [
@@ -379,6 +379,22 @@ describe('useLiveSessions: hub verification', () => {
     await waitFor(() => expect(api.verifyHub).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(api.forgetToken).toHaveBeenCalled());
     expect(api.openStream).toHaveBeenCalledTimes(1);
+  });
+  it('a hub that stays unreachable for LOST_MS ends the page like a token loss (spec 2026-11-27-old-window-after-update)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { result } = renderHook(() => useLiveSessions());
+    await waitFor(() => expect(result.current.data.connected).toHaveLength(2));
+    await waitFor(() => expect(api.openStream).toHaveBeenCalled());
+    vi.mocked(api.verifyHub).mockResolvedValue('unreachable');
+    act(() => handlers.onError?.());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LOST_MS - 15_000);
+    });
+    expect(api.forgetToken).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    await waitFor(() => expect(api.forgetToken).toHaveBeenCalled());
   });
   // Audit R4-L1: the hub's poll can make a sessions refresh adopt the message before the POST answers.
   it('a sent message shows once even when the hub lists it before the POST response arrives', async () => {

@@ -800,6 +800,17 @@ describe('one app window', () => {
     st.req.destroy();
   });
 
+  it('closing the hub tells the open pages before ending their streams (spec 2026-11-27-old-window-after-update)', async () => {
+    const u = await start(fakeProvider());
+    const st = await openStream(u, '/api/stream', auth);
+    const ended = new Promise<void>((ok) => st.res.on('end', () => ok()));
+    const h = hub!;
+    hub = undefined;
+    await h.close();
+    expect(await st.next(/event: bye\n/)).toMatch(/event: bye\ndata: \{"reason":"stopped"\}\n\n/);
+    await ended;
+  });
+
   it('a page that closed or stopped pinging no longer counts', async () => {
     let t = 1_000_000;
     const u = await start(fakeProvider(), { now: () => t });

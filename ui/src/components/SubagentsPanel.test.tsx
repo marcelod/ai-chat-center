@@ -191,6 +191,18 @@ describe('subagents History', () => {
     expect(within(side).getByRole('button', { name: 'History (1)' })).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('one waiting on its own background task stays with the working ones, labelled "Waiting for task" (spec 2026-11-27-subagent-background-task)', async () => {
+    const waiting = fin('w1', '2026-11-26T09:50:00.000Z', { status: 'waiting', description: 'Sleeper', startedAt: '2026-11-26T09:40:00.000Z' });
+    expect(groupSubagents([waiting], '2026-11-26T10:00:00.000Z').running.map((a) => a.id)).toEqual(['w1']);
+    setup({ subagents: vi.fn(async () => [waiting]) }, session(), [userAt('2026-11-26T10:00:00.000Z')]);
+    const side = await open();
+    const items = await within(side).findAllByTestId('subagent');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toHaveTextContent('Waiting for task');
+    expect(items[0]).toHaveTextContent('Working for 50 min');
+    expect(within(side).queryByText('No subagents running now.')).toBeNull();
+  });
+
   it('no History when every subagent is in view', async () => {
     setup({ subagents: vi.fn(async () => [agents[0]]) });
     const side = await open();

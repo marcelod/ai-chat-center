@@ -50,6 +50,11 @@ export const readGroupByProject = groupByProject.read;
 export const saveGroupByProject = groupByProject.save;
 export const useGroupByProject = groupByProject.use;
 
+// "Wrap lines" in the side panel's code view (spec 2026-11-27-side-panel-leftovers). Off by default.
+const codeWrap = booleanPref('acc.codeWrap');
+export const saveCodeWrap = codeWrap.save;
+export const useCodeWrap = codeWrap.use;
+
 // Folders whose group is closed in the session list; groups are open unless listed here.
 const CLOSED_GROUPS = 'acc.closedGroups';
 let closedMemory: string[] | null = null; // set only when storage failed to save

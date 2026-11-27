@@ -3,7 +3,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 // Audit S2-N5: after a hub restart the token rotates. EventSource only reports a bare error on the
 // 401 from /api/stream, so the tab used to keep a stale list and retry forever. On a stream error the
-// UI now asks GET /api/sessions once; its 401 drops the token and shows the "open the /cc link" screen.
+// UI now asks GET /api/sessions once; its 401 drops the token. Since spec 2026-11-27-old-window-after-update
+// a page that had a token shows "the app was updated; this window can be closed" (not the /cc link screen).
 
 class FakeEventSource {
   static last: FakeEventSource | null = null;
@@ -55,7 +56,7 @@ afterEach(() => {
   vi.resetModules();
 });
 
-it('a stream error after a token rotation shows the "open the /cc link" screen', async () => {
+it('a stream error after a token rotation shows the "app was updated" screen', async () => {
   vi.resetModules();
   const { App } = await import('./App');
   render(<App />);
@@ -66,7 +67,8 @@ it('a stream error after a token rotation shows the "open the /cc link" screen',
   rotated = true; // the hub restarted with a new token
   calls.length = 0;
   await act(async () => FakeEventSource.last!.onerror?.());
-  await waitFor(() => expect(screen.getByText('Open the link shown by /cc')).toBeInTheDocument(), { timeout: 5000 });
+  await waitFor(() => expect(screen.getByText('The app was updated; this window can be closed')).toBeInTheDocument(), { timeout: 5000 });
+  expect(screen.queryByText('Open the link shown by /cc')).toBeNull();
   // Audit S4-S3: the reconnect asks for the proof first; the new hub's proof does not match the old token,
   // so the token is dropped without being sent anywhere again.
   expect(calls.some((c) => c.startsWith('/api/health?challenge='))).toBe(true);

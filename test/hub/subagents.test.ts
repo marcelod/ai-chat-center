@@ -103,6 +103,70 @@ describe('runningSubagents', () => {
   });
 });
 
+// Spec 2026-11-27-subagent-background-task: a subagent that ends its turn while a background task of its own
+// runs is marked finished by Claude Code, but comes back when the task ends. Until the task-notification for
+// that tool_use shows up in its transcript, it is "waiting" and counts as working (STALE_MS still applies).
+const bgLaunch = (min: number, id: string) => ({
+  type: 'assistant',
+  isSidechain: true,
+  uuid: `bg${id}`,
+  timestamp: iso(min),
+  message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command: 'sleep 60', run_in_background: true } }] },
+});
+const bgStarted = (min: number, id: string, error = false) => ({
+  type: 'user',
+  isSidechain: true,
+  uuid: `bgr${id}`,
+  timestamp: iso(min),
+  toolUseResult: error ? 'Error: Blocked' : { stdout: '', backgroundTaskId: 'b1' },
+  message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: error ? '<tool_use_error>Blocked</tool_use_error>' : 'Command running in background with ID: b1.', ...(error ? { is_error: true } : {}) }] },
+});
+const bgDone = (min: number, id: string) => ({
+  type: 'user',
+  isSidechain: true,
+  isMeta: true,
+  uuid: `bgn${id}`,
+  timestamp: iso(min),
+  origin: { kind: 'task-notification', producer: 'session-task' },
+  message: {
+    role: 'user',
+    content: `[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>\n<task-id>b1</task-id>\n<tool-use-id>${id}</tool-use-id>\n<status>completed</status>\n</task-notification>`,
+  },
+});
+
+describe('a finished subagent with its own background task', () => {
+  it('is waiting while the task has no notification, and counts as working', async () => {
+    agent('a1', { agentType: 't', description: 'sleeper', finished: true }, [user(0, 'x'), bgLaunch(1, 'tb'), bgStarted(1, 'tb'), say(1, 'waiting for it')], 1);
+    agent('a2', { agentType: 't', description: 'done', finished: true }, [user(0, 'x'), say(1, 'ok')], 1);
+    const list = await listSubagents(dir, { now: () => T0 + 2 * 60_000 });
+    expect(list.find((a) => a.id === 'a1')?.status).toBe('waiting');
+    expect(list.find((a) => a.id === 'a2')?.status).toBe('finished');
+    expect(await runningSubagents(dir, () => T0 + 2 * 60_000)).toBe(1);
+  });
+
+  it('is finished once the notification for that task is in its transcript', async () => {
+    agent('a1', { agentType: 't', description: 'sleeper', finished: true }, [user(0, 'x'), bgLaunch(1, 'tb'), bgStarted(1, 'tb'), say(1, 'waiting')], 1);
+    expect(await runningSubagents(dir, () => T0 + 2 * 60_000)).toBe(1);
+    agent('a1', { agentType: 't', description: 'sleeper', finished: true }, [user(0, 'x'), bgLaunch(1, 'tb'), bgStarted(1, 'tb'), say(1, 'waiting'), bgDone(2, 'tb'), say(2, '20')], 2);
+    expect(await runningSubagents(dir, () => T0 + 3 * 60_000)).toBe(0);
+    expect((await listSubagents(dir, { now: () => T0 + 3 * 60_000 }))[0].status).toBe('finished');
+  });
+
+  it('a launch the tool refused (an error result) is not waited for', async () => {
+    agent('a1', { agentType: 't', description: 'blocked', finished: true }, [user(0, 'x'), bgLaunch(1, 'tb'), bgStarted(1, 'tb', true), say(1, 'gave up')], 1);
+    expect((await listSubagents(dir, { now: () => T0 + 2 * 60_000 }))[0].status).toBe('finished');
+  });
+
+  it('an orphan never holds: no news for STALE_MS makes it finished; stopped by the user is finished', async () => {
+    agent('a1', { agentType: 't', description: 'orphan', finished: true }, [user(0, 'x'), bgLaunch(1, 'tb'), bgStarted(1, 'tb')], 1);
+    agent('a2', { agentType: 't', description: 'stopped', finished: true, stoppedByUser: true }, [user(0, 'x'), bgLaunch(1, 'tc'), bgStarted(1, 'tc')], 1);
+    const later = () => T0 + 60_000 + STALE_MS + 1;
+    expect((await listSubagents(dir, { now: later })).map((a) => a.status)).toEqual(['finished', 'finished']);
+    expect(await runningSubagents(dir, later)).toBe(0);
+    expect((await listSubagents(dir, { now: () => T0 + 2 * 60_000 })).find((a) => a.id === 'a2')?.status).toBe('finished');
+  });
+});
+
 describe('subagentEvents', () => {
   it("parses the subagent's own transcript (side-chain lines)", async () => {
     agent('a1', { agentType: 't', description: 'x' }, [user(0, 'do A'), tool(1, 'Read'), say(2, 'All done')], 2);

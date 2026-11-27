@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as api from './api';
 import type { Language } from './api';
 import { SessionList } from './components/SessionList';
@@ -20,6 +20,22 @@ function NoToken() {
       <div className="max-w-md rounded-2xl border border-line bg-surface p-6">
         <h1 className="font-display text-xl font-semibold">{t('ui.noToken.title')}</h1>
         <p className="mt-2 text-sm text-muted">{t('ui.noToken.body')}</p>
+      </div>
+    </main>
+  );
+}
+
+/**
+ * The page lost a token it had (the hub stopped, was replaced by a newer version, or restarted with a new
+ * token): nothing here works any more, and /cc opens a new window (spec 2026-11-27-old-window-after-update).
+ */
+function Ended() {
+  const t = useT();
+  return (
+    <main className="flex h-full items-center justify-center p-4">
+      <div className="max-w-md rounded-2xl border border-line bg-surface p-6">
+        <h1 className="font-display text-xl font-semibold">{t('ui.ended.title')}</h1>
+        <p className="mt-2 text-sm text-muted">{t('ui.ended.body')}</p>
       </div>
     </main>
   );
@@ -181,7 +197,35 @@ export function App() {
   // null while a #pair= code is being traded for the token: nothing authenticated runs until it settles.
   const [token, setToken] = useState<boolean | null>(() => (api.isPairing() ? null : api.hasToken()));
 
-  useEffect(() => api.onAuthLost(() => setToken(false)), []);
+  /** True once this page has run with a token: losing it then means the hub went away, not a bad link. */
+  const hadToken = useRef(false);
+  const [ended, setEnded] = useState(false);
+  useEffect(() => {
+    if (token) hadToken.current = true;
+  }, [token]);
+  useEffect(
+    () =>
+      api.onAuthLost(() => {
+        if (hadToken.current) setEnded(true);
+        setToken(false);
+      }),
+    [],
+  );
+  // The window /cc (or the launcher) opened closes itself when its hub stops; a tab cannot, so it says so.
+  useEffect(
+    () =>
+      api.onHubStopped(() => {
+        setEnded(true);
+        if (api.openedByPair()) {
+          try {
+            window.close();
+          } catch {
+            /* not allowed: the screen says it can be closed */
+          }
+        }
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (token !== null) return;
@@ -212,6 +256,6 @@ export function App() {
   };
 
   return (
-    <LangProvider lang={lang}>{token === null ? null : token ? <Shell onLanguage={changeLanguage} /> : <NoToken />}</LangProvider>
+    <LangProvider lang={lang}>{token === null ? null : token ? <Shell onLanguage={changeLanguage} /> : ended ? <Ended /> : <NoToken />}</LangProvider>
   );
 }

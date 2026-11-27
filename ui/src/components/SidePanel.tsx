@@ -10,6 +10,7 @@ import { BackIcon, CloseIcon } from './icons';
 import { MarkdownText } from './Markdown';
 import { CodeView } from './CodeView';
 import { DiffLines } from './ActionsGroup';
+import { saveCodeWrap, useCodeWrap } from '../prefs';
 
 export type PanelItem =
   | { kind: 'file'; path: string; line?: number }
@@ -63,20 +64,35 @@ async function isPdf(blob: Blob): Promise<boolean> {
   return (await blob.slice(0, 5).text()) === '%PDF-';
 }
 
+/** A touch screen (a phone, a tablet): their browsers often leave a PDF frame empty. */
+function coarsePointer(): boolean {
+  try {
+    return typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+  } catch {
+    return false;
+  }
+}
+
 function PdfView({ url, name }: { url: string; name: string }) {
   const t = useT();
+  // On a touch screen the links come first, with a hint saying the frame is often empty there.
+  const [touch] = useState(coarsePointer);
+  const links = (
+    <p className={`flex flex-wrap items-center gap-x-4 gap-y-1 border-line px-4 py-2 text-xs text-muted ${touch ? 'border-b' : 'border-t'}`}>
+      <span className="min-w-0 flex-1">{t(touch ? 'ui.panel.pdfHintTouch' : 'ui.panel.pdfHint')}</span>
+      <a href={url} target="_blank" rel="noopener noreferrer" className="font-semibold text-accent underline">
+        {t('ui.panel.pdfOpenTab')}
+      </a>
+      <a href={url} download={name} className="font-semibold text-accent underline">
+        {t('ui.panel.pdfDownload')}
+      </a>
+    </p>
+  );
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {touch && links}
       <iframe title={name} src={url} className="min-h-0 w-full flex-1 border-0 bg-white" />
-      <p className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line px-4 py-2 text-xs text-muted">
-        <span className="min-w-0 flex-1">{t('ui.panel.pdfHint')}</span>
-        <a href={url} target="_blank" rel="noopener noreferrer" className="font-semibold text-accent underline">
-          {t('ui.panel.pdfOpenTab')}
-        </a>
-        <a href={url} download={name} className="font-semibold text-accent underline">
-          {t('ui.panel.pdfDownload')}
-        </a>
-      </p>
+      {!touch && links}
     </div>
   );
 }
@@ -89,6 +105,7 @@ function FileView({ path, line, load }: { path: string; line?: number; load: (pa
   const loadRef = useRef(load);
   loadRef.current = load;
   const [state, setState] = useState<FileState>({ status: 'loading' });
+  const wrap = useCodeWrap();
   const asSource = kind === 'text' || (kind === 'markdown' && line !== undefined);
   useEffect(() => {
     let alive = true;
@@ -134,9 +151,21 @@ function FileView({ path, line, load }: { path: string; line?: number; load: (pa
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <p className="truncate border-b border-line px-4 py-1.5 font-mono text-xs text-muted" title={path}>
-        {line ? `${path}:${line}` : path}
-      </p>
+      <div className="flex items-center gap-2 border-b border-line px-4 py-1.5">
+        <p className="min-w-0 flex-1 truncate font-mono text-xs text-muted" title={path}>
+          {line ? `${path}:${line}` : path}
+        </p>
+        {state.status === 'text' && (
+          <button
+            type="button"
+            aria-pressed={wrap}
+            onClick={() => saveCodeWrap(!wrap)}
+            className="shrink-0 rounded-md border border-line bg-surface px-1.5 py-0.5 text-[11px] font-medium text-muted hover:text-ink"
+          >
+            {wrap ? t('ui.chat.code.noWrap') : t('ui.chat.code.wrap')}
+          </button>
+        )}
+      </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {state.status === 'loading' && <PanelMessage>{t('ui.panel.loading')}</PanelMessage>}
         {state.status === 'error' && <PanelMessage alert>{t(state.key)}</PanelMessage>}
@@ -145,7 +174,9 @@ function FileView({ path, line, load }: { path: string; line?: number; load: (pa
             <img src={state.url} alt={baseName(path)} className="max-h-full max-w-full rounded-lg object-contain" />
           </div>
         )}
-        {state.status === 'text' && <CodeView text={state.text} path={path} line={line} label={t('ui.panel.codeOf', { name: baseName(path) })} />}
+        {state.status === 'text' && (
+          <CodeView text={state.text} path={path} line={line} wrap={wrap} label={t('ui.panel.codeOf', { name: baseName(path) })} />
+        )}
         {state.status === 'markdown' && (
           // Inside a Markdown file every local link opens in the panel; a missing one says so there.
           <FileLinksProvider value={{ isLinkable: () => true, open: (p, line) => links?.open(p, line) }}>

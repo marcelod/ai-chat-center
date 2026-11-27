@@ -49,12 +49,13 @@ const STATUS_STYLE: Record<SubagentInfo['status'], string> = {
   running: 'bg-busy-bg text-busy-text',
   finished: 'bg-field text-muted',
   stale: 'bg-warn-bg text-waiting-text',
+  waiting: 'bg-busy-bg text-busy-text',
 };
 
 function timeLine(a: SubagentInfo, now: number, t: T): string | null {
   const start = a.startedAt ? Date.parse(a.startedAt) : NaN;
   const last = a.lastActivityAt ? Date.parse(a.lastActivityAt) : NaN;
-  if (a.status === 'running' && Number.isFinite(start)) return t('ui.panel.workingFor', { d: formatDuration(now - start, t) });
+  if ((a.status === 'running' || a.status === 'waiting') && Number.isFinite(start)) return t('ui.panel.workingFor', { d: formatDuration(now - start, t) });
   if (a.status === 'finished' && Number.isFinite(start) && Number.isFinite(last)) return t('ui.panel.ran', { d: formatDuration(last - start, t) });
   if (a.status === 'stale' && Number.isFinite(last)) return t('ui.panel.noNewsFor', { d: formatDuration(now - last, t) });
   return null;
@@ -73,7 +74,8 @@ export function groupSubagents(list: SubagentInfo[], since: string | undefined):
   const recent: SubagentInfo[] = [];
   const history: SubagentInfo[] = [];
   for (const a of [...list].sort(newestFirst)) {
-    if (a.status === 'running') running.push(a);
+    // Waiting on a background task of its own: it comes back, so it stays with the working ones.
+    if (a.status === 'running' || a.status === 'waiting') running.push(a);
     else if (Number.isFinite(from) && activityAt(a) >= from) recent.push(a);
     else history.push(a);
   }
@@ -100,6 +102,7 @@ function SubagentItem({ a, at, onOpen }: { a: SubagentInfo; at: number; onOpen: 
           <span className="min-w-0 flex-1 text-sm font-semibold text-ink">{a.description || a.agentType || a.id}</span>
           <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[a.status]}`}>
             {a.status === 'running' && <span aria-hidden="true">● </span>}
+            {a.status === 'waiting' && <span aria-hidden="true">◔ </span>}
             {t(`ui.panel.status.${a.status}`)}
           </span>
         </span>

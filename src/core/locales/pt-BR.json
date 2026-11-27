@@ -32,6 +32,7 @@
       "openFile": "Abrir {name}",
       "codeOf": "Código de {name}",
       "pdfHint": "Se o PDF não aparecer aqui, abra numa nova aba ou baixe o arquivo.",
+      "pdfHintTouch": "No celular o PDF costuma não aparecer aqui: abra numa nova aba ou baixe o arquivo.",
       "pdfOpenTab": "Abrir numa nova aba",
       "pdfDownload": "Baixar",
       "diffTitle": "Alterações · {name}",
@@ -49,7 +50,8 @@
       "status": {
         "running": "Trabalhando",
         "finished": "Terminado",
-        "stale": "Sem novidade"
+        "stale": "Sem novidade",
+        "waiting": "Aguardando tarefa"
       },
       "duration": {
         "lessThanMinute": "menos de um minuto",
@@ -145,6 +147,7 @@
     "back": "Voltar",
     "unread": "{n} não lidas",
     "loadError": "Não foi possível falar com o hub. Tentando de novo…",
+    "ended": {"title": "O app foi atualizado; esta janela pode ser fechada", "body": "Esta janela perdeu a conexão com o hub do AI Chat Center, que foi atualizado ou reiniciado. Digite /cc numa sessão para abrir o app de novo."},
     "noToken": {
       "title": "Abra o link mostrado pelo /cc",
       "body": "Esta página precisa do link de acesso exibido pelo /cc na sessão do terminal. Abra esse link para continuar."

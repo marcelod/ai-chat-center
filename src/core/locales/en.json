@@ -32,6 +32,7 @@
       "openFile": "Open {name}",
       "codeOf": "Code of {name}",
       "pdfHint": "If the PDF does not show here, open it in a new tab or download it.",
+      "pdfHintTouch": "Phones often show nothing here: open the PDF in a new tab or download it.",
       "pdfOpenTab": "Open in a new tab",
       "pdfDownload": "Download",
       "diffTitle": "Changes · {name}",
@@ -49,7 +50,8 @@
       "status": {
         "running": "Working",
         "finished": "Finished",
-        "stale": "No news"
+        "stale": "No news",
+        "waiting": "Waiting for task"
       },
       "duration": {
         "lessThanMinute": "less than a minute",
@@ -145,6 +147,7 @@
     "back": "Back",
     "unread": "{n} unread",
     "loadError": "Could not reach the hub. Retrying…",
+    "ended": {"title": "The app was updated; this window can be closed", "body": "This window lost its connection to the AI Chat Center hub, which was updated or restarted. Type /cc in a session to open the app again."},
     "noToken": {
       "title": "Open the link shown by /cc",
       "body": "This page needs the access link printed by /cc in your terminal session. Open that link to continue."

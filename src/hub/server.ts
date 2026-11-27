@@ -946,7 +946,9 @@ export async function createHub(
       new Promise<void>((resolve) => {
         closed = true;
         stopTimers();
-        for (const r of clients) r.end();
+        // The open pages learn that this hub is going away (stopped, or replaced by a newer version): the
+        // window /cc opened closes itself, a tab says it can be closed (spec 2026-11-27-old-window-after-update).
+        for (const r of clients) r.end('event: bye\ndata: {"reason":"stopped"}\n\n');
         clients.clear();
         writePresence(0).catch(() => {}).finally(() => {
           server.close(() => resolve());

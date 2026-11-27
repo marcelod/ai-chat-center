@@ -136,6 +136,14 @@ export function onAuthLost(cb: () => void): () => void {
   return () => authListeners.delete(cb);
 }
 
+const byeListeners = new Set<() => void>();
+
+/** Subscribes to the hub saying `bye` on the stream (it is stopping). A token loss follows at once. */
+export function onHubStopped(cb: () => void): () => void {
+  byeListeners.add(cb);
+  return () => byeListeners.delete(cb);
+}
+
 function dropToken(): void {
   token = null;
   try {
@@ -468,6 +476,13 @@ export function openStream(onChange: (c: ProviderChange) => void, handlers: Stre
   es.addEventListener('events', handle as EventListener);
   // /cc asked the open page to show a session: useAppWindow pings at once to learn which one.
   es.addEventListener('focus', () => window.dispatchEvent(new Event(WINDOW_FOCUS_EVENT)));
+  // The hub is going away (stopped, or replaced by a newer version): its token dies with it. The page ends
+  // (spec 2026-11-27-old-window-after-update); nothing reconnects.
+  es.addEventListener('bye', () => {
+    es.close();
+    byeListeners.forEach((cb) => cb());
+    dropToken();
+  });
   es.onopen = () => handlers.onOpen?.();
   es.onerror = () => handlers.onError?.();
   return () => es.close();

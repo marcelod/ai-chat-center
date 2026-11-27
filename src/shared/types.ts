@@ -188,8 +188,12 @@ export type SubagentInfo = {
   model?: string;
   /** Launched in the background (the session's turn may end while it works). */
   background: boolean;
-  /** finished: the meta says so; stale: not finished but no news for a while (never counted as working). */
-  status: 'running' | 'finished' | 'stale';
+  /**
+   * finished: the meta says so; stale: not finished but no news for a while (never counted as working);
+   * waiting: the meta says finished, but a background task it launched has not reported back yet (it comes
+   * back then; counted as working, spec 2026-11-27-subagent-background-task).
+   */
+  status: 'running' | 'finished' | 'stale' | 'waiting';
   startedAt?: string;
   lastActivityAt?: string;
   /** The name of the last tool it called. */
