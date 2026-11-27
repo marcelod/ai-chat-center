@@ -55,6 +55,8 @@ export interface StartHubOptions {
   ownershipCheckMs?: number;
   /** Called once when hub.json names another hub or is gone. Default (main): close and exit. */
   onReplaced?: () => void;
+  /** Binds the HTTP server (tests). Default: createHub. */
+  createHub?: typeof createHub;
 }
 
 async function prune(log: (m: string) => void): Promise<void> {
@@ -174,13 +176,16 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
     const tries = base === 0 ? 1 : 11;
     const staticDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'ui');
     const provider = opts.listLive ? new ClaudeCodeProvider(opts.listLive) : new ClaudeCodeProvider();
+    const bind = opts.createHub ?? createHub;
     let lastErr: unknown;
     for (let i = 0; i < tries && !hub; i++) {
       try {
-        hub = await createHub({ provider, token, port: base + i, staticDir, log });
+        hub = await bind({ provider, token, port: base + i, staticDir, log });
       } catch (e) {
         lastErr = e;
-        if ((e as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw e;
+        // EACCES: a port inside a range Windows reserves (Hyper-V/WSL); try the next one as for a busy port.
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code !== 'EADDRINUSE' && code !== 'EACCES') throw e;
       }
     }
     if (!hub) throw lastErr;
