@@ -8,7 +8,7 @@ import { useT } from '../i18n';
 
 type Props = {
   load: () => Promise<StoppedBackground[]>;
-  /** Removes one (`claude rm`); rejects with ApiError (code `claude-failed` carries claude's words in `detail`). */
+  /** Removes one (`claude rm`); rejects with ApiError (code `claude-failed` when claude refused). */
   remove: (bgId: string) => Promise<void>;
   onClose: () => void;
 };
@@ -56,10 +56,9 @@ export function StoppedSessionsDialog({ load, remove, onClose }: Props) {
       try {
         await remove(id);
         removed.add(id);
-      } catch (e) {
-        const { code, detail } = (e ?? {}) as { code?: unknown; detail?: unknown };
-        const base = t('ui.stopped.failed', { name: id });
-        failed.push({ bgId: id, text: code === 'claude-failed' && typeof detail === 'string' && detail ? `${base}: ${detail}` : base });
+      } catch {
+        // claude's own words stay in the hub log (they may hold paths).
+        failed.push({ bgId: id, text: t('ui.stopped.failed', { name: id }) });
       }
     }
     setList((l) => (l ?? []).filter((s) => !removed.has(s.bgId)));

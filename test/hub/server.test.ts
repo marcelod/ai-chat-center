@@ -1244,13 +1244,13 @@ describe('stop, respawn and rm endpoints (spec 2026-11-26-stop-respawn-rm)', () 
     expect(manage).not.toHaveBeenCalled();
   });
 
-  it('a refusal of claude is 502 with its output, and the registration is untouched', async () => {
+  it("a refusal of claude is 502 with a fixed message (claude's output, which may hold paths, stays in the hub log), and the registration is untouched", async () => {
     const u = await start(fakeProvider(), {
-      bg: { listLive: async () => [bgLive()], manage: async () => ({ ok: false as const, error: 'Not safe to remove: unpushed commits' }) },
+      bg: { listLive: async () => [bgLive()], manage: async () => ({ ok: false as const, error: 'Not safe to remove: /home/u/proj has unpushed commits' }) },
     });
     const r = await post(u, 'rm');
     expect(r.status).toBe(502);
-    expect(JSON.parse(r.body)).toEqual({ error: 'Not safe to remove: unpushed commits', code: 'claude-failed' });
+    expect(JSON.parse(r.body)).toEqual({ error: 'claude rm failed', code: 'claude-failed' });
     expect(r.body).not.toContain(TOKEN);
     const reg = (await getRegistration('s1'))!;
     expect(isActive(reg)).toBe(true);
@@ -1310,6 +1310,31 @@ describe('stopped background sessions (spec 2026-11-26-stop-respawn-rm)', () => 
     expect((await rm(u, 'abcdef02')).status).toBe(200); // no registration: fine
   });
 
+  it('rm of a stopped entry leaves a conversation that runs again (resumed with the same session id) connected', async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
+    const manage = vi.fn(async () => ({ ok: true as const }));
+    const u = await start(fakeProvider(), { bg: { listStopped: async () => stopped, manage } });
+    expect((await rm(u, 'abcdef01')).status).toBe(200);
+    const reg = (await getRegistration('s1'))!;
+    expect(isRemoved(reg)).toBe(false);
+    expect(isActive(reg)).toBe(true);
+  });
+
+  it('the same claude rm from the ⋮ menu and from the clean-up is one action at a time', async () => {
+    await register({ sessionId: 's1', transcriptPath: '/t.jsonl', cwd: '/x', pid: 42 });
+    await markDisconnected('s1', 'exited');
+    let release!: () => void;
+    const manage = vi.fn(() => new Promise<{ ok: true }>((r) => (release = () => r({ ok: true }))));
+    const u = await start(fakeProvider(), { bg: { listStopped: async () => stopped, manage } });
+    const first = rm(u, 'abcdef01');
+    await vi.waitFor(() => expect(manage).toHaveBeenCalledTimes(1));
+    const r = await req(u, '/api/sessions/s1/rm', { method: 'POST', headers: auth });
+    expect(r.status).toBe(409);
+    expect(JSON.parse(r.body).code).toBe('busy');
+    release();
+    expect((await first).status).toBe(200);
+  });
+
   it('refuses an id that is not a stopped session (400 invalid, 409 not stopped), and 502 on a refusal', async () => {
     const manage = vi.fn(async () => ({ ok: false as const, error: 'nope' }));
     const u = await start(fakeProvider(), { bg: { listStopped: async () => stopped, manage } });
@@ -1319,7 +1344,7 @@ describe('stopped background sessions (spec 2026-11-26-stop-respawn-rm)', () => 
     expect((await rm(u, 'abcdef01', {})).status).toBe(401);
     const r = await rm(u, 'abcdef01');
     expect(r.status).toBe(502);
-    expect(JSON.parse(r.body).error).toBe('nope');
+    expect(JSON.parse(r.body)).toEqual({ error: 'claude rm failed', code: 'claude-failed' });
   });
 });
 

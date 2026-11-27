@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
 import type { AddressInfo } from 'node:net';
+import { redactAppSecrets } from '../shared/redact.js';
 import type { Provider } from './provider.js';
 import { SessionDisconnectedError, SessionProtocolError, assertSameProtocol } from './provider.js';
 import type { ProviderChange } from '../shared/types.js';
@@ -218,10 +219,17 @@ export async function createHub(
   const openTerm = opts.bg?.openTerminal ?? ((t: TerminalTarget) => openTerminal(t));
   const listStopped = opts.bg?.listStopped ?? (() => queryStoppedBackground());
   const manage = opts.bg?.manage ?? ((a: BgAction, id: string, configDir: string | undefined) => manageBackground(a, id, configDir));
-  /** Sessions (and stopped short ids, as `bg:<id>`) with a stop, respawn or rm under way: one at a time each. */
+  /**
+   * Background short ids with a stop, respawn or rm under way: one at a time each, whichever route asked (the
+   * ⋮ menu of a session and the clean-up of stopped ones may name the same session).
+   */
   const managing = new Set<string>();
-  /** Runs one `claude stop|respawn|rm`; a refusal becomes a 502 carrying claude's own words. */
-  const runManage = async (key: string, action: BgAction, bgId: string, configDir: string | undefined) => {
+  /**
+   * Runs one `claude stop|respawn|rm`. A refusal becomes a 502 with a fixed message: claude's output may hold
+   * paths of the home or the config, so it goes only to the hub log (security audit B4).
+   */
+  const runManage = async (action: BgAction, bgId: string, configDir: string | undefined) => {
+    const key = `bg:${bgId}`;
     if (managing.has(key)) throw new HttpError(409, 'another action is under way', 'busy');
     managing.add(key);
     let r: ResumeResult;
@@ -233,8 +241,8 @@ export async function createHub(
       managing.delete(key);
     }
     if (!r.ok) {
-      log(`claude ${action} ${bgId} failed: ${r.error}`);
-      throw new HttpError(502, r.error, 'claude-failed');
+      log(`claude ${action} ${bgId} failed: ${redactAppSecrets(r.error)}`);
+      throw new HttpError(502, `claude ${action} failed`, 'claude-failed');
     }
   };
   const folders = async () => knownFolders(await listRegistrations(), await listLive(), opts.bg?.folderExists);
@@ -534,7 +542,7 @@ export async function createHub(
       if (list === null) throw new HttpError(503, 'could not list background sessions');
       const s = list.find((x) => x.bgId === id);
       if (!s) throw new HttpError(409, 'not a stopped background session', 'not-stopped');
-      await runManage(`bg:${id}`, 'rm', id, undefined);
+      await runManage('rm', id, undefined);
       let reg: Registration | null = null;
       try {
         assertSessionId(s.sessionId);
@@ -542,7 +550,9 @@ export async function createHub(
       } catch {
         reg = null;
       }
-      if (reg && !isRemoved(reg)) await markRemoved(s.sessionId);
+      // A conversation that runs again with the same session id (resumed) keeps its registration: only the
+      // stopped entry of Claude Code was removed.
+      if (reg && !isRemoved(reg) && !isActive(reg)) await markRemoved(s.sessionId);
       fanOut({ type: 'sessions' });
       return sendJson(res, 200, { ok: true });
     }
@@ -785,7 +795,7 @@ export async function createHub(
           bgId = stopped.find((x) => x.sessionId === sid)?.bgId;
           if (!bgId) throw new HttpError(409, 'not a background session', 'not-background');
         }
-        await runManage(sid, action, bgId, reg.configDir);
+        await runManage(action, bgId, reg.configDir);
         if (action === 'stop') await markDisconnected(sid, 'exited');
         else if (action === 'rm') await markRemoved(sid);
         // The restarted process comes back with the same session id: its waiter re-registers the new pid.
