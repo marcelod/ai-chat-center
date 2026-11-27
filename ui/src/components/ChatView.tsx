@@ -136,7 +136,7 @@ function SessionBar({ session, hubVersion, runCommand }: { session: SessionView;
         <span
           title={t('ui.chat.mode')}
           aria-label={`${t('ui.chat.mode')}: ${modeLabel(session.mode, t)}`}
-          className="inline-flex h-7 min-w-0 max-w-[10rem] items-center rounded-full border border-line px-2.5 text-xs text-muted"
+          className="inline-flex h-6 min-w-0 max-w-[10rem] items-center rounded-full border border-line px-2 text-[11px] text-muted"
         >
           <span className="truncate">
             {MODE_GLYPH[session.mode] && <span aria-hidden="true">{MODE_GLYPH[session.mode]}</span>}
@@ -730,7 +730,7 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
         onScroll={onScroll}
         role="log"
         aria-label={t('ui.chat.messages')}
-        className="relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 md:px-12"
+        className="relative flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-5 md:px-6"
       >
         {loading && events.length === 0 && <p className="self-center text-sm text-muted">{t('ui.chat.loading')}</p>}
         {events.map(render)}
