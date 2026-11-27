@@ -26,8 +26,9 @@ export function subagentsDir(transcriptPath: string, sid: string): string {
   return path.join(path.dirname(transcriptPath), sid, 'subagents');
 }
 
-type Meta = { description: string; agentType: string; model?: string; background: boolean; finished: boolean };
-type Tail = { startedAt?: string; lastAt?: string; lastTool?: string };
+type Meta = { description: string; agentType: string; model?: string; background: boolean; finished: boolean; stopped: boolean };
+/** `pending`: background tasks the agent launched (in the tail read) with no task-notification yet. */
+type Tail = { startedAt?: string; lastAt?: string; lastTool?: string; pending?: number };
 type Entry = { metaKey: string; meta: Meta | null; logKey: string; tail: Tail; mtimeMs: number };
 /** Per file path: what was read, and the size and time it was read at. */
 const cache = new Map<string, Entry>();
@@ -52,6 +53,7 @@ function parseMeta(raw: string): Meta | null {
     model: str(m.model, 100) ? shortModel(str(m.model, 100)!) : undefined,
     background: m.requestShape === 'background',
     finished: m.finished === true || m.stoppedByUser === true,
+    stopped: m.stoppedByUser === true,
   };
 }
 
@@ -97,6 +99,46 @@ function lastToolOf(lines: Record<string, unknown>[]): string | undefined {
   return undefined;
 }
 
+const NOTIFIED_RE = /<tool-use-id>([^<\s]{1,200})<\/tool-use-id>/g;
+
+/** The text of a user line's content (a string, or its text blocks). */
+function userText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map((b) => (b && typeof b === 'object' && (b as { type?: unknown }).type === 'text' ? String((b as { text?: unknown }).text ?? '') : '')).join('\n');
+}
+
+/**
+ * Background tasks the agent launched itself and still waits for (spec 2026-11-27-subagent-background-task):
+ * a tool_use with `run_in_background: true` whose result was not an error (a refused launch never ran) and no
+ * `<task-notification>` naming its `<tool-use-id>` later. Claude Code marks the agent finished when it ends its
+ * turn to wait, and wakes it with that notification.
+ */
+function pendingTasks(lines: Record<string, unknown>[]): number {
+  const launched = new Set<string>();
+  for (const l of lines) {
+    const content = (l.message as { content?: unknown } | undefined)?.content;
+    if (l.type === 'assistant' && Array.isArray(content)) {
+      for (const b of content) {
+        const u = b as { type?: unknown; id?: unknown; input?: { run_in_background?: unknown } } | null;
+        if (u?.type === 'tool_use' && typeof u.id === 'string' && u.input?.run_in_background === true) launched.add(u.id);
+      }
+    } else if (l.type === 'user') {
+      if (Array.isArray(content)) {
+        for (const b of content) {
+          const r = b as { type?: unknown; tool_use_id?: unknown; is_error?: unknown; content?: unknown } | null;
+          if (r?.type !== 'tool_result' || typeof r.tool_use_id !== 'string') continue;
+          const refused = r.is_error === true || (typeof r.content === 'string' && r.content.startsWith('<tool_use_error>'));
+          if (refused) launched.delete(r.tool_use_id);
+        }
+      }
+      const text = userText(content);
+      if (text.includes('<task-notification>')) for (const m of text.matchAll(NOTIFIED_RE)) launched.delete(m[1]);
+    }
+  }
+  return launched.size;
+}
+
 async function readTail(file: string, size: number, prev: Tail | undefined, onRead?: (f: string) => void): Promise<Tail> {
   onRead?.(file);
   let startedAt = prev?.startedAt;
@@ -108,7 +150,7 @@ async function readTail(file: string, size: number, prev: Tail | undefined, onRe
   const tail = jsonLines(await readRange(file, from, size - from), from > 0);
   let lastAt: string | undefined;
   for (let i = tail.length - 1; i >= 0 && !lastAt; i--) lastAt = str(tail[i].timestamp, 40);
-  return { startedAt, lastAt: lastAt ?? prev?.lastAt, lastTool: lastToolOf(tail) ?? prev?.lastTool };
+  return { startedAt, lastAt: lastAt ?? prev?.lastAt, lastTool: lastToolOf(tail) ?? prev?.lastTool, pending: pendingTasks(tail) };
 }
 
 type ListOpts = { now?: () => number; limit?: number; onRead?: (file: string) => void };
@@ -149,7 +191,11 @@ function info(id: string, e: Entry, now: number): SubagentInfo | null {
   if (!e.meta) return null;
   const lineAt = e.tail.lastAt ? Date.parse(e.tail.lastAt) : NaN;
   const last = Math.max(Number.isFinite(lineAt) ? lineAt : 0, e.mtimeMs);
-  const status = e.meta.finished ? 'finished' : now - last < STALE_MS ? 'running' : 'stale';
+  const fresh = now - last < STALE_MS;
+  // Finished but waiting on a background task of its own: it comes back when the task ends. An orphan (no
+  // news for STALE_MS) or an agent the user stopped never holds this state.
+  const waiting = e.meta.finished && !e.meta.stopped && (e.tail.pending ?? 0) > 0 && fresh;
+  const status = waiting ? 'waiting' : e.meta.finished ? 'finished' : fresh ? 'running' : 'stale';
   const out: SubagentInfo = { id, description: e.meta.description, agentType: e.meta.agentType, background: e.meta.background, status };
   if (e.meta.model) out.model = e.meta.model;
   if (e.tail.startedAt) out.startedAt = e.tail.startedAt;
@@ -188,17 +234,20 @@ export async function listSubagents(dir: string, opts: ListOpts = {}): Promise<S
 }
 
 /**
- * How many subagents in `dir` are working: not finished, with news in the last STALE_MS. Cheap: a finished
- * agent (it never comes back) is not looked at again, the others cost a stat of their two files, and a
- * transcript is read (its ends only) only when it changed.
+ * How many subagents in `dir` are working: not finished (or finished but waiting on a background task of its
+ * own), with news in the last STALE_MS. Cheap: a finished agent with nothing pending (it never comes back) is
+ * not looked at again, the others cost a stat of their two files, and a transcript is read (its ends only)
+ * only when it changed.
  */
 export async function runningSubagents(dir: string, now: () => number = Date.now): Promise<number> {
   const t = now();
   let n = 0;
   for (const id of await agentIds(dir)) {
-    if (cache.get(path.join(dir, `agent-${id}.meta.json`))?.meta?.finished) continue;
+    const known = cache.get(path.join(dir, `agent-${id}.meta.json`));
+    if (known?.meta?.finished && (known.meta.stopped || !known.tail.pending)) continue;
     const e = await readAgent(dir, id).catch(() => null);
-    if (e && info(id, e, t)?.status === 'running') n++;
+    const status = e && info(id, e, t)?.status;
+    if (status === 'running' || status === 'waiting') n++;
   }
   return n;
 }
