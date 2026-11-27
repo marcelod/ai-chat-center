@@ -12,6 +12,7 @@ import { isActive, listRegistrations, pruneRegistrations, type Registration } fr
 import type { LiveSession } from '../shared/types.js';
 import { createHub } from './server.js';
 import { installSecret } from '../core/secret.js';
+import { loggedLiveLookup } from './status.js';
 
 const TOKEN_RE = /^[0-9a-f]{64}$/;
 /** Disconnected registrations older than this are deleted (with their inbox, busy and waiting files). */
@@ -175,12 +176,14 @@ export async function startHub(opts: StartHubOptions = {}): Promise<{ port: numb
     const base = pickPort();
     const tries = base === 0 ? 1 : 11;
     const staticDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'ui');
-    const provider = opts.listLive ? new ClaudeCodeProvider(opts.listLive) : new ClaudeCodeProvider();
+    // One lookup for the provider and the routes; failed lookups are logged at most once per 5 minutes.
+    const listLive = opts.listLive ?? loggedLiveLookup(log);
+    const provider = new ClaudeCodeProvider(listLive);
     const bind = opts.createHub ?? createHub;
     let lastErr: unknown;
     for (let i = 0; i < tries && !hub; i++) {
       try {
-        hub = await bind({ provider, token, port: base + i, staticDir, log });
+        hub = await bind({ provider, token, port: base + i, staticDir, log, bg: { listLive } });
       } catch (e) {
         lastErr = e;
         // EACCES: a port inside a range Windows reserves (Hyper-V/WSL); try the next one as for a busy port.

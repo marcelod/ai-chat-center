@@ -23,15 +23,78 @@ function toLive(x: unknown): LiveSession | null {
   return live;
 }
 
-/** Like listLiveSessions but returns null when the lookup itself failed (error, timeout, non-JSON). */
-export async function queryLiveSessions(run: () => Promise<string> = runClaudeAgentsJson): Promise<LiveSession[] | null> {
+/** A short, fixed description of a failed command: the error code or signal only, never its text or output. */
+function commandFailure(e: unknown): string {
+  const { code, signal } = (e ?? {}) as { code?: unknown; signal?: unknown };
+  if (typeof code === 'string' && /^E[A-Z0-9_]{1,30}$/.test(code)) return `command failed (${code})`;
+  if (typeof code === 'number' && Number.isInteger(code)) return `command failed (exit ${code})`;
+  if (typeof signal === 'string' && /^SIG[A-Z0-9]{1,10}$/.test(signal)) return `command failed (${signal})`;
+  return 'command failed';
+}
+
+/**
+ * Like listLiveSessions but returns null when the lookup itself failed (error, timeout, non-JSON, not a
+ * list). A non-empty list in which no item has the known shape is a failure too: a new `claude agents`
+ * output format must not read as "no sessions", or every session would be marked exited and its queue
+ * cleared. `onFail` gets a short reason (never the output or the error text).
+ */
+export async function queryLiveSessions(
+  run: () => Promise<string> = runClaudeAgentsJson,
+  onFail?: (reason: string) => void,
+): Promise<LiveSession[] | null> {
+  let out: string;
   try {
-    const parsed: unknown = JSON.parse(await run());
-    if (!Array.isArray(parsed)) return null;
-    return parsed.map(toLive).filter((s): s is LiveSession => s !== null);
-  } catch {
+    out = await run();
+  } catch (e) {
+    onFail?.(commandFailure(e));
     return null;
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(out);
+  } catch {
+    onFail?.('not JSON');
+    return null;
+  }
+  if (!Array.isArray(parsed)) {
+    onFail?.('not a list');
+    return null;
+  }
+  const live = parsed.map(toLive).filter((s): s is LiveSession => s !== null);
+  if (parsed.length > 0 && live.length === 0) {
+    onFail?.('unknown item shape');
+    return null;
+  }
+  return live;
+}
+
+export interface LoggedLookupOptions {
+  /** At most one log line per this interval. Default FAILED_LOOKUP_LOG_MS. */
+  everyMs?: number;
+  now?: () => number;
+  run?: () => Promise<string>;
+}
+
+/** How often the hub notes failed `claude agents` lookups (they run every few seconds). */
+export const FAILED_LOOKUP_LOG_MS = 5 * 60_000;
+
+/** queryLiveSessions that logs failed lookups, at most once per `everyMs`, with the count held back. */
+export function loggedLiveLookup(log: (m: string) => void, opts: LoggedLookupOptions = {}): () => Promise<LiveSession[] | null> {
+  const everyMs = opts.everyMs ?? FAILED_LOOKUP_LOG_MS;
+  const now = opts.now ?? Date.now;
+  let lastAt: number | null = null;
+  let held = 0;
+  const note = (reason: string) => {
+    const t = now();
+    if (lastAt !== null && t - lastAt < everyMs) {
+      held++;
+      return;
+    }
+    log(`claude agents lookup failed: ${reason}${held ? ` (${held} more since the last note)` : ''}`);
+    lastAt = t;
+    held = 0;
+  };
+  return () => queryLiveSessions(opts.run, note);
 }
 
 function toStopped(x: unknown): StoppedBackground | null {

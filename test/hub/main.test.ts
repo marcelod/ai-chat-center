@@ -359,6 +359,17 @@ describe('main', () => {
       await h?.close();
     }
   });
+  it('the routes use the same live lookup as the provider', async () => {
+    const { createHub } = await import('../../src/hub/server.js');
+    const listLive = async () => [];
+    let given: unknown;
+    const h = await startHub({ listLive, createHub: async (o) => ((given = o.bg?.listLive), createHub(o)) });
+    try {
+      expect(given).toBe(listLive);
+    } finally {
+      await h?.close();
+    }
+  });
   it('any other bind error still stops the start', async () => {
     const base = await freePort();
     process.env.AI_CHAT_CENTER_PORT = String(base);
