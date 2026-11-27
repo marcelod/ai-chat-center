@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AssistantBubble } from './MessageBubble';
+import { MarkdownText } from './Markdown';
 import { LangProvider } from '../i18n';
 
 function show(text: string) {
@@ -50,5 +51,25 @@ describe('code blocks', () => {
     const { container } = show('use `npm test` here');
     expect(container.querySelector('[data-code-block]')).toBeNull();
     expect(container.querySelector('code')!.textContent).toBe('npm test');
+  });
+  it('a re-render (even with more text streamed in) keeps the block: wrap and the same DOM nodes, with or without a link base', async () => {
+    for (const linkBase of [undefined, 'docs/a.md']) {
+      const md = (n: number) => (
+        <LangProvider lang="en">
+          <div data-n={n}>
+            <MarkdownText text={fence('ts', 'const x = 1;') + '\n\nsee [x](https://example.com)' + '\n\nmore'.repeat(n)} linkBase={linkBase} />
+          </div>
+        </LangProvider>
+      );
+      const { container, rerender, unmount } = render(md(1));
+      const pre = container.querySelector('pre')!;
+      const link = container.querySelector('a')!;
+      await userEvent.click(screen.getByRole('button', { name: 'Wrap lines' }));
+      rerender(md(2));
+      expect(container.querySelector('pre')).toBe(pre);
+      expect(container.querySelector('a')).toBe(link);
+      expect(pre.getAttribute('data-wrap')).toBe('on');
+      unmount();
+    }
   });
 });

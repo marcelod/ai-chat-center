@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { createContext, memo, useContext, useMemo, type ReactNode } from 'react';
+import type { Components, Options } from 'react-markdown';
 import Markdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useT } from '../i18n';
@@ -33,32 +34,44 @@ function BlockedImage({ src, alt, base }: { src?: string; alt?: string; base?: s
   );
 }
 
+/** The file whose relative links are relative to it, for the module-level `img` renderer. */
+const LinkBaseContext = createContext<string | undefined>(undefined);
+
+function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
+  const base = useContext(LinkBaseContext);
+  return <BlockedImage src={src} alt={alt} base={base} />;
+}
+
+/**
+ * The element renderers, defined once: react-markdown uses them as element types, so a new object per render
+ * would unmount and remount every code block and link (losing "wrap", "Copied" and the find-in-chat ranges).
+ */
+const components: Components = {
+  a: ({ node: _node, href, children, ...props }) => {
+    const f = fileTargetOf(href);
+    if (f !== null) return <FileLink path={f.path} line={f.line}>{children}</FileLink>;
+    return (
+      <a {...props} href={href} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    );
+  },
+  img: ({ src, alt }) => <MarkdownImage src={typeof src === 'string' ? src : undefined} alt={alt} />,
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+};
+
 /**
  * The Markdown of messages and of Markdown files: GitHub flavour, no raw HTML (react-markdown drops it), no
  * image loaded from anywhere, and cited files as links to the side panel. `linkBase`: the file whose
- * relative links are relative to it.
+ * relative links are relative to it. Memoized: a parent re-render with the same text does not parse it again.
  */
-export function MarkdownText({ text, linkBase }: { text: string; linkBase?: string }) {
+export const MarkdownText = memo(function MarkdownText({ text, linkBase }: { text: string; linkBase?: string }) {
+  const remarkPlugins = useMemo<NonNullable<Options['remarkPlugins']>>(() => [remarkGfm, [remarkFileLinks, { linkBase }]], [linkBase]);
   return (
-    <Markdown
-      remarkPlugins={[remarkGfm, [remarkFileLinks, { linkBase }]]}
-      urlTransform={urlTransform}
-      skipHtml
-      components={{
-        a: ({ node: _node, href, children, ...props }) => {
-          const f = fileTargetOf(href);
-          if (f !== null) return <FileLink path={f.path} line={f.line}>{children}</FileLink>;
-          return (
-            <a {...props} href={href} target="_blank" rel="noopener noreferrer">
-              {children}
-            </a>
-          );
-        },
-        img: ({ src, alt }) => <BlockedImage src={typeof src === 'string' ? src : undefined} alt={alt} base={linkBase} />,
-        pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-      }}
-    >
-      {text}
-    </Markdown>
+    <LinkBaseContext.Provider value={linkBase}>
+      <Markdown remarkPlugins={remarkPlugins} urlTransform={urlTransform} skipHtml components={components}>
+        {text}
+      </Markdown>
+    </LinkBaseContext.Provider>
   );
-}
+});
