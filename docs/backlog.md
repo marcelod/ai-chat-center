@@ -4,6 +4,47 @@ Itens combinados e deixados para depois. Estado em 2026-11-27, versão 0.6.11. S
 
 ## A fazer
 
+### Revisão geral de 2026-11-27 (0.6.11)
+
+Revisão do app inteiro (funcionalidade, velocidade, segurança, arquitetura, outros sistemas), feita por cinco agentes só de leitura. ✔ = conferido no código pelo coordenador.
+
+**Na 0.6.12 (em andamento):**
+- ✔ CI vermelho no Windows: três testes da tela da sessão não fixam a plataforma (a rota responde 501 no Windows de propósito); testes do waiter com prazo de 150 ms falham em máquina lenta (`waiter.test.ts`, quatro testes).
+- ✔ Leitura do hub que passa de 10 s perde as mensagens daquela leitura até recarregar (`server.ts`, "poll timed out"; uma ocorrência no log em 2026-11-27).
+- ✔ Depois de `--resume`, mensagem do app que espera mais de 30 min por um turno longo é apagada sem entrega (`waiter.ts`, `discardOld` vale a vida toda do waiter).
+- ✔ Envio que falhou: mandar outra mensagem apaga o texto da que falhou (`Composer.tsx`, `deliver`).
+- ✔ Comandos (`/model`, `/effort`, `/compact`) recusados como "ocupada" enquanto o app mostra a sessão parada (tarefa em segundo plano); regra diferente da do app.
+- ✔ Porta reservada no Windows (Hyper-V/WSL) dá EACCES e o hub desiste em vez de tentar a próxima (`main.ts`).
+- ✔ `claude agents` com formato desconhecido vira "nenhuma sessão": no Windows ou sem pid conhecido, as sessões são marcadas encerradas e a fila apagada (`status.ts`, `claudePid.ts`).
+- Respostas da múltipla escolha (e seus arquivos de controle) não são assinadas: algo que escreva em `~/.ai-chat-center` forja uma resposta (`ask.ts`, `questions.ts`).
+
+**Para depois:**
+- Velocidade do hub: a cada 0,5 s relê os arquivos de todas as sessões, inclusive as encerradas de 30 dias (5–12% de um núcleo medido); duas listagens por ciclo; meta lida 2–3 vezes.
+- Conversa longa: sem janela nem memo nas bolhas; 4000 mensagens ≈ 3,5 s para abrir e ~200 ms por novidade de qualquer sessão. Busca na conversa redesenha tudo a cada tecla.
+- Voltar à aba recarrega a conversa inteira (`useLiveSessions.ts`).
+- Lentidão na primeira vez: transcrições encerradas lidas inteiras na partida do hub (estimativas divergentes, 0,65 s a 3 s; medir).
+- Busca entre conversas relê todas as transcrições a cada consulta (~1,5 s aqui); sem cancelar consultas antigas.
+- Logs sem limite nem rotação; um erro em laço pode crescer sem fim.
+- Busca reabre sozinha ao voltar à conversa depois de abrir um resultado (`App.tsx`, `hitSearch`).
+- Turno que termina por Esc ou erro com tarefa em segundo plano pode deixar a sessão "trabalhando" para sempre (marcador de ocupado nunca limpo).
+- Pasta de configuração do Claude diferente da padrão: sessões nunca marcadas encerradas nem ocupadas; `usage on` guarda uma só linha de status original para todas; limpeza de paradas roda `claude rm` na pasta padrão.
+- Retomar a sessão pode trocar o pid conhecido por nulo (`waiter.ts`, refresh no resume).
+- Limpeza de sessões antigas deixa `meta`, `turns`, `names`, `questions` e lock para trás.
+- Busca da transcrição sumida repete a cada 10 s por até 30 dias para sessões encerradas.
+- Limites de mensagem divergem: 32.000 caracteres, mas 64 KiB de corpo (emoji/CJK dão 413).
+- Painel de subagentes puxa a leitura para o fim a cada 3 s e segue consultando subagente terminado.
+- `acc.lastSeen` nunca é podado e é regravado a cada evento; eventos de sessões removidas ficam na memória da aba.
+- Diálogos modais não prendem o Tab (`NewSessionDialog`, `StoppedSessionsDialog`, painel em tela cheia no celular).
+- Falha ao carregar a conversa mostra tela vazia, sem erro nem nova tentativa.
+- Cinco chaves de tradução parecem sem uso.
+- Segurança: código de pareamento na linha de comando do navegador (só pesa em máquina com outros usuários); o app consegue digitar `/cc answers on` numa sessão em segundo plano; `claude`/`script` achados pelo PATH herdado com a pasta do projeto como cwd; `statusline.json` executado sem assinatura; CSP sem `base-uri`/`form-action`.
+- Arquitetura: teste de versão sem efeito (última tag v0.4.2; criar as tags ou comparar com a última versão); formato novo da transcrição aparece como conversa vazia sem aviso; `server.ts` (973 linhas, função de 517) e `provider.ts` grandes; hub importa de hooks e vice-versa; formato do bloco do app e extração de texto repetidos em três lugares.
+- Windows: painel lateral não reconhece caminhos com `\` nem `C:\`; `usage on` roda a linha de status original pelo cmd.exe; pasta UNC cai em `%windir%`; tela e comandos aparecem sem funcionar (o hub não informa a plataforma); pastas `c:\x` e `C:\x` listadas duas vezes; `AppData` servido pelo painel quando a sessão está na home.
+- macOS: `claude` num caminho com espaço quebra a detecção do processo; Safari antigo (<16.4) não carrega o app; `Library` servido pelo painel.
+- Linux/WSL: `/cc` diz que abriu a janela sem tela (SSH); lock depende de hard link (exFAT/SMB).
+- `scripts/smoke-flow.mjs` reescreve o atalho real do app de quem roda.
+- Node 18.0–18.1: `closeAllConnections` não existe (README promete 18+).
+
 ### Instalação mais fácil no Windows
 
 Em avaliação pelo autor (2026-11-24).
