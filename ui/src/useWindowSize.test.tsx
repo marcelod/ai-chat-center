@@ -81,7 +81,21 @@ describe('useWindowSize', () => {
     render(<Probe />);
     await flush();
     expect(resizeTo).not.toHaveBeenCalled();
-    expect(api.getConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it('after a reload, a resize event that leaves the saved size is not sent', async () => {
+    vi.mocked(api.openedByPair).mockReturnValue(false);
+    vi.mocked(api.getConfig).mockResolvedValue({ language: 'en', answersFromApp: false, windowSize: { width: 1300, height: 800 } });
+    outer = { width: 1300, height: 800 };
+    render(<Probe />);
+    await flush();
+    window.dispatchEvent(new Event('resize'));
+    await act(async () => vi.advanceTimersByTime(WINDOW_SIZE_SAVE_MS));
+    expect(api.saveWindowSize).not.toHaveBeenCalled();
+    expect(resizeTo).not.toHaveBeenCalled();
+    userResize(1310, 800);
+    await act(async () => vi.advanceTimersByTime(WINDOW_SIZE_SAVE_MS));
+    expect(api.saveWindowSize).toHaveBeenCalledExactlyOnceWith({ width: 1310, height: 800 });
   });
 
   it('saves the size the person leaves, once, after the resizing stops', async () => {

@@ -226,6 +226,19 @@ describe('provider', () => {
     }
     expect(gone).toEqual(['s1']);
   });
+  it('the restart mark is dropped once its grace is over, also for a session that never left the list', async () => {
+    await reg();
+    let t = Date.now() + 3600_000;
+    const p = new ClaudeCodeProvider(async () => [live({ status: 'idle' })], { now: () => t, isAlive: () => true });
+    const marks = () => (p as unknown as { restarting: Map<string, number> }).restarting;
+    p.expectRestart('s1');
+    p.expectRestart('gone'); // a session with no registration
+    await p.poll();
+    expect([...marks().keys()]).toEqual(['s1']);
+    t += RESTART_GRACE_MS + 1;
+    await p.poll();
+    expect(marks().size).toBe(0);
+  });
   // Audit S4-U3: the hub only sees sessions of its own Claude config dir: it never marks another one exited.
   it('a session of another Claude config dir is never marked exited', async () => {
     await register({ sessionId: 'far', transcriptPath: '/none.jsonl', cwd: '/x', pid: null, configDir: '/other/claude-config' });

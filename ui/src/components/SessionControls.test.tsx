@@ -43,6 +43,17 @@ describe('model and effort controls', () => {
     expect(screen.queryByRole('menu')).toBeNull();
   });
 
+  it('on a phone the effort list stacks above the model list, so the menu never leaves the screen', async () => {
+    chat(session({ bgId: '5e1b5e9b', model: 'Opus 5.5', effort: 'high' }), vi.fn(async () => {}));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Switch model/ }));
+    await user.click(screen.getByRole('menuitem', { name: /Switch effort/ }));
+    const box = screen.getByRole('menu', { name: 'Switch effort' }).parentElement!;
+    expect(box.className).toMatch(/(^|\s)flex-col(\s|$)/);
+    expect(box.className).toContain('md:flex-row');
+    expect(box.className).toContain('max-w-[calc(100vw-1rem)]');
+  });
+
   it('a background session: choosing types /model and /effort', async () => {
     const onCommand = vi.fn(async () => {});
     chat(session({ bgId: '5e1b5e9b' }), onCommand);

@@ -1,12 +1,13 @@
 // A code or text file in the side panel (spec 2026-11-27-side-panel-file-types): line numbers, a light
 // highlight, and the cited line scrolled to and marked. Long lines scroll sideways, or wrap with `wrap`
 // (spec 2026-11-27-side-panel-leftovers).
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { extOf, highlightLines, langOf } from '../highlight';
 
 type Props = { text: string; path: string; line?: number; label: string; wrap?: boolean };
 
-export function CodeView({ text, path, line, label, wrap = false }: Props) {
+/** Memoized: a big file is not reconciled again on every event of any session. */
+export const CodeView = memo(function CodeView({ text, path, line, label, wrap = false }: Props) {
   const lines = useMemo(() => highlightLines(text, langOf(path), extOf(path)), [text, path]);
   const current = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -43,4 +44,4 @@ export function CodeView({ text, path, line, label, wrap = false }: Props) {
       })}
     </div>
   );
-}
+});

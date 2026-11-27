@@ -1,10 +1,10 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, renderHook, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { ChatEvent, SessionView, SubagentInfo } from '@shared/types';
 import { LangProvider } from '../i18n';
 import { ChatView } from './ChatView';
-import { formatDuration, groupSubagents, lastUserMessageAt } from './SubagentsPanel';
+import { formatDuration, groupSubagents, lastUserMessageAt, SUBAGENTS_POLL_MS, usePolled } from './SubagentsPanel';
 import type { PanelApi } from './SidePanel';
 
 // Spec 2026-11-26-side-panel: the subagents of the session in the side panel.
@@ -54,6 +54,45 @@ function setup(over: Partial<PanelApi> = {}, s = session(), events: ChatEvent[] 
   return panel;
 }
 
+describe('usePolled', () => {
+  const setHidden = (hidden: boolean) => Object.defineProperty(document, 'hidden', { value: hidden, configurable: true });
+  it('does not poll while the page is hidden, and loads again when it is shown', async () => {
+    vi.useFakeTimers();
+    try {
+      let n = 0;
+      const load = vi.fn(async () => ({ n: ++n }));
+      const { result } = renderHook(() => usePolled(load, SUBAGENTS_POLL_MS));
+      await act(async () => {});
+      expect(load).toHaveBeenCalledTimes(1);
+      setHidden(true);
+      await act(async () => vi.advanceTimersByTime(SUBAGENTS_POLL_MS)); // the one already scheduled
+      await act(async () => vi.advanceTimersByTime(SUBAGENTS_POLL_MS * 5));
+      expect(load).toHaveBeenCalledTimes(2);
+      setHidden(false);
+      await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+      expect(load).toHaveBeenCalledTimes(3);
+      expect(result.current.value).toEqual({ n: 3 });
+    } finally {
+      setHidden(false);
+      vi.useRealTimers();
+    }
+  });
+  it('keeps the same value when an answer did not change', async () => {
+    vi.useFakeTimers();
+    try {
+      const load = vi.fn(async () => ({ same: true }));
+      const { result } = renderHook(() => usePolled(load, SUBAGENTS_POLL_MS));
+      await act(async () => {});
+      const first = result.current.value;
+      await act(async () => vi.advanceTimersByTime(SUBAGENTS_POLL_MS));
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(result.current.value).toBe(first);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('formatDuration', () => {
   it('says minutes and hours', () => {
     const t = (k: string, v?: Record<string, unknown>) => `${k}:${JSON.stringify(v ?? {})}`;
@@ -66,7 +105,7 @@ describe('formatDuration', () => {
 describe('subagents in the side panel', () => {
   it('clicking the status opens the list: description, type, model, time, state and last tool', async () => {
     setup();
-    await userEvent.click(screen.getByRole('button', { name: 'Show subagents' }));
+    await userEvent.click(screen.getByRole('button', { name: /Show subagents/ }));
     const panel = await screen.findByTestId('side-panel');
     const items = await within(panel).findAllByTestId('subagent');
     expect(items).toHaveLength(1);
@@ -87,7 +126,7 @@ describe('subagents in the side panel', () => {
 
   it('clicking a subagent shows its transcript; Back returns to the list', async () => {
     const panel = setup();
-    await userEvent.click(screen.getByRole('button', { name: 'Show subagents' }));
+    await userEvent.click(screen.getByRole('button', { name: /Show subagents/ }));
     const side = await screen.findByTestId('side-panel');
     await userEvent.click((await within(side).findAllByTestId('subagent'))[0]);
     expect(await within(side).findByText('step 1')).toBeTruthy();
@@ -100,13 +139,13 @@ describe('subagents in the side panel', () => {
 
   it('an empty list says so', async () => {
     setup({ subagents: vi.fn(async () => []) });
-    await userEvent.click(screen.getByRole('button', { name: 'Show subagents' }));
+    await userEvent.click(screen.getByRole('button', { name: /Show subagents/ }));
     expect(await screen.findByText('No subagents in this conversation.')).toBeTruthy();
   });
 
   it('without the subagents loader the status is not a button', () => {
     setup({ subagents: undefined });
-    expect(screen.queryByRole('button', { name: 'Show subagents' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Show subagents/ })).toBeNull();
   });
 });
 
@@ -159,7 +198,7 @@ describe('lastUserMessageAt', () => {
 
 describe('subagents History', () => {
   const open = async () => {
-    await userEvent.click(screen.getByRole('button', { name: 'Show subagents' }));
+    await userEvent.click(screen.getByRole('button', { name: /Show subagents/ }));
     return screen.findByTestId('side-panel');
   };
 

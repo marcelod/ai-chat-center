@@ -33,27 +33,36 @@ export function candidatePaths(events: ChatEvent[]): string[] {
   return [...out];
 }
 
-/** The paths of `events` the hub says the panel can open. Each path is asked once per session. */
+/**
+ * The paths of `events` the hub says the panel can open. Each path is asked once per session, in batches of
+ * BATCH, one request at a time: when a batch answers, the next one goes out (a long conversation that no
+ * longer changes still gets all its links).
+ */
 export function useExistingFiles(sessionId: string, events: ChatEvent[], filesExist?: (paths: string[]) => Promise<string[]>): ReadonlySet<string> {
-  const [, setVersion] = useState(0);
-  const known = useRef<{ sid: string; asked: Set<string>; found: Set<string> }>({ sid: sessionId, asked: new Set(), found: new Set() });
-  if (known.current.sid !== sessionId) known.current = { sid: sessionId, asked: new Set(), found: new Set() };
+  const [version, setVersion] = useState(0);
+  type Known = { sid: string; asked: Set<string>; found: Set<string>; busy: boolean };
+  const known = useRef<Known>({ sid: sessionId, asked: new Set(), found: new Set(), busy: false });
+  if (known.current.sid !== sessionId) known.current = { sid: sessionId, asked: new Set(), found: new Set(), busy: false };
   useEffect(() => {
     if (!filesExist) return;
     const k = known.current;
+    if (k.busy) return; // the answer in flight brings the next batch
     const ask = candidatePaths(events).filter((p) => !k.asked.has(p)).slice(0, BATCH);
     if (ask.length === 0) return;
     for (const p of ask) k.asked.add(p);
+    k.busy = true;
     filesExist(ask).then(
       (found) => {
-        if (known.current !== k || found.length === 0) return;
+        k.busy = false;
+        if (known.current !== k) return;
         for (const p of found) k.found.add(p);
-        setVersion((v) => v + 1);
+        setVersion((v) => v + 1); // also asks the next batch, if any
       },
       () => {
+        k.busy = false;
         for (const p of ask) k.asked.delete(p); // asked again at the next change
       },
     );
-  }, [sessionId, events, filesExist]);
+  }, [sessionId, events, filesExist, version]);
   return known.current.found;
 }

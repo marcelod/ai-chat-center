@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tmpDir } from '../helpers/tmp.js';
 import { fakePng } from '../helpers/png.js';
-import { existingSessionFiles, MAX_PDF_BYTES, MAX_TEXT_BYTES, readSessionFile, SessionFileError, type FileRoots } from '../../src/hub/sessionFiles.js';
+import { existingSessionFiles, MAX_PDF_BYTES, MAX_TEXT_BYTES, readCapped, readSessionFile, SessionFileError, type FileRoots } from '../../src/hub/sessionFiles.js';
 
 // Spec 2026-11-26-side-panel: the side panel reads a few file types from the session folder and the
 // session's attachments folder only.
@@ -143,6 +143,72 @@ describe('readSessionFile', () => {
     fs.writeFileSync(pdf, '%PDF-1.7\n');
     fs.truncateSync(pdf, MAX_PDF_BYTES + 1);
     expect(await code(readSessionFile('big.pdf', roots))).toBe('too-large');
+  });
+});
+
+// Security audit B1: a session that runs in the home folder must not open the home's dot folders and files
+// (credentials, the app's own keys) nor files with a secret's name anywhere; the app's attachments still open.
+describe('private files', () => {
+  function homeTree() {
+    const home = fs.realpathSync.native(tmpDir('acc-home-'));
+    const att = path.join(home, '.ai-chat-center', 'attachments', 'sid1');
+    const put = (rel: string, body: string | Buffer = 'x') => {
+      fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
+      fs.writeFileSync(path.join(home, rel), body);
+    };
+    put('.claude/.credentials.json', '{"token":"t"}');
+    put('.config/gh/hosts.yml', 'token: t');
+    put('.ai-chat-center/sessions/sid1.json', '{"key":"k"}');
+    put('.ssh/notes.txt');
+    put('.aws/config.toml');
+    put('.bashrc.txt');
+    put('.notes.md');
+    put('proj/.env.local.txt');
+    put('proj/README.md', '# ok');
+    put('proj/aws-credentials.json');
+    put('proj/id_rsa.txt');
+    put('proj/server.key.txt');
+    put('proj/.github/workflows/ci.yml', 'on: push');
+    put('notes.md', '# notes');
+    put('.ai-chat-center/attachments/sid1/0123456789abcdef-.env.txt', 'attached');
+    put('.ai-chat-center/attachments/sid1/0123456789abcdef-pic.png', fakePng(1, 1));
+    fs.symlinkSync(path.join(home, '.claude', '.credentials.json'), path.join(home, 'proj', 'creds.json'));
+    const roots: FileRoots = { base: home, roots: [home, att], home, open: [att] };
+    return { home, att, roots };
+  }
+
+  it('refuses dot folders and dot files right in the home, even through a link', async () => {
+    const { roots } = homeTree();
+    for (const p of ['.claude/.credentials.json', '.config/gh/hosts.yml', '.ai-chat-center/sessions/sid1.json', '.ssh/notes.txt', '.aws/config.toml', '.bashrc.txt', '.notes.md', 'proj/creds.json']) {
+      expect(await code(readSessionFile(p, roots)), p).toBe('private');
+    }
+    expect(await code(readSessionFile('.ssh/missing.txt', roots))).toBe('private');
+  });
+
+  it('refuses names of secrets anywhere', async () => {
+    const { roots } = homeTree();
+    for (const p of ['proj/.env.local.txt', 'proj/aws-credentials.json', 'proj/id_rsa.txt', 'proj/server.key.txt']) {
+      expect(await code(readSessionFile(p, roots)), p).toBe('private');
+    }
+  });
+
+  it('still opens ordinary files, dot folders inside a project, and the attachments of the app', async () => {
+    const { att, roots } = homeTree();
+    expect((await readSessionFile('notes.md', roots)).data.toString()).toBe('# notes');
+    expect((await readSessionFile('proj/README.md', roots)).kind).toBe('markdown');
+    expect((await readSessionFile('proj/.github/workflows/ci.yml', roots)).kind).toBe('text');
+    expect((await readSessionFile(path.join(att, '0123456789abcdef-pic.png'), roots)).kind).toBe('image');
+    expect((await readSessionFile(path.join(att, '0123456789abcdef-.env.txt'), roots)).data.toString()).toBe('attached');
+    expect(await existingSessionFiles(['notes.md', '.claude/.credentials.json', 'proj/creds.json', 'proj/.env.local.txt'], roots)).toEqual(['notes.md']);
+  });
+});
+
+describe('readCapped', () => {
+  it('a file that grew after the stat is read up to the size seen, not refused (a log being written)', async () => {
+    const f = path.join(fs.realpathSync.native(tmpDir('acc-cap-')), 'live.log');
+    fs.writeFileSync(f, 'first line\nsecond line\n');
+    expect((await readCapped(f, 11)).toString()).toBe('first line\n');
+    expect((await readCapped(f, 1000)).toString()).toBe('first line\nsecond line\n');
   });
 });
 

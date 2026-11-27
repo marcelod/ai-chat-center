@@ -20,25 +20,46 @@ export function formatDuration(ms: number, t: T): string {
   return t('ui.panel.duration.hours', { h: Math.floor(min / 60), m: min % 60 });
 }
 
-/** Loads with `load` now and every `ms` while mounted; keeps the last good answer on a failed refresh. */
-function usePolled<V>(load: () => Promise<V>, ms: number): { value?: V; error?: string } {
+/**
+ * Loads with `load` now and every `ms` while mounted and the page is visible (a hidden tab does not poll; it
+ * loads again as soon as it is shown). Keeps the last good answer on a failed refresh, and the same object when
+ * an answer did not change (nothing is drawn again).
+ */
+export function usePolled<V>(load: () => Promise<V>, ms: number): { value?: V; error?: string } {
   const [state, setState] = useState<{ value?: V; error?: string }>({});
   const loadRef = useRef(load);
   loadRef.current = load;
   useEffect(() => {
     let alive = true;
+    let loading = false;
+    let last: string | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = () => {
+      timer = undefined;
+      if (loading) return;
+      loading = true;
       loadRef.current().then(
-        (value) => alive && setState({ value }),
+        (value) => {
+          if (!alive) return;
+          const json = JSON.stringify(value);
+          if (json === last) return;
+          last = json;
+          setState({ value });
+        },
         (e: unknown) => alive && setState((s) => (s.value === undefined ? { error: loadErrorKey(e) } : s)),
       ).finally(() => {
-        if (alive) timer = setTimeout(tick, ms);
+        loading = false;
+        if (alive && !document.hidden) timer = setTimeout(tick, ms);
       });
     };
+    const onVisible = () => {
+      if (!document.hidden && timer === undefined) tick();
+    };
     tick();
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       alive = false;
+      document.removeEventListener('visibilitychange', onVisible);
       if (timer) clearTimeout(timer);
     };
   }, [ms]);

@@ -20,7 +20,15 @@ export function runClaudeAgentsJson(platform: NodeJS.Platform = process.platform
     execFile(
       win ? `claude ${argv.join(' ')}` : 'claude',
       win ? [] : argv,
-      { cwd: os.homedir(), shell: win, windowsHide: true, timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
+      {
+        cwd: os.homedir(),
+        // Windows: never a claude.cmd from the current folder, the PATH only (see bgSessions.runClaude).
+        ...(win ? { env: { ...process.env, NoDefaultCurrentDirectoryInExePath: '1' } } : {}),
+        shell: win,
+        windowsHide: true,
+        timeout: 5000,
+        maxBuffer: 10 * 1024 * 1024,
+      },
       (err, stdout) => (err ? reject(err) : resolve(String(stdout))),
     );
   });

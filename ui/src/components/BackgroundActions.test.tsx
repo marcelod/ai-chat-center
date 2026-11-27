@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionView, StoppedBackground } from '@shared/types';
@@ -84,9 +84,9 @@ describe('⋮ menu: stop, restart and remove a background session', () => {
     expect(screen.getByTestId('respawn-notice')).toHaveTextContent('/cc');
   });
 
-  it('Remove from Claude Code asks to confirm; a refusal of claude rm is said with its words', async () => {
+  it('Remove from Claude Code asks to confirm; a refusal of claude rm is said', async () => {
     const onRmBackground = vi.fn(async () => {
-      throw Object.assign(new Error('502'), { status: 502, code: 'claude-failed', detail: 'Not safe to remove: unpushed commits' });
+      throw Object.assign(new Error('502'), { status: 502, code: 'claude-failed', detail: 'claude rm failed' });
     });
     setup({ onRmBackground });
     await userEvent.click(menuButton());
@@ -94,7 +94,8 @@ describe('⋮ menu: stop, restart and remove a background session', () => {
     expect(onRmBackground).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole('menuitem', { name: 'Remove from Claude Code? Confirm' }));
     expect(onRmBackground).toHaveBeenCalledTimes(1);
-    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't remove from Claude Code: Not safe to remove: unpushed commits");
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't remove from Claude Code");
+    expect(screen.getByRole('alert')).not.toHaveTextContent('claude rm failed');
   });
 
   it('a failed restart is said in the menu, without the hub text for other errors', async () => {
@@ -158,7 +159,7 @@ describe('StoppedSessionsDialog', () => {
 
   it('a failure keeps that session listed and says why', async () => {
     const remove = vi.fn(async (id: string) => {
-      if (id === 'abcdef02') throw Object.assign(new Error('502'), { status: 502, code: 'claude-failed', detail: 'unpushed commits' });
+      if (id === 'abcdef02') throw Object.assign(new Error('502'), { status: 502, code: 'claude-failed', detail: 'claude rm failed' });
     });
     dialog({ remove });
     const d = screen.getByRole('dialog');
@@ -166,9 +167,21 @@ describe('StoppedSessionsDialog', () => {
     await userEvent.click(within(d).getByRole('checkbox', { name: 'Select all' }));
     await userEvent.click(within(d).getByRole('button', { name: 'Remove (2)' }));
     await userEvent.click(within(d).getByRole('button', { name: 'Remove' }));
-    expect(await within(d).findByRole('alert')).toHaveTextContent("Couldn't remove abcdef02: unpushed commits");
+    expect(await within(d).findByRole('alert')).toHaveTextContent("Couldn't remove abcdef02");
     expect(within(d).queryByText('old work')).not.toBeInTheDocument();
     expect(within(d).getByText('Unnamed')).toBeInTheDocument();
+  });
+
+  it('after removing, focus goes back to Close and Escape still closes the dialog', async () => {
+    const { onClose } = dialog();
+    const d = screen.getByRole('dialog');
+    await within(d).findByText('old work');
+    await userEvent.click(within(d).getByRole('checkbox', { name: 'Select all' }));
+    await userEvent.click(within(d).getByRole('button', { name: 'Remove (2)' }));
+    await userEvent.click(within(d).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(within(d).getByRole('button', { name: 'Close' })).toHaveFocus());
+    await userEvent.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('empty list, load failure, Escape closes', async () => {

@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { fileKind, fileTargetOf, findFilePaths, localLinkTarget, remarkFileLinks, FILE_HREF, resolveRelative } from './filePaths';
 
+describe('findFilePaths on long runs without spaces', () => {
+  it('stays linear: 100 KB of `_a`, `_a.` or `_a/` takes well under a second', () => {
+    for (const s of ['_a'.repeat(50_000), '_a.'.repeat(33_000), '_a/'.repeat(33_000), '*a'.repeat(50_000)]) {
+      const t = performance.now();
+      findFilePaths(s);
+      expect(performance.now() - t).toBeLessThan(300);
+    }
+  });
+  it('still finds paths in Markdown emphasis and names with underscores', () => {
+    expect(findFilePaths('_notes.md_ and **b.md** and __init__.py and *c/d.ts*')).toEqual(['_notes.md', 'b.md', '__init__.py', 'c/d.ts']);
+    expect(findFilePaths('x _a.md and (*b.md*)')).toEqual(['_a.md', 'b.md']);
+  });
+});
+
 describe('findFilePaths', () => {
   it('finds Markdown and image paths: absolute, relative, with ./ and ../', () => {
     expect(findFilePaths('See docs/backlog.md and /home/me/p/shot.PNG, then ./a.jpeg or ../b.webp.')).toEqual([

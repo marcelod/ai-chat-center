@@ -168,6 +168,30 @@ describe('suggestReplies', () => {
     expect(out).toEqual([]);
   });
 
+  it('leaves out shell commands typed with `!`, and lines over 64 KiB (never a short message)', async () => {
+    const { file, projects } = setup();
+    const huge = JSON.stringify({ type: 'user', uuid: 'big', timestamp: iso(DAY), message: { role: 'user', content: 'big' }, pad: 'x'.repeat(70 * 1024) });
+    const p = file('a.jsonl', [...[1, 2, 3].map((d) => user('!git status', iso(d * DAY))), huge, huge, huge]);
+    expect(await run([{ path: p, keys: [], projects }])).toEqual([]);
+  });
+
+  it('reads at most maxFiles transcripts, the most recently changed first', async () => {
+    const { file, projects } = setup();
+    const lines = [1, 2, 3].map(() => user('ok'));
+    const older = file('older.jsonl', [1, 2, 3].map(() => user('from the older')));
+    const newer = file('newer.jsonl', lines);
+    fs.utimesSync(older, new Date(NOW - 5 * DAY), new Date(NOW - 5 * DAY));
+    fs.utimesSync(newer, new Date(NOW - DAY), new Date(NOW - DAY));
+    const out = await run(
+      [
+        { path: older, keys: [], projects },
+        { path: newer, keys: [], projects },
+      ],
+      { maxFiles: 1 },
+    );
+    expect(out).toEqual([{ text: 'ok', count: 3 }]);
+  });
+
   it('skips files not changed in the last 30 days', async () => {
     const { file, projects } = setup();
     const p = file('a.jsonl', [1, 2, 3].map(() => user('ok')));

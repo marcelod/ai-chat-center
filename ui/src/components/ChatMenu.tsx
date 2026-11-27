@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { useT, type T } from '../i18n';
+import { useT } from '../i18n';
 import { MoreIcon } from './icons';
 
 type Props = {
@@ -31,12 +31,6 @@ type Props = {
 };
 
 type Confirmable = 'disconnect' | 'remove' | 'stop' | 'rm';
-
-/** The text of a failure: claude's own words when it refused (code `claude-failed`), else the plain message. */
-function failText(t: T, key: string, e: unknown): string {
-  const { code, detail } = (e ?? {}) as { code?: unknown; detail?: unknown };
-  return code === 'claude-failed' && typeof detail === 'string' && detail ? `${t(key)}: ${detail}` : t(key);
-}
 
 /**
  * The ⋮ menu of a conversation (spec 2026-11-24-chat-menu-remove). Escape closes it and returns focus to
@@ -131,8 +125,9 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu(
       await act();
       setOpen(false);
       setConfirming(null);
-    } catch (e) {
-      setFailed(failText(t, failKey, e));
+    } catch {
+      // A plain message: claude's own words stay in the hub log (they may hold paths).
+      setFailed(t(failKey));
     } finally {
       setBusy(false);
     }
@@ -144,8 +139,8 @@ export const ChatMenu = forwardRef<HTMLButtonElement, Props>(function ChatMenu(
     try {
       await onRespawn();
       close(false);
-    } catch (e) {
-      setFailed(failText(t, 'ui.chatMenu.respawnFailed', e));
+    } catch {
+      setFailed(t('ui.chatMenu.respawnFailed'));
     } finally {
       setBusy(false);
     }

@@ -1,9 +1,10 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionView } from '@shared/types';
 import { LangProvider } from '../i18n';
 import { ChatView } from './ChatView';
+import { ScreenView } from './ScreenPanel';
 import type { PanelApi } from './SidePanel';
 
 // Spec 2026-11-26-side-panel: the screen of a background session in the side panel.
@@ -35,6 +36,22 @@ function setup(screenFn: PanelApi['screen'], s = session(), onCommand?: (text: s
     </LangProvider>,
   );
 }
+
+describe('ScreenView', () => {
+  it('an answer that comes back after a newer one is dropped (the newest screen stays)', async () => {
+    const resolvers: ((text: string) => void)[] = [];
+    const load = vi.fn(() => new Promise<string>((r) => resolvers.push(r)));
+    render(
+      <LangProvider lang="en">
+        <ScreenView load={load} after="/status" refreshInMs={[5]} />
+      </LangProvider>,
+    );
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    await act(async () => resolvers[1]('new screen'));
+    await act(async () => resolvers[0]('old screen'));
+    expect(screen.getByTestId('session-screen')).toHaveTextContent('new screen');
+  });
+});
 
 describe('session screen', () => {
   it('the ⋮ menu opens the screen as monospaced text, with a refresh button', async () => {

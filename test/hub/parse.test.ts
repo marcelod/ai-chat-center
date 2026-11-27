@@ -206,6 +206,21 @@ describe('TranscriptParser with a session key', () => {
     call('a3', 'tu3');
     expect(result('r3', 'tu3', 'Async agent launched successfully.\nagentId: abc123 (internal ID)', false)).toEqual([]);
   });
+  it('a SendMessage whose result is an error is marked not run too; a Windows path in the reason is hidden', () => {
+    const p = new TranscriptParser([K]);
+    p.push({ type: 'assistant', uuid: 's1', timestamp: 't', message: { content: [{ type: 'tool_use', id: 'tu9', name: 'SendMessage', input: { to: 'dev-c2', message: 'Rebase onto main' } }] } });
+    const upd = p.push({
+      type: 'user',
+      uuid: 'r9',
+      timestamp: 't',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'tu9', is_error: true, content: 'Denied: cannot write C:\\Users\\me\\secret\\notes.txt now.' }] },
+    });
+    expect(upd).toMatchObject([{ kind: 'toAgent', id: 's1', to: 'dev-c2', blocked: true }]);
+    const ev = upd[0]!;
+    if (ev.kind !== 'toAgent') throw new Error('not toAgent');
+    expect(ev.blockedReason).toMatch(/^Denied: cannot write/);
+    expect(ev.blockedReason).not.toMatch(/Users|secret|C:\\/);
+  });
   it('a newer peer entry (isMeta, origin.kind peer) is shown with the origin name and report', () => {
     const p = new TranscriptParser([K]);
     const content = 'Another Claude session sent a message:\n<agent-message from="afac8">\n[Subagent hand-back] frame. The report follows:\n  Sources: docs\n</agent-message>\n\nThat "other Claude session" is an agent.';

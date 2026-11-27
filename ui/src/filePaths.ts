@@ -12,7 +12,9 @@ const EXT = `(?:${PANEL_EXTENSIONS.join('|')})`;
 /** A path: optional `/`, `./` or `../`, folders, a name, a known extension; never part of a URL or a longer word. */
 const PATH_BODY = String.raw`(?:\.{1,2}\/|\/)?(?:[\w@+\-.]+\/)*[\w@+\-.]*[\w@+\-]\.${EXT}`;
 const LINE = String.raw`(?::(\d{1,7})(?::\d{1,7})?)?`;
-const PATH_RE = new RegExp(String.raw`(^|[\s(\[{"'<>*_\`])(${PATH_BODY})${LINE}(?=$|[\s)\]}"'<>,;:!?*_\`]|\.(?:\s|$))`, 'gi');
+// `*` and `_` (Markdown emphasis) open a path only when they do not follow a path character: otherwise each `_`
+// of a long `_a_a_a…` run would start a scan to its end (quadratic: seconds for 100 KB).
+const PATH_RE = new RegExp(String.raw`(^|[\s(\[{"'<>\`]|(?<![\w@+\-.\/])[*_]+)(${PATH_BODY})${LINE}(?=$|[\s)\]}"'<>,;:!?*_\`]|\.(?:\s|$))`, 'gi');
 /** Inline code made of one path, maybe with a `:line` suffix. */
 const WHOLE_RE = new RegExp(String.raw`^(${PATH_BODY})${LINE}$`, 'i');
 

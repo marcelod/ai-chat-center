@@ -176,7 +176,8 @@ function StatusPill({ state, asking, agents = 0, onOpen }: { state: SessionView[
         type="button"
         data-state={agentsOnly ? 'agents' : state}
         onClick={onOpen}
-        aria-label={t('ui.panel.showSubagents')}
+        // The state first (what is seen, and what a voice user says), then what the button does.
+        aria-label={`${label}. ${t('ui.panel.showSubagents')}`}
         title={t('ui.panel.showSubagents')}
         className={`${cls} min-h-9 hover:brightness-95`}
       >

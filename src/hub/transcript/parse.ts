@@ -4,6 +4,7 @@ import { parseQuestions } from '../../core/questions.js';
 import type { ChatEvent, ToolAction } from '../../shared/types.js';
 import { attachmentPaths, splitAttachments } from '../../shared/attachments.js';
 import { toolDiff } from '../../shared/diff.js';
+import { stripAppBlocks } from '../../shared/redact.js';
 
 type ActionsEvent = Extract<ChatEvent, { kind: 'actions' }>;
 type QuestionEvent = Extract<ChatEvent, { kind: 'question' }>;
@@ -374,7 +375,10 @@ export class TranscriptParser {
     return [...updated, ...created].map((e) => (e.kind === 'actions' ? snapshot(e) : e));
   }
 
-  private user(uuid: string, ts: string, content: unknown, toolUseResult?: unknown): ChatEvent[] {
+  private user(uuid: string, ts: string, input: unknown, toolUseResult?: unknown): ChatEvent[] {
+    // A subagent never receives an app message: a block in its transcript is text Claude passed on (maybe from
+    // an untrusted file), shown as plain text without its id and key (security audit B3).
+    const content = this.opts.sidechain && typeof input === 'string' ? stripAppBlocks(input) : input;
     if (Array.isArray(content)) {
       const out: ChatEvent[] = this.toolResults(content, toolUseResult);
       const parts = promptParts(content);
@@ -388,7 +392,7 @@ export class TranscriptParser {
     }
     if (typeof content !== 'string') return [];
 
-    const msgs = unwrapMessages(content, this.keys);
+    const msgs = this.opts.sidechain ? [] : unwrapMessages(content, this.keys);
     if (msgs.length > 0) {
       this.open = null;
       return withIndex(

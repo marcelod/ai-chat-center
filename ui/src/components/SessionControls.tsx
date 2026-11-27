@@ -121,7 +121,8 @@ export function SessionControls({ onCommand, working, unavailable = false, model
       )}
       {open && (
         <div
-          className="absolute bottom-full right-0 z-30 mb-1.5 flex items-end gap-1"
+          // On a phone the effort list stacks above the model list: side by side they are wider than the screen.
+          className="absolute bottom-full right-0 z-30 mb-1.5 flex max-w-[calc(100vw-1rem)] flex-col items-end gap-1 md:flex-row"
           onKeyDown={(e) => {
             if (e.key === 'Escape') {
               e.stopPropagation();

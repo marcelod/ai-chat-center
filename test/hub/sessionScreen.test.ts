@@ -12,6 +12,14 @@ const KEY = 'fedcba9876543210'.repeat(2);
 const SECRET = 'abcdefabcdef0123'.repeat(4);
 
 describe('cleanScreen', () => {
+  it('cleans the largest raw stream (the fallback when the terminal cannot play it) without blocking the hub', () => {
+    const esc = String.fromCharCode(27);
+    for (const raw of ['1a'.repeat(256 * 1024), 'a-'.repeat(256 * 1024), `${esc}]a`.repeat(170_000)]) {
+      const t = performance.now();
+      cleanScreen(raw, ['0123456789abcdef0123456789abcdef']);
+      expect(performance.now() - t).toBeLessThan(1000);
+    }
+  });
   it('removes colours, cursor moves and window titles', () => {
     const raw = '\x1b[1;32m✓ done\x1b[0m\r\n\x1b]0;claude\x07\x1b[2K\x1b[?25lnext\x1b(B line\x07\r\nlast\r';
     expect(cleanScreen(raw, [])).toBe('✓ done\nnext line\nlast');
