@@ -112,6 +112,11 @@ describe('resumeInBackground', () => {
     expect(r.calls[0].cmd).toBe(`claude --bg --resume ${SID} ${RESUME_PROMPT}`);
     expect(r.calls[0].args).toEqual([]);
     expect(r.calls[0].opts.shell).toBe(true);
+    // cmd.exe must not run a claude.cmd found in the session folder before the one on the PATH.
+    expect(r.calls[0].opts.env).toMatchObject({ NoDefaultCurrentDirectoryInExePath: '1' });
+    const l = recorder((c) => c.emit('close', 0));
+    await resumeInBackground(reg(), { spawn: l.spawn, platform: 'linux', env: {} });
+    expect(l.calls[0].opts.env).not.toHaveProperty('NoDefaultCurrentDirectoryInExePath');
   });
 
   it('a failure gives the output, without terminal escapes', async () => {
@@ -161,6 +166,7 @@ describe('manageBackground', () => {
     expect(r.calls[0].cmd).toBe('claude rm 5e1b5e9b');
     expect(r.calls[0].args).toEqual([]);
     expect(r.calls[0].opts.shell).toBe(true);
+    expect(r.calls[0].opts.env).toMatchObject({ NoDefaultCurrentDirectoryInExePath: '1' });
   });
 
   it('a refusal gives the output; a hang is killed after the timeout', async () => {

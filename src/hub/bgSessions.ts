@@ -109,10 +109,14 @@ function runClaude(
       resolve(r);
     };
     let child: ChildProcess;
+    const env = cleanEnv(deps.env ?? process.env, configDirFor(configDir, deps.home, platform));
+    // Windows: cmd.exe looks in the current folder (the session's project) before the PATH, so a repository's
+    // own claude.cmd would run; this variable turns that off (as in openTerminal).
+    if (win) env.NoDefaultCurrentDirectoryInExePath = '1';
     try {
       child = spawn(cmd, args, {
         cwd,
-        env: cleanEnv(deps.env ?? process.env, configDirFor(configDir, deps.home, platform)),
+        env,
         shell: win,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],

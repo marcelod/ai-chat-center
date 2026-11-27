@@ -32,6 +32,8 @@ describe('runClaudeAgentsJson', () => {
     expect(cmd).toBe('claude agents --json');
     expect(args).toEqual([]);
     expect(opts).toMatchObject({ shell: true, windowsHide: true, cwd: (await import('node:os')).default.homedir() });
+    // cmd.exe must not pick up a claude.cmd from the current folder.
+    expect((opts as { env?: object }).env).toMatchObject({ NoDefaultCurrentDirectoryInExePath: '1' });
   });
   it('with all: `claude agents --json --all` (exited background sessions too)', async () => {
     execFile.mockReset();
