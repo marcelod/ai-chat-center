@@ -25,6 +25,8 @@ export function StoppedSessionsDialog({ load, remove, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [failures, setFailures] = useState<Failure[]>([]);
   const closeButton = useRef<HTMLButtonElement>(null);
+  /** The confirm row is going away (removed or Back): its focused button with it, so focus goes to Close. */
+  const refocus = useRef(false);
 
   useEffect(() => {
     let live = true;
@@ -36,6 +38,12 @@ export function StoppedSessionsDialog({ load, remove, onClose }: Props) {
     };
   }, [load]);
   useEffect(() => closeButton.current?.focus(), []);
+  // Without this the focus falls to the page and Escape (handled by the dialog) no longer closes it.
+  useEffect(() => {
+    if (confirming || busy || !refocus.current) return;
+    refocus.current = false;
+    closeButton.current?.focus();
+  }, [confirming, busy]);
 
   const toggle = (id: string) =>
     setChosen((c) => {
@@ -64,6 +72,7 @@ export function StoppedSessionsDialog({ load, remove, onClose }: Props) {
     setList((l) => (l ?? []).filter((s) => !removed.has(s.bgId)));
     setChosen(new Set(failed.map((f) => f.bgId)));
     setFailures(failed);
+    refocus.current = true;
     setConfirming(false);
     setBusy(false);
   };
@@ -147,7 +156,15 @@ export function StoppedSessionsDialog({ load, remove, onClose }: Props) {
           <div className="mt-3 rounded-lg bg-field p-3">
             <p className="mb-2 text-sm font-semibold text-waiting-text">{chosen.size === 1 ? t('ui.stopped.confirmOne') : t('ui.stopped.confirm', { n: chosen.size })}</p>
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setConfirming(false)} disabled={busy} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface">
+              <button
+                type="button"
+                onClick={() => {
+                  refocus.current = true;
+                  setConfirming(false);
+                }}
+                disabled={busy}
+                className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface"
+              >
                 {t('ui.stopped.confirmBack')}
               </button>
               <button

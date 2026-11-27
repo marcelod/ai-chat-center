@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionView, StoppedBackground } from '@shared/types';
@@ -170,6 +170,18 @@ describe('StoppedSessionsDialog', () => {
     expect(await within(d).findByRole('alert')).toHaveTextContent("Couldn't remove abcdef02");
     expect(within(d).queryByText('old work')).not.toBeInTheDocument();
     expect(within(d).getByText('Unnamed')).toBeInTheDocument();
+  });
+
+  it('after removing, focus goes back to Close and Escape still closes the dialog', async () => {
+    const { onClose } = dialog();
+    const d = screen.getByRole('dialog');
+    await within(d).findByText('old work');
+    await userEvent.click(within(d).getByRole('checkbox', { name: 'Select all' }));
+    await userEvent.click(within(d).getByRole('button', { name: 'Remove (2)' }));
+    await userEvent.click(within(d).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(within(d).getByRole('button', { name: 'Close' })).toHaveFocus());
+    await userEvent.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('empty list, load failure, Escape closes', async () => {
