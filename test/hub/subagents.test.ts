@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmpDir } from '../helpers/tmp.js';
-import { clearSubagentCache, isAgentId, listSubagents, runningSubagents, STALE_MS, subagentEvents, subagentsDir } from '../../src/hub/subagents.js';
+import { clearSubagentCache, isAgentId, listSubagents, runningSubagents, setSubagentCacheLimit, STALE_MS, subagentCacheSize, subagentEvents, subagentsDir } from '../../src/hub/subagents.js';
 
 // Spec 2026-11-26-side-panel: the subagents of a session, read from
 // <transcript folder>/<sessionId>/subagents/agent-<id>.meta.json and agent-<id>.jsonl.
@@ -164,6 +164,19 @@ describe('a finished subagent with its own background task', () => {
     expect((await listSubagents(dir, { now: later })).map((a) => a.status)).toEqual(['finished', 'finished']);
     expect(await runningSubagents(dir, later)).toBe(0);
     expect((await listSubagents(dir, { now: () => T0 + 2 * 60_000 })).find((a) => a.id === 'a2')?.status).toBe('finished');
+  });
+});
+
+describe('the cache of subagent files', () => {
+  it('is capped, dropping the least recently used entries', async () => {
+    setSubagentCacheLimit(3);
+    try {
+      for (const id of ['a1', 'a2', 'a3', 'a4', 'a5']) agent(id, { agentType: 't', description: id }, [user(0, 'go')], 0);
+      await listSubagents(dir, { now: () => T0 });
+      expect(subagentCacheSize()).toBe(3);
+    } finally {
+      setSubagentCacheLimit();
+    }
   });
 });
 

@@ -30,10 +30,28 @@ type Meta = { description: string; agentType: string; model?: string; background
 /** `pending`: background tasks the agent launched (in the tail read) with no task-notification yet. */
 type Tail = { startedAt?: string; lastAt?: string; lastTool?: string; pending?: number };
 type Entry = { metaKey: string; meta: Meta | null; logKey: string; tail: Tail; mtimeMs: number };
-/** Per file path: what was read, and the size and time it was read at. */
+/**
+ * Per file path: what was read, and the size and time it was read at. Least recently used first (a hit moves
+ * the entry to the end), capped: a hub that runs for days sees many subagents of sessions long gone.
+ */
 const cache = new Map<string, Entry>();
+export const MAX_CACHE = 2000;
+let cacheLimit = MAX_CACHE;
 export function clearSubagentCache(): void {
   cache.clear();
+}
+export const subagentCacheSize = () => cache.size;
+/** Tests only: a smaller cap. */
+export function setSubagentCacheLimit(n: number = MAX_CACHE): void {
+  cacheLimit = n;
+}
+function remember(key: string, e: Entry): void {
+  cache.delete(key);
+  cache.set(key, e);
+  for (const k of cache.keys()) {
+    if (cache.size <= cacheLimit) break;
+    cache.delete(k);
+  }
 }
 
 const str = (v: unknown, max = 300) => (typeof v === 'string' ? v.slice(0, max) : undefined);
@@ -168,7 +186,10 @@ async function readAgent(dir: string, id: string, onRead?: (f: string) => void):
   const metaKey = `${metaSt.size}:${metaSt.mtimeMs}`;
   const logKey = logSt ? `${logSt.size}:${logSt.mtimeMs}` : '';
   const prev = cache.get(metaFile);
-  if (prev && prev.metaKey === metaKey && prev.logKey === logKey) return prev;
+  if (prev && prev.metaKey === metaKey && prev.logKey === logKey) {
+    remember(metaFile, prev);
+    return prev;
+  }
   let meta = prev?.meta ?? null;
   if (!prev || prev.metaKey !== metaKey) {
     meta = null;
@@ -183,7 +204,7 @@ async function readAgent(dir: string, id: string, onRead?: (f: string) => void):
   if (!tail.startedAt && logSt && logSt.birthtimeMs > 0) tail = { ...tail, startedAt: new Date(logSt.birthtimeMs).toISOString() };
   // Activity is the transcript's: the meta is rewritten when the agent ends, not while it works.
   const entry: Entry = { metaKey, meta, logKey, tail, mtimeMs: logSt?.mtimeMs ?? metaSt.mtimeMs };
-  cache.set(metaFile, entry);
+  remember(metaFile, entry);
   return entry;
 }
 
