@@ -51,6 +51,8 @@ import { isAgentId, listSubagents, subagentEvents, subagentsDir } from './subage
 import { cleanScreen, readScreen } from './sessionScreen.js';
 import { loadSecret } from '../core/secret.js';
 import { sessionAttachmentsDir } from '../core/attachments.js';
+import { claudeConfigDir } from '../core/registry.js';
+import { createSuggestionCache, suggestReplies } from './suggestions.js';
 
 export interface HubOptions {
   provider: Provider;
@@ -200,6 +202,14 @@ export async function createHub(
   let port = opts.port;
 
   const pairing = createPairing();
+  // Quick reply suggestions (spec 2026-11-27-suggested-quick-replies): the transcripts of the sessions in the list.
+  const suggestions = createSuggestionCache(async () =>
+    suggestReplies(
+      (await listRegistrations())
+        .filter((r) => !isRemoved(r))
+        .map((r) => ({ path: r.transcriptPath, keys: trustedKeys(r), projects: path.join(r.configDir ? path.resolve(r.configDir) : claudeConfigDir(), 'projects') })),
+    ),
+  );
   const listLive = opts.bg?.listLive ?? (() => queryLiveSessions());
   const resume = opts.bg?.resume ?? ((reg: Registration) => resumeInBackground(reg));
   const type = opts.bg?.type ?? ((id: string, text: string) => typeCommand(id, text));
@@ -456,6 +466,7 @@ export async function createHub(
       if (q.length < MIN_QUERY || q.length > MAX_QUERY) throw new HttpError(400, 'invalid query');
       return sendJson(res, 200, { hits: await searchAll(provider, q) });
     }
+    if (p === '/api/quick-replies/suggestions' && method === 'GET') return sendJson(res, 200, { suggestions: await suggestions.get() });
     if (p === '/api/sessions' && method === 'POST') {
       // A new background session that connects at once (spec 2026-11-25-app-batch): in a known folder, or in
       // any folder inside the home folder (spec 2026-11-25-any-folder).

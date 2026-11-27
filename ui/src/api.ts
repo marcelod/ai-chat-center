@@ -1,6 +1,7 @@
 import type { ChatEvent, ProviderChange, SessionsResponse, StoppedBackground, SubagentInfo } from '@shared/types';
 import type { BackgroundPreset } from '@shared/background';
 import type { SearchHit } from '@shared/search';
+import type { SuggestedReply } from '@shared/quickReplies';
 import type { WindowSize } from '@shared/windowSize';
 
 export type Language = 'en' | 'pt-BR';
@@ -193,6 +194,11 @@ async function errorBody(res: Response): Promise<{ code?: string; detail?: strin
 /** Messages that contain `q` in every conversation of the app (newest first). */
 export async function searchAll(q: string): Promise<SearchHit[]> {
   return (await request<{ hits: SearchHit[] }>(`/api/search?q=${encodeURIComponent(q)}`)).hits;
+}
+
+/** Messages the user often sends, offered as quick replies (spec 2026-11-27-suggested-quick-replies). */
+export async function quickReplySuggestions(): Promise<SuggestedReply[]> {
+  return (await request<{ suggestions: SuggestedReply[] }>('/api/quick-replies/suggestions')).suggestions;
 }
 
 export type Folder = { cwd: string; lastUsed: string };

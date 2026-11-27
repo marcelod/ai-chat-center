@@ -348,6 +348,11 @@
       "new": "Nova resposta rápida",
       "empty": "Nenhuma resposta rápida. Use Editar para adicionar.",
       "hint": "Preenche o campo de mensagem; aperte Enter para enviar.",
+      "suggestions": "Sugestões",
+      "suggestionsHint": "Mensagens que você manda com frequência",
+      "useSuggestion": "Usar sugestão: {text}",
+      "addSuggestion": "Adicionar às respostas rápidas: {text}",
+      "dismiss": "Dispensar: {text}",
       "defaults": {
         "d1": "Pode seguir",
         "d2": "Faz o commit",
