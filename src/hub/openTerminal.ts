@@ -21,42 +21,81 @@ export interface TerminalCommand {
   args: string[];
 }
 
+type ArgsFor = (cwd: string, run: string[]) => string[];
+
 /**
  * Linux terminals in the order tried (those with a known syntax first), each with the arguments that run `claude attach <id>` in `cwd`.
- * Where a terminal has a working-directory option it is used (gnome-terminal opens its window from a
- * server process, whose own cwd is not ours); the process cwd is set as well for the others.
+ * Where a terminal has a working-directory option it is used (gnome-terminal, Ptyxis and Console open their
+ * windows from a server process, whose own cwd is not ours); the process cwd is set as well for the others.
+ * The command always goes as separate arguments after the terminal's own "run this" marker, never as one string.
  */
-const LINUX_TERMINALS: [string, (cwd: string, run: string[]) => string[]][] = [
+const LINUX_TERMINALS: [string, ArgsFor][] = [
   ['gnome-terminal', (cwd, run) => [`--working-directory=${cwd}`, '--', ...run]],
+  // Ptyxis (Ubuntu's default terminal since 25.10): `-d` applies to --new-window/-x; the arguments after
+  // `--` are the command's argv. Its `-x` takes ONE string it parses itself, so it is not used.
+  ['ptyxis', (cwd, run) => ['--new-window', '--working-directory', cwd, '--', ...run]],
+  // GNOME Console (kgx): the arguments after `--` are the command's argv.
+  ['kgx', (cwd, run) => ['--working-directory', cwd, '--', ...run]],
   ['konsole', (cwd, run) => ['--workdir', cwd, '-e', ...run]],
   ['xfce4-terminal', (cwd, run) => [`--working-directory=${cwd}`, '-x', ...run]],
   ['kitty', (cwd, run) => ['--directory', cwd, ...run]],
   ['alacritty', (cwd, run) => ['--working-directory', cwd, '-e', ...run]],
   ['xterm', (_cwd, run) => ['-e', ...run]],
-  // Last: it is a Debian alternative that may be any terminal, so only the one syntax every one of them
-  // takes is used: `-e` with the whole command as ONE string (the id is 8 validated hex characters, so
-  // nothing in it needs quoting). The folder is the process cwd.
-  ['x-terminal-emulator', (_cwd, run) => ['-e', run.join(' ')]],
 ];
 
-/** The first Linux terminal found in an absolute PATH entry, with its arguments; null when there is none. */
-export function linuxTerminal(id: string, cwd: string, env: Env, exists: (p: string) => boolean): TerminalCommand | null {
+/**
+ * Last: `x-terminal-emulator` is a Debian alternative that may be any terminal. Its real program (realpath)
+ * gets its own syntax when it is one of the list above (Ubuntu's points to Ptyxis, which takes the string
+ * of `-e` as the program name). For an unknown one (or Debian's `*.wrapper` scripts, which translate the
+ * xterm syntax) only the syntax every one of them takes is used: `-e` with the whole command as ONE string
+ * (the id is 8 validated hex characters, so nothing in it needs quoting). The folder is the process cwd.
+ */
+const X_TERMINAL_EMULATOR = 'x-terminal-emulator';
+
+function findInPath(name: string, dirs: string[], exists: (p: string) => boolean): string | null {
+  for (const d of dirs) {
+    const p = path.posix.join(d, name);
+    try {
+      if (exists(p)) return p;
+    } catch {
+      // not usable: try the next entry
+    }
+  }
+  return null;
+}
+
+/**
+ * The first Linux terminal found in an absolute PATH entry, with its arguments; null when there is none.
+ * `realpath` resolves `x-terminal-emulator` to the terminal behind it (default: fs.realpathSync).
+ */
+export function linuxTerminal(
+  id: string,
+  cwd: string,
+  env: Env,
+  exists: (p: string) => boolean,
+  realpath: (p: string) => string = fs.realpathSync,
+): TerminalCommand | null {
   const run = ['claude', 'attach', id];
   // Only absolute PATH entries: a relative one would resolve against the hub's cwd.
   const dirs = (env.PATH ?? '').split(path.posix.delimiter).filter((d) => path.posix.isAbsolute(d));
   for (const [name, argsFor] of LINUX_TERMINALS) {
-    for (const d of dirs) {
-      const p = path.posix.join(d, name);
-      let ok = false;
-      try {
-        ok = exists(p);
-      } catch {
-        ok = false;
-      }
-      if (ok) return { cmd: p, args: argsFor(cwd, run) };
-    }
+    const p = findInPath(name, dirs, exists);
+    if (p) return { cmd: p, args: argsFor(cwd, run) };
   }
-  return null;
+  const x = findInPath(X_TERMINAL_EMULATOR, dirs, exists);
+  if (!x) return null;
+  let target: string | null = null;
+  try {
+    target = realpath(x);
+  } catch {
+    target = null;
+  }
+  if (target && path.posix.isAbsolute(target)) {
+    const base = path.posix.basename(target);
+    const known = LINUX_TERMINALS.find(([name]) => name === base);
+    if (known) return { cmd: target, args: known[1](cwd, run) };
+  }
+  return { cmd: x, args: ['-e', run.join(' ')] };
 }
 
 /**
@@ -84,6 +123,8 @@ export interface OpenTerminalDeps {
   home?: string;
   /** Whether a terminal program exists (Linux, Windows). */
   exists?: (p: string) => boolean;
+  /** Linux: resolves `x-terminal-emulator` to the real terminal (default: fs.realpathSync). */
+  realpath?: (p: string) => string;
   /** Whether the session folder exists and is a folder (default: fs.statSync). */
   isDir?: (p: string) => boolean;
   /** macOS: makes the private folder of the `.command` file (default: mkdtemp under os.tmpdir(), 0700). */
@@ -163,7 +204,7 @@ export async function openTerminal(t: TerminalTarget, deps: OpenTerminalDeps = {
       args = ['/d', '/c', 'start', '', ...run];
     }
   } else {
-    const term = linuxTerminal(t.bgId, t.cwd, env, deps.exists ?? ((p) => isExecutableFile(p, platform)));
+    const term = linuxTerminal(t.bgId, t.cwd, env, deps.exists ?? ((p) => isExecutableFile(p, platform)), deps.realpath);
     if (!term) return { ok: false, code: 'no-terminal', error: 'no terminal program found' };
     cmd = term.cmd;
     args = term.args;
