@@ -91,6 +91,20 @@ describe('side panel: code files', () => {
     expect(within(panel).getByRole('heading', { level: 2 })).toHaveTextContent('server.ts');
   });
 
+  it('"Wrap lines" wraps the code view, and the choice is remembered (spec 2026-11-27-side-panel-leftovers)', async () => {
+    setup([say('see `src/hub/server.ts`')]);
+    await userEvent.click(await screen.findByRole('button', { name: 'src/hub/server.ts' }));
+    const panel = await screen.findByTestId('side-panel');
+    const view = await within(panel).findByTestId('panel-code');
+    expect(view).toHaveAttribute('data-wrap', 'off');
+    const toggle = within(panel).getByRole('button', { name: 'Wrap lines' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.click(toggle);
+    expect(view).toHaveAttribute('data-wrap', 'on');
+    expect(within(panel).getByRole('button', { name: "Don't wrap lines" })).toHaveAttribute('aria-pressed', 'true');
+    expect(localStorage.getItem('acc.codeWrap')).toBe('1');
+  });
+
   it('without a line it opens at the top, nothing marked', async () => {
     setup([say('see `src/hub/server.ts`')]);
     await userEvent.click(await screen.findByRole('button', { name: 'src/hub/server.ts' }));
@@ -118,6 +132,21 @@ describe('side panel: PDF', () => {
     expect(made.at(-1)?.type).toBe('application/pdf');
     expect(within(panel).getByRole('link', { name: 'Download' })).toHaveAttribute('download', 'a.pdf');
     expect(within(panel).getByRole('link', { name: 'Open in a new tab' })).toHaveAttribute('href', frame.getAttribute('src'));
+  });
+
+  it('on a touch screen the links come first, with a hint for phones (spec 2026-11-27-side-panel-leftovers)', async () => {
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === '(pointer: coarse)', media: q, addEventListener() {}, removeEventListener() {} }));
+    try {
+      setup([say('Report in docs/a.pdf')]);
+      await userEvent.click(await screen.findByRole('button', { name: 'docs/a.pdf' }));
+      const panel = await screen.findByTestId('side-panel');
+      const frame = await within(panel).findByTitle('a.pdf');
+      const hint = within(panel).getByText('Phones often show nothing here: open the PDF in a new tab or download it.');
+      expect(hint.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(within(panel).getByRole('link', { name: 'Open in a new tab' })).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('a PDF attachment opens in the panel', async () => {

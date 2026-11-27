@@ -221,3 +221,6 @@ body {
 .code-view .tok-s { color: var(--c-ok); }
 .code-view .tok-n { color: var(--c-waiting-text); }
 .code-view .tok-c { color: var(--c-muted); font-style: italic; }
+/* 0.6.9: keys (JSON, YAML, TOML) and decorators / annotations (spec 2026-11-27-side-panel-leftovers). */
+.code-view .tok-p { color: var(--c-avatar-text); }
+.code-view .tok-d { color: color-mix(in srgb, var(--c-accent) 55%, var(--c-danger)); }

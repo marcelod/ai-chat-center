@@ -32,6 +32,7 @@
       "openFile": "Open {name}",
       "codeOf": "Code of {name}",
       "pdfHint": "If the PDF does not show here, open it in a new tab or download it.",
+      "pdfHintTouch": "Phones often show nothing here: open the PDF in a new tab or download it.",
       "pdfOpenTab": "Open in a new tab",
       "pdfDownload": "Download",
       "diffTitle": "Changes · {name}",

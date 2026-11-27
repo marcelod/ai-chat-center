@@ -32,6 +32,7 @@
       "openFile": "Abrir {name}",
       "codeOf": "Código de {name}",
       "pdfHint": "Se o PDF não aparecer aqui, abra numa nova aba ou baixe o arquivo.",
+      "pdfHintTouch": "No celular o PDF costuma não aparecer aqui: abra numa nova aba ou baixe o arquivo.",
       "pdfOpenTab": "Abrir numa nova aba",
       "pdfDownload": "Baixar",
       "diffTitle": "Alterações · {name}",
