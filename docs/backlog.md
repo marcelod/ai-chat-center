@@ -18,6 +18,15 @@ Pedido em 2026-11-25. Investigado na rodada 0.6.2 (Claude Code 2.1.332), **adiad
 
 Na 0.6.8 o painel ganhou código com a linha citada, PDF e o diff das edições. Falta, quando o autor quiser: quebrar linhas no visualizador de código, realce de sintaxe melhor (hoje é aproximado e sem dependência) e PDF no celular (o frame costuma ficar vazio; "Abrir numa nova aba" e "Baixar" funcionam). PDF desenhado pelo próprio app exigiria o pdf.js (dependência nova).
 
+### Janela antiga do app fica aberta e vazia depois de um update
+
+Visto em 2026-11-27. Às vezes, depois de `/reload-plugins` e `/cc`, abre uma janela nova do app e a antiga continua aberta, mas vazia (sem conversas nem mensagens). Causa provável: com uma versão nova do plugin, o `/cc` encerra o hub da versão anterior e sobe um novo (`src/hooks/ensureHub.ts`, "stops a hub of another version"). O hub novo não conhece a janela antiga (a presença fica no hub), então abre outra; a antiga perde a conexão e, sem um pareamento válido no hub novo, fica vazia. Confirmar se o token muda ao reiniciar o hub.
+
+Ideias, da melhor para a mais simples:
+- A janela antiga se reconectar sozinha ao hub novo (volta a achar o hub e pede um novo pareamento) e o `/cc` reaproveitá-la em vez de abrir outra. Exige um jeito seguro de parear de novo sem o token na URL.
+- O hub antigo, antes de sair, avisar as páginas abertas ("o app foi atualizado") e elas se fecharem (`window.close()` funciona na janela `--app` aberta pelo hub; numa aba comum, mostrar "Atualizado: feche esta aba").
+- No mínimo, a janela sem conexão mostrar "O app foi atualizado; esta janela pode ser fechada" em vez de ficar vazia.
+
 ### Entrada por voz
 
 Ideia antiga, ainda sem detalhes. Aguardando (2026-11-24).
