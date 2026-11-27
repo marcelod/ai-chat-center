@@ -264,6 +264,19 @@ describe('waiter', () => {
     await markDisconnected('s1', 'off');
     expect(await p).toEqual({ exitCode: 0, stderr: '' });
   });
+  // Review 2026-11-27: the 30-minute cut is only for messages left from before the resume. A start waiter can
+  // hold the lock across a long terminal turn; a message sent during that turn is delivered, however old.
+  it('start on resume: a message sent after the resume, during a turn longer than 30 min, is delivered', async () => {
+    await reg('s1');
+    await setBusy('s1');
+    let t = Date.now();
+    const p = wait('start', { source: 'resume' }, { now: () => t, lookup: async () => ({ ok: true, pid: process.pid }) });
+    await sleep(30);
+    await enqueue('s1', 'sent during the turn');
+    t += 40 * 60_000;
+    fs.rmSync(paths().busyFile('s1')); // the turn ends
+    expect(unwrapMessages((await p).stderr).map((m) => m.text)).toEqual(['sent during the turn']);
+  });
   // Audit S2-N6 / R2-N2: a message sent during a turn longer than 30 min used to be dropped when it ended.
   it('stop delivers messages regardless of their age (a long turn)', async () => {
     await reg('s1');
@@ -278,6 +291,17 @@ describe('waiter', () => {
     const now = Date.parse(old.createdAt) + 40 * 60_000;
     const r = await wait('start', { source: 'startup' }, { now: () => now, lookup: async () => ({ ok: true, pid: process.pid }) });
     expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['old']);
+  });
+  // Review 2026-11-27 (CI on a slow runner): the deadline never ends a waiter before its first drain pass.
+  it('a deadline already over at the first pass still drains once', async () => {
+    await reg('s1');
+    await enqueue('s1', 'x');
+    const r = await wait('stop', {}, { deadlineMs: 0 });
+    expect(unwrapMessages(r.stderr).map((m) => m.text)).toEqual(['x']);
+  });
+  it('a deadline already over with nothing queued exits after one pass', async () => {
+    await reg('s1');
+    expect(await wait('stop', {}, { deadlineMs: 0 })).toEqual({ exitCode: 0, stderr: '' });
   });
   // Audit R2-N2: one fs error used to end the waiter (no per-iteration try/catch), stopping delivery.
   it('a transient fs error in one iteration is logged and the waiter keeps going', async () => {
@@ -673,17 +697,21 @@ describe('waiter: signature scope, replay and the secret', () => {
     const m = await enqueue('s1', 'for s1 only');
     fs.rmSync(paths().inboxDir('s1'), { recursive: true });
     put('s2', m);
-    expect(await wait('stop', { session_id: 's2' }, { deadlineMs: 150 })).toEqual({ exitCode: 0, stderr: '' });
-    expect(inbox('s2').filter((n) => n.endsWith('.msg.unsigned'))).toHaveLength(1);
+    const p = wait('stop', { session_id: 's2' }, { deadlineMs: 60_000 });
+    await vi.waitFor(() => expect(inbox('s2').filter((n) => n.endsWith('.msg.unsigned'))).toHaveLength(1), { timeout: 10_000, interval: 10 });
+    await markDisconnected('s2', 'off'); // ends the waiter (and empties the inbox)
+    expect(await p).toEqual({ exitCode: 0, stderr: '' });
   });
   it('a delivered message dropped into the inbox again is not delivered twice (replay)', async () => {
     await reg('s1');
     const m = await enqueue('s1', 'once');
     expect(unwrapMessages((await wait('stop')).stderr).map((x) => x.text)).toEqual(['once']);
     put('s1', m);
-    expect(await wait('stop', {}, { deadlineMs: 150 })).toEqual({ exitCode: 0, stderr: '' });
+    const p = wait('stop', {}, { deadlineMs: 60_000 });
+    await vi.waitFor(() => expect(waiterLog()).toMatch(/already delivered/), { timeout: 10_000, interval: 10 });
     expect(inbox('s1')).toEqual([]);
-    expect(waiterLog()).toMatch(/already delivered/);
+    await markDisconnected('s1', 'off');
+    expect(await p).toEqual({ exitCode: 0, stderr: '' });
   });
   it('a signed message dated in the future, or before this connection, is dropped', async () => {
     await reg('s1');
@@ -728,9 +756,11 @@ describe('waiter: signature scope, replay and the secret', () => {
     await reg('s1');
     await enqueue('s1', 'x');
     fs.rmSync(paths().secret);
-    expect(await wait('stop', {}, { deadlineMs: 200 })).toEqual({ exitCode: 0, stderr: '' });
+    const p = wait('stop', {}, { deadlineMs: 60_000 });
+    await vi.waitFor(() => expect(waiterLog()).toMatch(/install secret is missing/), { timeout: 10_000, interval: 10 });
     expect(inbox('s1').filter((n) => n.endsWith('.msg'))).toHaveLength(1);
-    expect(waiterLog()).toMatch(/install secret is missing/);
+    await markDisconnected('s1', 'off');
+    expect(await p).toEqual({ exitCode: 0, stderr: '' });
   });
 });
 
@@ -868,8 +898,14 @@ describe('waiter: pinned to the claude process it serves', () => {
       await regWith(PARENT);
       let lookups = 0;
       const lookup = async () => (lookups++, { ok: true, pid: PARENT } as PidLookup);
-      expect(await wait('stop', {}, { ...win, lookup, deadlineMs: 150 })).toEqual({ exitCode: 0, stderr: '' });
+      let checks = 0; // one liveness check of the parent per pass
+      const counted = (pid: number) => (checks++, aliveFn(pid));
+      const p = wait('stop', {}, { ...win, isAlive: counted, lookup, deadlineMs: 60_000 });
+      await vi.waitFor(() => expect(checks).toBeGreaterThanOrEqual(5), { timeout: 10_000, interval: 10 });
+      await markDisconnected('s1', 'off');
+      expect(await p).toEqual({ exitCode: 0, stderr: '' });
       expect(lookups).toBe(0);
+      await regWith(PARENT);
       await enqueue('s1', 'x');
       const r = await wait('stop', {}, { ...win, platform: 'linux', lookup });
       expect(r.exitCode).toBe(2);
