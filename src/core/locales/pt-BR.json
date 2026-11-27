@@ -145,6 +145,7 @@
     "back": "Voltar",
     "unread": "{n} não lidas",
     "loadError": "Não foi possível falar com o hub. Tentando de novo…",
+    "ended": {"title": "O app foi atualizado; esta janela pode ser fechada", "body": "Esta janela perdeu a conexão com o hub do AI Chat Center, que foi atualizado ou reiniciado. Digite /cc numa sessão para abrir o app de novo."},
     "noToken": {
       "title": "Abra o link mostrado pelo /cc",
       "body": "Esta página precisa do link de acesso exibido pelo /cc na sessão do terminal. Abra esse link para continuar."

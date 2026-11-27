@@ -8,6 +8,7 @@ vi.mock('./api', () => ({
   isPairing: vi.fn(() => false),
   ready: vi.fn(async () => true),
   onAuthLost: vi.fn(() => () => {}),
+  onHubStopped: vi.fn(() => () => {}),
   getSessions: vi.fn(),
   getEvents: vi.fn(async () => []),
   getConfig: vi.fn(async () => ({ language: 'en' })),

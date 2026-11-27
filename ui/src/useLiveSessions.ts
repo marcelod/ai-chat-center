@@ -27,6 +27,13 @@ const MAX_DELAY = 10_000;
 /** Reconnect delay for the nth consecutive failure: 1 s, 2 s, 4 s ... capped at 10 s. */
 export const nextDelay = (attempt: number): number => Math.min(1000 * 2 ** attempt, MAX_DELAY);
 
+/**
+ * A hub that stays unreachable this long is taken as gone for good (a new one may listen on another port,
+ * with another token): the page ends like on a token loss, "this window can be closed", instead of
+ * retrying forever behind a stale list (spec 2026-11-27-old-window-after-update).
+ */
+export const LOST_MS = 2 * 60_000;
+
 /** Replaces events with the same id (in place) or appends them, then orders by ts (stable). */
 export function mergeEvents(current: ChatEvent[], incoming: ChatEvent[]): ChatEvent[] {
   const out = current.slice();
@@ -273,6 +280,8 @@ export function useLiveSessions() {
     let closed = false;
     let failures = 0;
     let failed = false;
+    /** When the reconnect checks started finding nothing on the port (null while the hub answers). */
+    let unreachableSince: number | null = null;
     /** Stream closed on purpose while the page is hidden. */
     let paused = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -294,8 +303,11 @@ export function useLiveSessions() {
         if (check === 'mismatch') return api.forgetToken();
         if (check === 'unreachable') {
           failed = true;
+          unreachableSince ??= Date.now();
+          if (Date.now() - unreachableSince >= LOST_MS) return api.forgetToken();
           return retryLater();
         }
+        unreachableSince = null;
         open();
       });
     };
@@ -338,6 +350,7 @@ export function useLiveSessions() {
         close = undefined;
       } else if (!document.hidden && paused) {
         paused = false;
+        unreachableSince = null;
         failed = true; // resync on open
         failures = 0;
         connect();

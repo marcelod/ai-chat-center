@@ -145,6 +145,7 @@
     "back": "Back",
     "unread": "{n} unread",
     "loadError": "Could not reach the hub. Retrying…",
+    "ended": {"title": "The app was updated; this window can be closed", "body": "This window lost its connection to the AI Chat Center hub, which was updated or restarted. Type /cc in a session to open the app again."},
     "noToken": {
       "title": "Open the link shown by /cc",
       "body": "This page needs the access link printed by /cc in your terminal session. Open that link to continue."
