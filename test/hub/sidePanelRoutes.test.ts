@@ -64,6 +64,8 @@ beforeEach(async () => {
   fs.mkdirSync(outside);
   fs.writeFileSync(path.join(cwd, 'docs', 'spec.md'), '# Spec\n\n<script>x</script>');
   fs.writeFileSync(path.join(cwd, 'shot.png'), fakePng(3, 3));
+  fs.writeFileSync(path.join(cwd, 'main.ts'), 'const a = 1;\n');
+  fs.writeFileSync(path.join(cwd, 'doc.pdf'), '%PDF-1.7\n%%EOF\n');
   fs.writeFileSync(path.join(outside, 'secret.md'), '# Secret');
   fs.symlinkSync(path.join(outside, 'secret.md'), path.join(cwd, 'out.md'));
   const att = path.join(paths().attachmentsDir, 's1');
@@ -103,6 +105,20 @@ describe('GET /api/sessions/:sid/file', () => {
     expect(r.headers['content-security-policy']).toContain("default-src 'none'");
     expect(r.headers['cache-control']).toBe('no-store');
     expect(r.body.toString()).toBe('# Spec\n\n<script>x</script>');
+  });
+
+  it('serves a code file as plain text and a PDF as a sandboxed PDF (spec 2026-11-27-side-panel-file-types)', async () => {
+    const u = await start();
+    let r = await get(u, 'main.ts');
+    expect(r.status).toBe(200);
+    expect(r.headers['content-type']).toBe('text/plain; charset=utf-8');
+    expect(r.body.toString()).toBe('const a = 1;\n');
+    r = await get(u, 'doc.pdf');
+    expect(r.status).toBe(200);
+    expect(r.headers['content-type']).toBe('application/pdf');
+    expect(r.headers['x-content-type-options']).toBe('nosniff');
+    expect(r.headers['content-security-policy']).toContain('sandbox');
+    expect(r.headers['cache-control']).toBe('no-store');
   });
 
   it('serves an image of the folder and of the session attachments', async () => {
