@@ -18,7 +18,7 @@ const session = (over: Partial<SessionView> = {}): SessionView => ({
   ...over,
 });
 
-function setup(screenFn: PanelApi['screen'], s = session()) {
+function setup(screenFn: PanelApi['screen'], s = session(), onCommand?: (text: string) => Promise<void>) {
   render(
     <LangProvider lang="en">
       <ChatView
@@ -29,6 +29,7 @@ function setup(screenFn: PanelApi['screen'], s = session()) {
         onSend={async () => {}}
         onBack={() => {}}
         onRemove={async () => {}}
+        onCommand={onCommand}
         panel={{ file: async () => new Blob(['']), screen: screenFn }}
       />
     </LangProvider>,
@@ -61,5 +62,35 @@ describe('session screen', () => {
     setup(vi.fn(), session({ bgId: undefined }));
     await userEvent.click(screen.getByRole('button', { name: 'Conversation actions' }));
     expect(screen.queryByRole('menuitem', { name: 'Session screen' })).toBeNull();
+  });
+
+  it('after /context from the app, the screen opens by itself and refreshes for the result (spec 2026-11-27-session-screen-terminal)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const fn = vi.fn().mockResolvedValueOnce('typing…').mockResolvedValue('Context 42%');
+      const onCommand = vi.fn(async () => {});
+      setup(fn, session(), onCommand);
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      await user.type(screen.getByRole('textbox'), '/context{Enter}');
+      expect(onCommand).toHaveBeenCalledWith('/context');
+      const panel = await screen.findByTestId('side-panel');
+      expect(await within(panel).findByText('typing…')).toBeTruthy();
+      expect(within(panel).getByText('Result of /context: the screen refreshes in a moment.')).toBeTruthy();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(await within(panel).findByText('Context 42%')).toBeTruthy();
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(fn).toHaveBeenCalledTimes(3);
+      expect(within(panel).queryByText(/refreshes in a moment/)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a terminal session still does not run /status from the app', async () => {
+    const onCommand = vi.fn(async () => {});
+    setup(vi.fn(), session({ bgId: undefined }), onCommand);
+    await userEvent.type(screen.getByRole('textbox'), '/status{Enter}');
+    expect(onCommand).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('side-panel')).toBeNull();
   });
 });

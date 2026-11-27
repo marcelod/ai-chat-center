@@ -8,7 +8,7 @@ import { FileLinksProvider, useFileLinksContext } from '../fileLinks';
 import { BackIcon, CloseIcon } from './icons';
 import { MarkdownText } from './Markdown';
 
-export type PanelItem = { kind: 'file'; path: string } | { kind: 'subagents' } | { kind: 'subagent'; id: string; title: string } | { kind: 'screen' };
+export type PanelItem = { kind: 'file'; path: string } | { kind: 'subagents' } | { kind: 'subagent'; id: string; title: string } | { kind: 'screen'; cmd?: string; at?: number };
 
 /** What the panel loads, bound to the open session. */
 export type PanelApi = {

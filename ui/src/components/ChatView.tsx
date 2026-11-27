@@ -840,7 +840,8 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
 
       <Composer key={session.sessionId} sessionId={session.sessionId} name={session.name} disabled={state === 'disconnected'}
         blockedByQuestion={Boolean(session.pendingQuestion)} onSend={onSend} onUpload={onUpload}
-        onCommand={session.bgId && state !== 'disconnected' ? runCommand : undefined} attachId={session.bgId} terminalHint={!session.bgId && state !== 'disconnected'}
+        onCommand={session.bgId && state !== 'disconnected' ? runCommand : undefined} attachId={session.bgId}
+        onScreenCommand={panel?.screen && session.bgId && state !== 'disconnected' ? (cmd) => setPanelStack([{ kind: 'screen', cmd, at: Date.now() }]) : undefined} terminalHint={!session.bgId && state !== 'disconnected'}
         controls={<SessionBar session={session} hubVersion={hubVersion} runCommand={runCommand} />} />
     </section>
   );
@@ -864,7 +865,7 @@ export function ChatView({ hubVersion, initialSearch, session, events, pending, 
                 const load = panel.subagentEvents;
                 return <SubagentTranscript key={item.id} title={item.title} load={() => load(item.id)} />;
               }
-              if (item.kind === 'screen' && panel.screen) return <ScreenView load={panel.screen} />;
+              if (item.kind === 'screen' && panel.screen) return <ScreenView key={item.at ?? 0} load={panel.screen} after={item.cmd} />;
               return null;
             }}
           />

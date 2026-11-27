@@ -17,7 +17,14 @@ function screenErrorKey(e: unknown): string {
   return s === 502 ? 'ui.panel.screenFailed' : loadErrorKey(e);
 }
 
-export function ScreenView({ load }: { load: () => Promise<string> }) {
+/** After a screen-only command (spec 2026-11-27-session-screen-terminal): reloads at these delays for its result. */
+export const SCREEN_COMMAND_REFRESH_MS = [2000, 6000];
+
+/**
+ * `after`: the command just typed from the app (/status, /context…): the screen is loaded at once and again at
+ * each of `refreshInMs`, with a line saying so until the last one.
+ */
+export function ScreenView({ load, after, refreshInMs = SCREEN_COMMAND_REFRESH_MS }: { load: () => Promise<string>; after?: string; refreshInMs?: number[] }) {
   const t = useT();
   const lang = useLang();
   const [state, setState] = useState<{ text?: string; at?: string; error?: string; loading: boolean }>({ loading: true });
@@ -32,6 +39,20 @@ export function ScreenView({ load }: { load: () => Promise<string> }) {
     );
   }, []);
   useEffect(refresh, [refresh]);
+  const [waiting, setWaiting] = useState(Boolean(after));
+  const delays = after ? refreshInMs.join(',') : '';
+  useEffect(() => {
+    if (!delays) return;
+    const ms = delays.split(',').map(Number);
+    const last = Math.max(...ms);
+    const timers = ms.map((d) =>
+      setTimeout(() => {
+        refresh();
+        if (d === last) setWaiting(false);
+      }, d),
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [delays, refresh]);
   useLayoutEffect(() => {
     const el = box.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -46,6 +67,7 @@ export function ScreenView({ load }: { load: () => Promise<string> }) {
           {t('ui.panel.refresh')}
         </button>
       </div>
+      {after && waiting && <PanelMessage>{t('ui.panel.screenAfterCommand', { cmd: after })}</PanelMessage>}
       {state.error && <PanelMessage alert>{t(state.error)}</PanelMessage>}
       <div ref={box} className="min-h-0 flex-1 overflow-auto bg-page">
         {state.text !== undefined && (
